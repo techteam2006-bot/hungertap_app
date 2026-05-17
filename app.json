@@ -1,0 +1,87 @@
+{
+  "expo": {
+    "name": "HungerTap",
+    "slug": "canteen-app",
+    "scheme": "hungertap",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "owner": "intellex",
+
+    "icon": "./assets/logo.png",
+
+    "splash": {
+      "image": "./assets/hungertap-global-loading.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FFFFFF"
+    },
+
+    "assetBundlePatterns": [
+      "assets/home-banner.webp",
+      "assets/logo.png",
+      "assets/login-logo-transparent.png",
+      "assets/hungertap-global-loading.png",
+      "assets/no-items-empty-state.png",
+      "assets/fonts/*.ttf"
+    ],
+
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.hungertap.app"
+    },
+
+    "android": {
+      "package": "com.hungertap.app",
+      "versionCode": 1,
+      "softwareKeyboardLayoutMode": "pan",
+      "permissions": [
+        "INTERNET",
+        "VIBRATE",
+        "RECEIVE_BOOT_COMPLETED",
+        "POST_NOTIFICATIONS"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": false,
+          "data": [{ "scheme": "hungertap" }],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/logo.png",
+        "backgroundColor": "#FFFFFF"
+      }
+    },
+
+    "web": {
+      "bundler": "metro"
+    },
+
+    "plugins": [
+      "expo-asset",
+      "expo-secure-store",
+      "expo-web-browser",
+      "expo-notifications",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 24,
+            "compileSdkVersion": 35,
+            "targetSdkVersion": 35,
+            "enableMinifyInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true,
+            "reactNativeArchitectures": ["arm64-v8a"]
+          }
+        }
+      ]
+    ],
+
+    "extra": {
+      "eas": {
+        "projectId": "58126100-85f1-4c16-9bf5-feda9581bb0d"
+      }
+    }
+  }
+}

@@ -1,0 +1,23 @@
+*.md
+
+# Git metadata (never upload to EAS / cloud builds)
+.git/
+.git/**
+.gitattributes
+.github/
+
+# Secrets — set EXPO_PUBLIC_* in EAS project env (Dashboard or `eas env:create`)
+.env
+.env.*
+!.env.example
+
+# npm / install artifacts (EAS runs npm ci on the server)
+node_modules/
+.npm/
+npm-debug.log*
+
+# Local build outputs
+build-artifacts/
+.expo/
+android/app/build/
+android/build/
