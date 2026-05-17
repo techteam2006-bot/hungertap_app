@@ -11,6 +11,7 @@
     "measure-bundle": "node scripts/measureBundle.mjs",
     "prebuild:android": "npx expo prebuild --platform android --clean",
     "build:apk": "eas build --platform android --profile apk --non-interactive",
+    "build:playstore": "eas build --platform android --profile production --non-interactive",
     "build:apk:local": "cd android && gradlew.bat assembleRelease",
     "build:apk:local:debug": "cd android && gradlew.bat assembleDebug"
   },
