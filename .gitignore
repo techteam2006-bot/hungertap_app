@@ -8,6 +8,8 @@ dist/
 # Environment & secrets
 .env*
 !.env.example
+credentials.json
+build-credentials/
 
 # Android / native build outputs
 android/build/
