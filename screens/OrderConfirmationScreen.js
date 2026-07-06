@@ -11,7 +11,7 @@ import {
   Dimensions,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
+import AppIcon from '../components/AppIcon';
 import { useTheme } from '../lib/ThemeContext';
 import NotificationService from '../lib/NotificationService';
 import { supabase } from '../lib/supabase';
@@ -254,7 +254,7 @@ const OrderConfirmationScreen = ({ navigation, route }) => {
             accessibilityRole="button"
             accessibilityLabel="Close and go home"
           >
-            <Ionicons name="close" size={22} color={colors.text} />
+            <AppIcon name="close" size={22} color={colors.text} />
           </TouchableOpacity>
 
           <Animated.View
@@ -272,7 +272,7 @@ const OrderConfirmationScreen = ({ navigation, route }) => {
               end={{ x: 1, y: 1 }}
               style={[styles.iconCircle, isFailure && { shadowColor: '#EF4444' }]}
             >
-              <Ionicons name={isFailure ? 'close' : 'checkmark'} size={44} color="#FFFFFF" />
+              <AppIcon name={isFailure ? 'close' : 'checkmark'} size={44} color="#FFFFFF" />
             </LinearGradient>
           </Animated.View>
 
@@ -322,7 +322,7 @@ const OrderConfirmationScreen = ({ navigation, route }) => {
               style={[styles.row, i > 0 && styles.rowSpacing]}
             >
               <View style={[styles.rowIcon, { backgroundColor: isDarkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)' }]}>
-                <Ionicons
+                <AppIcon
                   name={row.icon}
                   size={20}
                   color={row.emphasize ? (isFailure ? colors.error : colors.success) : colors.primary}
@@ -395,7 +395,7 @@ const OrderConfirmationScreen = ({ navigation, route }) => {
               end={{ x: 1, y: 0 }}
               style={styles.primaryBtn}
             >
-              <Ionicons name="receipt-outline" size={22} color="#FFFFFF" />
+              <AppIcon name="receipt-outline" size={22} color="#FFFFFF" />
               <Text style={styles.primaryBtnText}>{isFailure ? 'View order' : 'Track order'}</Text>
             </LinearGradient>
           </TouchableOpacity>
@@ -405,7 +405,7 @@ const OrderConfirmationScreen = ({ navigation, route }) => {
             onPress={handleBackToHome}
             activeOpacity={0.85}
           >
-            <Ionicons name="home-outline" size={22} color={colors.primary} />
+            <AppIcon name="home-outline" size={22} color={colors.primary} />
             <Text style={[styles.secondaryBtnText, { color: colors.text }]}>Back to menu</Text>
           </TouchableOpacity>
         </Animated.View>

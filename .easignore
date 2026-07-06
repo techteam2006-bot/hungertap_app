@@ -16,8 +16,17 @@ node_modules/
 .npm/
 npm-debug.log*
 
-# Local build outputs
+# Local build outputs & measurement artifacts
 build-artifacts/
+dist/
 .expo/
 android/app/build/
 android/build/
+android/.gradle/
+
+# Credentials — set in EAS Dashboard, never upload key files
+build-credentials/
+credentials.json
+
+# Dev scripts output
+scripts/

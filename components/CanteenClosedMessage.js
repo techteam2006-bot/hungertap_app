@@ -9,7 +9,7 @@ import {
   Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import AppIcon from './AppIcon';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '../lib/ThemeContext';
 import { useNavigation } from '@react-navigation/native';
@@ -57,7 +57,7 @@ const CanteenClosedMessage = ({ onRefresh }) => {
         <Image source={CANTEEN_STATUS_LOGO} style={styles.brandMark} resizeMode="contain" />
 
         <View style={[styles.iconRing, { backgroundColor: iconTint }]}>
-          <Ionicons name="moon-outline" size={36} color={colors.brandYellow} />
+          <AppIcon name="moon-outline" size={36} color={colors.brandYellow} />
         </View>
 
         <Text style={[styles.title, { color: colors.text }]}>Kitchen is closed</Text>
@@ -67,7 +67,7 @@ const CanteenClosedMessage = ({ onRefresh }) => {
         </Text>
 
         <View style={[styles.hint, { backgroundColor: hintBg, borderColor: cardOutline }]}>
-          <Ionicons name="time-outline" size={20} color={colors.textTertiary} style={styles.hintIcon} />
+          <AppIcon name="time-outline" size={20} color={colors.textTertiary} style={styles.hintIcon} />
           <Text style={[styles.hintText, { color: colors.textSecondary }]}>
             Tap refresh to check the latest status without leaving this screen.
           </Text>
@@ -80,7 +80,7 @@ const CanteenClosedMessage = ({ onRefresh }) => {
             end={{ x: 1, y: 1 }}
             style={styles.cta}
           >
-            <Ionicons name="refresh" size={22} color="#FFFFFF" />
+            <AppIcon name="refresh" size={22} color="#FFFFFF" />
             <Text style={[styles.ctaLabel, styles.ctaLabelSpacing]}>Check again</Text>
           </LinearGradient>
         </TouchableOpacity>
@@ -97,7 +97,7 @@ const CanteenClosedMessage = ({ onRefresh }) => {
               },
             ]}
           >
-            <Ionicons name="person-outline" size={20} color={colors.text} />
+            <AppIcon name="person-outline" size={20} color={colors.text} />
             <Text style={[styles.secondaryLabel, { color: colors.text }]}>Profile</Text>
           </Pressable>
           <Pressable
@@ -111,7 +111,7 @@ const CanteenClosedMessage = ({ onRefresh }) => {
               },
             ]}
           >
-            <Ionicons name="receipt-outline" size={20} color={colors.text} />
+            <AppIcon name="receipt-outline" size={20} color={colors.text} />
             <Text style={[styles.secondaryLabel, { color: colors.text }]}>Orders</Text>
           </Pressable>
         </View>

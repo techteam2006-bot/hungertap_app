@@ -11,7 +11,8 @@ import {
   StatusBar,
   Image,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import * as Clipboard from 'expo-clipboard';
+import AppIcon from '../components/AppIcon';
 import { useTheme } from '../lib/ThemeContext';
 import { appTypography } from '../lib/darkThemeConfig';
 import { pxToPercentX, pxToPercentY } from '../utils/percent';
@@ -191,13 +192,35 @@ const ContactUsScreen = ({ navigation }) => {
         await Linking.openURL(mailtoUrl);
       } else {
         Alert.alert(
-          'Email app not available',
-          `Install an email app or write to ${SUPPORT_EMAIL} from your browser.`,
-          [{ text: 'OK' }]
+          'No email app found',
+          `You can reach us at:\n${SUPPORT_EMAIL}`,
+          [
+            {
+              text: 'Copy Email',
+              onPress: () => {
+                Clipboard.setStringAsync(SUPPORT_EMAIL);
+                Alert.alert('Copied!', 'Email address copied to clipboard.');
+              },
+            },
+            { text: 'OK', style: 'cancel' },
+          ]
         );
       }
     } catch {
-      Alert.alert('Error', 'Unable to open your email app. Please try again.');
+      Alert.alert(
+        'No email app found',
+        `You can reach us at:\n${SUPPORT_EMAIL}`,
+        [
+          {
+            text: 'Copy Email',
+            onPress: () => {
+              Clipboard.setStringAsync(SUPPORT_EMAIL);
+              Alert.alert('Copied!', 'Email address copied to clipboard.');
+            },
+          },
+          { text: 'OK', style: 'cancel' },
+        ]
+      );
     }
   };
 
@@ -213,7 +236,7 @@ const ContactUsScreen = ({ navigation }) => {
           activeOpacity={0.7}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
+          <AppIcon name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>
           Contact us
@@ -240,7 +263,7 @@ const ContactUsScreen = ({ navigation }) => {
         <View style={styles.card}>
           <View style={styles.cardHeaderRow}>
             <View style={styles.cardIconWrap}>
-              <Ionicons name="chatbubbles-outline" size={22} color={colors.primary} />
+              <AppIcon name="chatbubbles-outline" size={22} color={colors.primary} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.cardTitle}>Email support</Text>
@@ -253,16 +276,16 @@ const ContactUsScreen = ({ navigation }) => {
             onPress={handleEmailPress}
             activeOpacity={0.75}
           >
-            <Ionicons name="mail-outline" size={22} color={colors.brandOrange} />
+            <AppIcon name="mail-outline" size={22} color={colors.brandOrange} />
             <Text style={styles.emailText} numberOfLines={2}>
               {SUPPORT_EMAIL}
             </Text>
-            <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
+            <AppIcon name="chevron-forward" size={20} color={colors.textTertiary} />
           </TouchableOpacity>
         </View>
 
         <View style={styles.metaRow}>
-          <Ionicons name="time-outline" size={22} color={colors.textTertiary} />
+          <AppIcon name="time-outline" size={22} color={colors.textTertiary} />
           <Text style={styles.metaText}>We typically respond within 24 hours on business days.</Text>
         </View>
       </ScrollView>

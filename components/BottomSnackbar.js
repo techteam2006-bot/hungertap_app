@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Animated, TouchableOpacity, Platform } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import AppIcon from './AppIcon';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const BottomSnackbar = ({ visible, onPressViewCart, onHidden }) => {
@@ -64,7 +64,7 @@ const BottomSnackbar = ({ visible, onPressViewCart, onHidden }) => {
     >
       <View style={styles.content}>
         <View style={styles.leftRow}>
-          <Ionicons name="cart" size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
+          <AppIcon name="cart" size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
           <Text style={styles.titleText}>1 Item added</Text>
         </View>
         <TouchableOpacity onPress={onPressViewCart} activeOpacity={0.8}>

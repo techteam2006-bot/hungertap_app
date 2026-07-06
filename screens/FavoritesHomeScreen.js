@@ -8,7 +8,7 @@ import {
   FlatList,
   Dimensions,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import AppIcon from '../components/AppIcon';
 import { LinearGradient } from 'expo-linear-gradient';
 import { CommonActions } from '@react-navigation/native';
 import { useTheme } from '../lib/ThemeContext';
@@ -36,7 +36,7 @@ const FavoritesHomeScreen = ({ navigation }) => {
             style={styles.favoriteButton}
             onPress={() => removeFromFavorites(item.id)}
           >
-            <Ionicons 
+            <AppIcon 
               name="heart" 
               size={20} 
               color="#ff4757" 
@@ -52,7 +52,7 @@ const FavoritesHomeScreen = ({ navigation }) => {
             style={styles.addToCartButton}
             onPress={() => navigation.navigate('ItemDetail', { item })}
           >
-            <Ionicons name="add" size={20} color="#FFFFFF" />
+            <AppIcon name="add" size={20} color="#FFFFFF" />
           </TouchableOpacity>
         </View>
       </View>
@@ -222,7 +222,7 @@ const FavoritesHomeScreen = ({ navigation }) => {
           onPress={() => navigation.goBack()}
           style={styles.backButton}
         >
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
+          <AppIcon name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>My Favorites</Text>
         <View style={{ width: 40 }} />
@@ -231,7 +231,7 @@ const FavoritesHomeScreen = ({ navigation }) => {
       <View style={styles.content}>
         {favorites.length === 0 ? (
           <View style={styles.emptyState}>
-            <Ionicons
+            <AppIcon
               name="heart-outline"
               size={64}
               color={colors.textTertiary}
@@ -277,7 +277,7 @@ const FavoritesHomeScreen = ({ navigation }) => {
                 );
               }}
             >
-              <Ionicons name="add" size={20} color="#FFFFFF" />
+              <AppIcon name="add" size={20} color="#FFFFFF" />
               <Text style={styles.addMoreButtonText}>Add More Favorites</Text>
             </TouchableOpacity>
           </>

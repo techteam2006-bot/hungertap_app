@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import AppIcon from './AppIcon';
 import { GlassCard } from './ModernComponents';
 import { appTypography } from '../lib/darkThemeConfig';
 import { LEGAL_LINKS, openLegalUrl } from '../lib/legalLinks';
@@ -13,14 +13,14 @@ function LegalitiesRow({ icon, title, onPress, colors, isLast }) {
       activeOpacity={0.65}
     >
       <View style={[styles.iconPill, { backgroundColor: colors.mutedRowBackground }]}>
-        <Ionicons name={icon} size={22} color={colors.textSecondary} />
+        <AppIcon name={icon} size={22} color={colors.textSecondary} />
       </View>
       <View style={styles.rowTextBlock}>
         <Text style={[styles.rowTitle, { color: colors.text }]} numberOfLines={1}>
           {title}
         </Text>
       </View>
-      <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
+      <AppIcon name="chevron-forward" size={20} color={colors.textTertiary} />
     </TouchableOpacity>
   );
 }

@@ -8,7 +8,7 @@ import {
   ScrollView,
   Dimensions,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import AppIcon from '../components/AppIcon';
 import BottomSnackbar from '../components/BottomSnackbar';
 import { useTheme } from '../lib/ThemeContext';
 import { useCart } from '../lib/CartContext';
@@ -63,7 +63,7 @@ const ItemDetailScreen = ({ route, navigation }) => {
             onPress={() => navigation.goBack()}
             style={styles.backButton}
           >
-            <Ionicons name="arrow-back" size={24} color={colors.text} />
+            <AppIcon name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
           <Text style={[styles.headerTitle, { color: colors.text }]}>Recipe Details</Text>
           <View style={styles.headerSpacer} />
@@ -135,7 +135,7 @@ const ItemDetailScreen = ({ route, navigation }) => {
               onPress={() => navigation.goBack()}
               style={styles.backButton}
             >
-              <Ionicons name="arrow-back" size={24} color={colors.text} />
+              <AppIcon name="arrow-back" size={24} color={colors.text} />
             </TouchableOpacity>
             <Text style={[styles.headerTitle, { color: colors.text }]}>Recipe Details</Text>
             <View style={styles.headerSpacer} />
@@ -205,7 +205,7 @@ const ItemDetailScreen = ({ route, navigation }) => {
             disabled={!item.isAvailable || cartQuantity === 0}
           >
             {cartQuantity === 1 ? (
-              <Ionicons 
+              <AppIcon 
                 name="trash-outline" 
                 size={18} 
                 color={!item.isAvailable ? '#999' : colors.text} 
@@ -248,7 +248,7 @@ const ItemDetailScreen = ({ route, navigation }) => {
           onPress={handleAddToCart}
           disabled={!item.isAvailable}
         >
-          <Ionicons 
+          <AppIcon 
             name="cart" 
             size={20} 
             color={item.isAvailable ? "white" : "#999"} 

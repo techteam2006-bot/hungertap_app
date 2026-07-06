@@ -14,7 +14,7 @@ import {
   Image,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
+import AppIcon from './AppIcon';
 import { useTheme } from '../lib/ThemeContext';
 import { appTypography } from '../lib/darkThemeConfig';
 import { pxToPercentX, pxToPercentY } from '../utils/percent';
@@ -104,7 +104,7 @@ export const GradientButton = ({
         style={styles.gradientContainer}
       >
         {icon && (
-          <Ionicons 
+          <AppIcon 
             name={icon} 
             size={size === 'small' ? 16 : size === 'large' ? 24 : 20} 
             color="#FFFFFF" 
@@ -311,7 +311,7 @@ export const AnimatedFoodCard = ({
               }}
               disabled={!onDecrease}
             >
-              <Ionicons 
+              <AppIcon 
                 name={quantity === 1 ? "trash-outline" : "remove"} 
                 size={20} 
                 color={quantity === 1 ? "#EF4444" : colors.textSecondary} 
@@ -326,7 +326,7 @@ export const AnimatedFoodCard = ({
               }}
               disabled={!onIncrease}
             >
-              <Ionicons name="add" size={20} color={colors.textSecondary} />
+              <AppIcon name="add" size={20} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
         ) : (
@@ -372,7 +372,7 @@ export const ModernSearchBar = ({
           borderColor: colors.glassBorder,
         },
       ]}>
-        <Ionicons name="search" size={20} color={colors.textTertiary} style={styles.searchIcon} />
+        <AppIcon name="search" size={20} color={colors.textTertiary} style={styles.searchIcon} />
         <TextInput
           style={[styles.searchInput, { color: colors.text }]}
           placeholder={placeholder}
@@ -389,7 +389,7 @@ export const ModernSearchBar = ({
         />
         {value ? (
           <TouchableOpacity onPress={() => onChangeText('')} style={styles.clearButton}>
-            <Ionicons name="close-circle" size={20} color={colors.textTertiary} />
+            <AppIcon name="close-circle" size={20} color={colors.textTertiary} />
           </TouchableOpacity>
         ) : null}
       </View>
@@ -438,7 +438,7 @@ export const ModernHeader = ({
       <View style={styles.headerLeft}>
         {leftIcon && (
           <TouchableOpacity onPress={onLeftPress} style={styles.headerButton}>
-            <Ionicons name={leftIcon} size={24} color={colors.text} />
+            <AppIcon name={leftIcon} size={24} color={colors.text} />
           </TouchableOpacity>
         )}
         <View style={styles.headerTextContainer}>
@@ -461,7 +461,7 @@ export const ModernHeader = ({
       
       {rightIcon && (
         <TouchableOpacity onPress={onRightPress} style={[styles.headerButton, rightButtonStyle]}>
-          <Ionicons name={rightIcon} size={24} color={rightIconColor || colors.text} />
+          <AppIcon name={rightIcon} size={24} color={rightIconColor || colors.text} />
         </TouchableOpacity>
       )}
     </View>
@@ -540,7 +540,7 @@ export const FloatingActionButton = ({
           end={{ x: 1, y: 1 }}
           style={styles.fabGradient}
         >
-          <Ionicons name={icon} size={getIconSize()} color="#FFFFFF" />
+          <AppIcon name={icon} size={getIconSize()} color="#FFFFFF" />
         </LinearGradient>
       </TouchableOpacity>
     </Animated.View>
@@ -762,7 +762,7 @@ export const SwipeableFoodCard = ({
               { backgroundColor: colors.glassCard }
             ]}
           >
-            <Ionicons 
+            <AppIcon 
               name={item.isFavorite ? "heart" : "heart-outline"} 
               size={20} 
               color={item.isFavorite ? colors.error : colors.textSecondary} 
@@ -1004,7 +1004,7 @@ export const AnimatedCategoryChip = ({
           {emoji ? (
             <Text style={[styles.categoryEmoji, { fontSize: size === 'large' ? 28 : size === 'small' ? 20 : 24 }]}>{emoji}</Text>
           ) : (
-            <Ionicons name="restaurant" size={size === 'large' ? 24 : size === 'small' ? 18 : 20} color={colors.textSecondary} />
+            <AppIcon name="restaurant" size={size === 'large' ? 24 : size === 'small' ? 18 : 20} color={colors.textSecondary} />
           )}
         </View>
         <Text

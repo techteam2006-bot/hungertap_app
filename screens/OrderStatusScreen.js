@@ -12,7 +12,8 @@ import {
   Alert,
   Linking,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import * as Clipboard from 'expo-clipboard';
+import AppIcon from '../components/AppIcon';
 import { CommonActions } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../lib/ThemeContext';
@@ -112,13 +113,35 @@ const OrderStatusScreen = ({ navigation, route }) => {
         await Linking.openURL(mailtoUrl);
       } else {
         Alert.alert(
-          'Email app not available',
-          `Install an email app or write to ${SUPPORT_EMAIL} from your browser.`,
-          [{ text: 'OK' }]
+          'No email app found',
+          `You can reach us at:\n${SUPPORT_EMAIL}`,
+          [
+            {
+              text: 'Copy Email',
+              onPress: () => {
+                Clipboard.setStringAsync(SUPPORT_EMAIL);
+                Alert.alert('Copied!', 'Email address copied to clipboard.');
+              },
+            },
+            { text: 'OK', style: 'cancel' },
+          ]
         );
       }
     } catch {
-      Alert.alert('Error', 'Unable to open your email app. Please try again.');
+      Alert.alert(
+        'No email app found',
+        `You can reach us at:\n${SUPPORT_EMAIL}`,
+        [
+          {
+            text: 'Copy Email',
+            onPress: () => {
+              Clipboard.setStringAsync(SUPPORT_EMAIL);
+              Alert.alert('Copied!', 'Email address copied to clipboard.');
+            },
+          },
+          { text: 'OK', style: 'cancel' },
+        ]
+      );
     }
   }, [currentOrder, resolvedOrderId]);
 
@@ -566,7 +589,7 @@ const OrderStatusScreen = ({ navigation, route }) => {
       <View style={[styles.container, { backgroundColor: colors.pageBackground }]}>
         <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.pageBackground }]}>
           <View style={styles.errorContainer}>
-            <Ionicons name="alert-circle-outline" size={64} color={colors.primary} />
+            <AppIcon name="alert-circle-outline" size={64} color={colors.primary} />
             <Text style={[styles.errorText, { color: colors.text }]}>Order not found</Text>
             <TouchableOpacity
               style={[styles.errorButton, { backgroundColor: colors.primary }]}
@@ -983,14 +1006,14 @@ const OrderStatusScreen = ({ navigation, route }) => {
       {/* Header */}
       <View style={[styles.header, { backgroundColor: colors.elevatedSurface }]}>
         <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
+          <AppIcon name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: colors.text }]}>Order Status</Text>
         <TouchableOpacity onPress={onRefresh} style={styles.headerRefreshButton} disabled={refreshing}>
           {refreshing ? (
             <LoadingSpinner size="small" color={colors.primary} />
           ) : (
-            <Ionicons name="refresh" size={20} color={colors.text} />
+            <AppIcon name="refresh" size={20} color={colors.text} />
           )}
         </TouchableOpacity>
       </View>
@@ -1007,14 +1030,14 @@ const OrderStatusScreen = ({ navigation, route }) => {
           <Text style={[styles.orderNumber, { color: colors.text }]}>Order #{currentOrder?.order_token || currentOrder?.orderNumber || '2435'}</Text>
           
           <View style={styles.locationRow}>
-            <Ionicons name="location" size={12} color={colors.error} />
+            <AppIcon name="location" size={12} color={colors.error} />
             <Text style={[styles.locationText, { color: colors.textSecondary }]}>{canteenName}</Text>
           </View>
           
           {isPendingPayment ? (
             <View style={[styles.successStrip, { backgroundColor: pendingStripBg }]}>
               <View style={[styles.successContent, { flexWrap: 'wrap' }]}>
-                <Ionicons name="wallet-outline" size={20} color={colors.warning} style={{ marginTop: 2 }} />
+                <AppIcon name="wallet-outline" size={20} color={colors.warning} style={{ marginTop: 2 }} />
                 <View style={[styles.successTextContainer, { flex: 1, minWidth: 0 }]}>
                   <Text style={[styles.successTitle, { color: colors.text }]}>Payment required</Text>
                   <Text style={[styles.successInfoLine, { color: colors.textSecondary }]}>
@@ -1026,7 +1049,7 @@ const OrderStatusScreen = ({ navigation, route }) => {
           ) : isPaymentFailedLike ? (
             <View style={[styles.successStrip, { backgroundColor: failedStripBg }]}>
               <View style={[styles.successContent, { flexWrap: 'wrap' }]}>
-                <Ionicons name="close-circle" size={20} color={colors.error} style={{ marginTop: 2 }} />
+                <AppIcon name="close-circle" size={20} color={colors.error} style={{ marginTop: 2 }} />
                 <View style={[styles.successTextContainer, { flex: 1, minWidth: 0 }]}>
                   <Text style={[styles.successTitle, { color: colors.text }]}>Payment failed</Text>
                   <Text style={[styles.successInfoLine, { color: colors.textSecondary }]}>
@@ -1050,7 +1073,7 @@ const OrderStatusScreen = ({ navigation, route }) => {
           ) : (
             <View style={[styles.successStrip, { backgroundColor: successStripBg }]}>
               <View style={styles.successContent}>
-                <Ionicons name="checkmark-circle" size={18} color={colors.success} style={{ marginTop: 2 }} />
+                <AppIcon name="checkmark-circle" size={18} color={colors.success} style={{ marginTop: 2 }} />
                 <View style={styles.successTextContainer}>
                   <Text style={[styles.successTitle, { color: colors.text }]}>Order Successful</Text>
                   <Text style={[styles.successInfoLine, { color: colors.textSecondary }]}>
@@ -1070,11 +1093,11 @@ const OrderStatusScreen = ({ navigation, route }) => {
           >
           <View style={styles.billHeaderMainRow}>
             <View style={styles.billHeaderLeft}>
-              <Ionicons name="receipt" size={26} color={colors.text} />
+              <AppIcon name="receipt" size={26} color={colors.text} />
               <Text style={[styles.billTitle, { color: colors.text }]}>Total Bill</Text>
             </View>
             <Text style={[styles.billAmount, { color: colors.accentGreen }]}>₹{totalAmountDisplay}</Text>
-            <Ionicons
+            <AppIcon
               name={isOrderSummaryExpanded ? 'chevron-up' : 'chevron-down'}
               size={24}
               color={colors.textTertiary}
@@ -1180,7 +1203,7 @@ const OrderStatusScreen = ({ navigation, route }) => {
                       : colors.border
                   }
                 ]}>
-                  <Ionicons 
+                  <AppIcon 
                     name={
                       step.id === 1 ? 'checkmark-circle' :
                       step.id === 2 ? 'document-text' :
@@ -1243,7 +1266,7 @@ const OrderStatusScreen = ({ navigation, route }) => {
             {reordering ? (
               <LoadingSpinner size="small" color="#FFFFFF" style={{ marginRight: 8 }} />
             ) : (
-              <Ionicons name="refresh" size={16} color="#FFFFFF" />
+              <AppIcon name="refresh" size={16} color="#FFFFFF" />
             )}
             <Text style={styles.reorderOptionButtonText}>
               {reordering ? 'Reordering...' : 'Reorder Items'}

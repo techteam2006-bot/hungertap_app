@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, StatusBar } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import AppIcon from '../components/AppIcon';
 import { useTheme } from '../lib/ThemeContext';
 import { appTypography } from '../lib/darkThemeConfig';
 import LegalitiesCard from '../components/LegalitiesCard';
@@ -21,7 +21,7 @@ const LegalitiesScreen = ({ navigation }) => {
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             activeOpacity={0.7}
           >
-            <Ionicons name="arrow-back" size={24} color={colors.text} />
+            <AppIcon name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
         </View>
         <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>

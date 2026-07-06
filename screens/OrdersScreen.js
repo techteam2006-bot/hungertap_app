@@ -13,7 +13,7 @@ import {
   RefreshControl,
 } from 'react-native';
 import Constants from 'expo-constants';
-import { Ionicons } from '@expo/vector-icons';
+import AppIcon from '../components/AppIcon';
 import { useTheme } from '../lib/ThemeContext';
 import { useAuth } from '../lib/AuthContext';
 import { useCart } from '../lib/CartContext';
@@ -386,7 +386,7 @@ const OrdersScreen = ({ navigation }) => {
 
       if (error) {
         console.error('RPC Error:', error.message || error);
-        Alert.alert('Error', error.message || 'Could not load menu items to reorder.');
+        Alert.alert('Error', 'Could not load these items right now. Please try again.');
         return;
       }
       if (!Array.isArray(itemsData)) {
@@ -507,7 +507,7 @@ const OrdersScreen = ({ navigation }) => {
       >
         
         <View style={[styles.statusBadge, { backgroundColor: colors.glassSurface }]}>
-          <Ionicons 
+          <AppIcon 
             name={getStatusIcon(order.status)} 
             size={14} 
             color={getStatusColor(order.status)} 
@@ -528,7 +528,7 @@ const OrdersScreen = ({ navigation }) => {
             </Text>
             
             <View style={styles.locationRow}>
-              <Ionicons name="location-outline" size={12} color="#FF0000" />
+              <AppIcon name="location-outline" size={12} color="#FF0000" />
               <Text style={[styles.locationText, { color: colors.textSecondary }]}>{canteenName}</Text>
             </View>
 
@@ -555,7 +555,7 @@ const OrdersScreen = ({ navigation }) => {
             <View style={styles.deliveredButtonsContainer}>
               <TouchableOpacity style={[styles.actionButton, styles.viewButton]} onPress={handleViewOrder}>
                 <Text style={[styles.actionButtonText, { color: colors.text }]}>View</Text>
-                <Ionicons name="eye-outline" size={16} color={colors.text} />
+                <AppIcon name="eye-outline" size={16} color={colors.text} />
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.actionButton, styles.reorderButton]}
@@ -569,7 +569,7 @@ const OrdersScreen = ({ navigation }) => {
                   {reorderingOrderId === order.id ? 'Reordering...' : 'Reorder'}
                 </Text>
                 {reorderingOrderId !== order.id ? (
-                  <Ionicons name="refresh" size={16} color="#000000" />
+                  <AppIcon name="refresh" size={16} color="#000000" />
                 ) : null}
               </TouchableOpacity>
             </View>
@@ -584,7 +584,7 @@ const OrdersScreen = ({ navigation }) => {
               <Text style={[styles.actionButtonText, isFinalStatus && { color: colors.text }]}>
                 {isFinalStatus ? 'View' : getActionButtonText(order.status)}
               </Text>
-              <Ionicons 
+              <AppIcon 
                 name={isFinalStatus ? 'eye-outline' : 'chevron-forward'} 
                 size={16} 
                 color={isFinalStatus ? colors.text : "#000000"} 
@@ -598,7 +598,7 @@ const OrdersScreen = ({ navigation }) => {
 
   const renderEmptyState = () => (
     <View style={styles.emptyState}>
-      <Ionicons name="receipt-outline" size={64} color={colors.textTertiary} />
+      <AppIcon name="receipt-outline" size={64} color={colors.textTertiary} />
       <Text style={[styles.emptyTitle, { color: colors.text }]}>No Orders Yet</Text>
       <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
         Your order history will appear here
@@ -654,7 +654,7 @@ const OrdersScreen = ({ navigation }) => {
           style={styles.backButton}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
+          <AppIcon name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>
           Your Orders
@@ -666,7 +666,7 @@ const OrdersScreen = ({ navigation }) => {
           accessibilityLabel="Refresh orders"
           disabled={refreshing || loading}
         >
-          <Ionicons
+          <AppIcon
             name="refresh"
             size={22}
             color={colors.text}
@@ -699,7 +699,7 @@ const OrdersScreen = ({ navigation }) => {
             { backgroundColor: colors.searchFocusedTint },
           ],
         ]}>
-          <Ionicons name="search" size={20} color={colors.textTertiary} />
+          <AppIcon name="search" size={20} color={colors.textTertiary} />
           <TextInput
             ref={searchInputRef}
             style={[styles.searchInput, { color: colors.text }]}
@@ -720,7 +720,7 @@ const OrdersScreen = ({ navigation }) => {
               onPress={() => setSearchQuery('')}
               style={styles.clearButton}
             >
-              <Ionicons name="close-circle" size={20} color={colors.textTertiary} />
+              <AppIcon name="close-circle" size={20} color={colors.textTertiary} />
             </TouchableOpacity>
           )}
         </View>

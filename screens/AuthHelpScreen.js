@@ -12,7 +12,8 @@ import {
   Alert,
   Image,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import * as Clipboard from 'expo-clipboard';
+import AppIcon from '../components/AppIcon';
 import { useTheme } from '../lib/ThemeContext';
 import { appTypography } from '../lib/darkThemeConfig';
 import splashCatLogo from '../assets/hungertap-global-loading.png';
@@ -208,13 +209,35 @@ const AuthHelpScreen = ({ navigation }) => {
         await Linking.openURL(mailtoUrl);
       } else {
         Alert.alert(
-          'Email app not available',
-          'Install an email app or send a message to ' + SUPPORT_EMAIL + ' from your browser.',
-          [{ text: 'OK' }]
+          'No email app found',
+          `You can reach us at:\n${SUPPORT_EMAIL}`,
+          [
+            {
+              text: 'Copy Email',
+              onPress: () => {
+                Clipboard.setStringAsync(SUPPORT_EMAIL);
+                Alert.alert('Copied!', 'Email address copied to clipboard.');
+              },
+            },
+            { text: 'OK', style: 'cancel' },
+          ]
         );
       }
     } catch {
-      Alert.alert('Error', 'Unable to open your email app. Please try again.');
+      Alert.alert(
+        'No email app found',
+        `You can reach us at:\n${SUPPORT_EMAIL}`,
+        [
+          {
+            text: 'Copy Email',
+            onPress: () => {
+              Clipboard.setStringAsync(SUPPORT_EMAIL);
+              Alert.alert('Copied!', 'Email address copied to clipboard.');
+            },
+          },
+          { text: 'OK', style: 'cancel' },
+        ]
+      );
     }
   };
 
@@ -230,7 +253,7 @@ const AuthHelpScreen = ({ navigation }) => {
             activeOpacity={0.7}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
-            <Ionicons name="arrow-back" size={24} color={colors.text} />
+            <AppIcon name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
           <Text style={styles.headerTitle} numberOfLines={1}>
             Account help
@@ -257,20 +280,20 @@ const AuthHelpScreen = ({ navigation }) => {
                 activeOpacity={0.75}
               >
                 <View style={styles.actionIconWrap}>
-                  <Ionicons name="lock-open-outline" size={22} color={colors.primary} />
+                  <AppIcon name="lock-open-outline" size={22} color={colors.primary} />
                 </View>
                 <View style={styles.actionTextWrap}>
                   <Text style={styles.actionTitle}>Reset my password</Text>
                   <Text style={styles.actionSubtitle}>Get a code by email and choose a new password</Text>
                 </View>
-                <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
+                <AppIcon name="chevron-forward" size={20} color={colors.textTertiary} />
               </TouchableOpacity>
             </View>
 
             <View style={styles.actionCard}>
               <TouchableOpacity style={styles.actionRow} onPress={handleEmailPress} activeOpacity={0.75}>
                 <View style={styles.actionIconWrap}>
-                  <Ionicons name="mail-outline" size={22} color={colors.primary} />
+                  <AppIcon name="mail-outline" size={22} color={colors.primary} />
                 </View>
                 <View style={styles.actionTextWrap}>
                   <Text style={styles.actionTitle}>Contact us by email</Text>
@@ -278,7 +301,7 @@ const AuthHelpScreen = ({ navigation }) => {
                     {SUPPORT_EMAIL} — opens your mail app
                   </Text>
                 </View>
-                <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
+                <AppIcon name="chevron-forward" size={20} color={colors.textTertiary} />
               </TouchableOpacity>
             </View>
 
@@ -286,7 +309,7 @@ const AuthHelpScreen = ({ navigation }) => {
               <Text style={styles.tipsHeading}>Quick tips</Text>
               {TIPS.map((tip, index) => (
                 <View key={index} style={[styles.tipRow, index === TIPS.length - 1 && { marginBottom: 0 }]}>
-                  <Ionicons name={tip.icon} size={18} color={colors.textTertiary} style={styles.tipIcon} />
+                  <AppIcon name={tip.icon} size={18} color={colors.textTertiary} style={styles.tipIcon} />
                   <Text style={styles.tipText}>{tip.text}</Text>
                 </View>
               ))}

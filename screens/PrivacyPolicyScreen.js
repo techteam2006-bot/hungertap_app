@@ -7,7 +7,7 @@ import {
   TouchableOpacity,
   ScrollView,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import AppIcon from '../components/AppIcon';
 import { useTheme } from '../lib/ThemeContext';
 
 const PrivacyPolicyScreen = ({ navigation }) => {
@@ -25,7 +25,7 @@ const PrivacyPolicyScreen = ({ navigation }) => {
             onPress={() => navigation.goBack()}
             activeOpacity={0.7}
           >
-            <Ionicons name="arrow-back" size={24} color={colors.text} />
+            <AppIcon name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
         </View>
         <View style={styles.headerCenter}>

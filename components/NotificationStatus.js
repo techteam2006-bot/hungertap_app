@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import AppIcon from './AppIcon';
 import { useTheme } from '../lib/ThemeContext';
 import NotificationService from '../lib/NotificationService';
 
@@ -15,7 +15,7 @@ const NotificationStatus = () => {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.surface }]}>
-      <Ionicons name="information-circle-outline" size={16} color={colors.textSecondary} />
+      <AppIcon name="information-circle-outline" size={16} color={colors.textSecondary} />
       <Text style={[styles.text, { color: colors.textSecondary }]}>
         Alerts need the HungerTap mobile app on a phone or tablet.
       </Text>

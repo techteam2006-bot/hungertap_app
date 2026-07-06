@@ -14,7 +14,7 @@ import {
   StatusBar,
   Image,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import AppIcon from '../components/AppIcon';
 import { useTheme } from '../lib/ThemeContext';
 import { useAuth } from '../lib/AuthContext';
 import { appTypography } from '../lib/darkThemeConfig';
@@ -285,7 +285,7 @@ const ForgotPasswordScreen = ({ navigation, route }) => {
               onPress={() => (step === 2 ? setStep(1) : navigation.goBack())}
               hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             >
-              <Ionicons name="arrow-back" size={24} color={colors.text} />
+              <AppIcon name="arrow-back" size={24} color={colors.text} />
             </TouchableOpacity>
           </View>
           <ScrollView
@@ -316,7 +316,7 @@ const ForgotPasswordScreen = ({ navigation, route }) => {
                     errors.email && styles.inputContainerError,
                   ]}
                 >
-                  <Ionicons
+                  <AppIcon
                     name="mail-outline"
                     size={20}
                     color={colors.textTertiary}
@@ -349,7 +349,7 @@ const ForgotPasswordScreen = ({ navigation, route }) => {
                     errors.code && styles.inputContainerError,
                   ]}
                 >
-                  <Ionicons
+                  <AppIcon
                     name="keypad-outline"
                     size={20}
                     color={colors.textTertiary}
@@ -375,7 +375,7 @@ const ForgotPasswordScreen = ({ navigation, route }) => {
                 ) : null}
 
                 <View style={styles.inputContainer}>
-                  <Ionicons
+                  <AppIcon
                     name="lock-closed-outline"
                     size={20}
                     color={colors.textTertiary}
@@ -400,7 +400,7 @@ const ForgotPasswordScreen = ({ navigation, route }) => {
                     style={styles.passwordToggle}
                     disabled={loading || submitting}
                   >
-                    <Ionicons
+                    <AppIcon
                       name={newPasswordVisible ? 'eye' : 'eye-off'}
                       size={20}
                       color="#9CA3AF"
@@ -409,7 +409,7 @@ const ForgotPasswordScreen = ({ navigation, route }) => {
                 </View>
 
                 <View style={styles.inputContainer}>
-                  <Ionicons
+                  <AppIcon
                     name="lock-closed-outline"
                     size={20}
                     color={colors.textTertiary}
@@ -434,7 +434,7 @@ const ForgotPasswordScreen = ({ navigation, route }) => {
                     style={styles.passwordToggle}
                     disabled={loading || submitting}
                   >
-                    <Ionicons
+                    <AppIcon
                       name={confirmPasswordVisible ? 'eye' : 'eye-off'}
                       size={20}
                       color="#9CA3AF"

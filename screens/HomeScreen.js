@@ -25,7 +25,7 @@ import {
   TouchableWithoutFeedback,
 } from 'react-native';
 import Constants from 'expo-constants';
-import { Ionicons } from '@expo/vector-icons';
+import AppIcon from '../components/AppIcon';
 import { LinearGradient } from 'expo-linear-gradient';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useAuth } from '../lib/AuthContext';
@@ -618,9 +618,7 @@ const HomeScreen = ({ navigation, route }) => {
       const rows = transformRawToMenuRows(rawRows || []);
 
       if (error) {
-        setMenuLoadError(
-          typeof error?.message === 'string' ? error.message : 'Could not load menu. Pull to refresh or try again.'
-        );
+        setMenuLoadError('Could not load menu. Pull down to refresh or try again.');
         setMenuItems([]);
         setHasMore(false);
         return;
@@ -630,7 +628,7 @@ const HomeScreen = ({ navigation, route }) => {
       nextOffsetRef.current = rows.length;
       setHasMore(!!more);
     } catch (e) {
-      setMenuLoadError(e?.message ? String(e.message) : 'Could not load menu.');
+      setMenuLoadError('Could not load menu. Pull down to refresh or try again.');
       setMenuItems([]);
       setHasMore(false);
     } finally {
@@ -657,9 +655,7 @@ const HomeScreen = ({ navigation, route }) => {
       );
 
       if (error) {
-        setMenuLoadError(
-          typeof error?.message === 'string' ? error.message : 'Could not load more items.'
-        );
+        setMenuLoadError('Could not load more items. Please try again.');
         setHasMore(false);
         return;
       }
@@ -1397,7 +1393,7 @@ const HomeScreen = ({ navigation, route }) => {
               ) : item.icon ? (
                 <Text style={styles.quickActionEmoji}>{item.icon}</Text>
               ) : (
-                <Ionicons
+                <AppIcon
                   name="restaurant"
                   size={22}
                   color={isActive ? '#D4A017' : colors.textSecondary}
@@ -1784,7 +1780,7 @@ const HomeScreen = ({ navigation, route }) => {
           <View style={styles.fixedHeaderContent}>
             <View>
               <View style={styles.locationRow}>
-                <Ionicons name="location" size={14} color={isDarkMode ? '#FFFFFF' : '#000000'} />
+                <AppIcon name="location" size={14} color={isDarkMode ? '#FFFFFF' : '#000000'} />
                 <Text style={[styles.locationText, { color: isDarkMode ? '#FFFFFF' : '#000000' }]}>{firstName || 'IARE'}</Text>
                 {currentCanteenName ? (
                   <TouchableOpacity
@@ -1792,9 +1788,9 @@ const HomeScreen = ({ navigation, route }) => {
                     style={[styles.canteenSmallSelector, { backgroundColor: '#F5B041', borderWidth: 0 }]}
                     activeOpacity={collegeCanteens.length > 1 ? 0.72 : 1}
                   >
-                    <Ionicons name="storefront-outline" size={11} color="#FFFFFF" />
+                    <AppIcon name="storefront-outline" size={11} color="#FFFFFF" />
                     <Text style={styles.canteenSmallText} numberOfLines={1}>{currentCanteenName}</Text>
-                    {collegeCanteens.length > 1 && <Ionicons name="chevron-down" size={11} color="#FFFFFF" />}
+                    {collegeCanteens.length > 1 && <AppIcon name="chevron-down" size={11} color="#FFFFFF" />}
                   </TouchableOpacity>
                 ) : null}
               </View>
@@ -1852,7 +1848,7 @@ const HomeScreen = ({ navigation, route }) => {
                     })
                   }]
                 }}>
-                  <Ionicons
+                  <AppIcon
                     name="leaf"
                     size={13}
                     color={vegMode ? '#00C137' : '#C0C0C0'}
@@ -1900,7 +1896,7 @@ const HomeScreen = ({ navigation, route }) => {
                 })
              }]} />
             <View style={[styles.animatedSearchBar, searchChrome.bar]}>
-              <Ionicons name="search" size={20} color={searchChrome.icon} style={styles.searchIcon} />
+              <AppIcon name="search" size={20} color={searchChrome.icon} style={styles.searchIcon} />
               <TextInput
                 style={[styles.searchInput, searchChrome.input]}
                 value={searchQuery}
@@ -1911,7 +1907,7 @@ const HomeScreen = ({ navigation, route }) => {
               />
               {searchQuery?.length > 0 && (
                 <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearIcon}>
-                  <Ionicons name="close-circle" size={18} color={searchChrome.icon} />
+                  <AppIcon name="close-circle" size={18} color={searchChrome.icon} />
                 </TouchableOpacity>
               )}
             </View>
@@ -1985,7 +1981,7 @@ const HomeScreen = ({ navigation, route }) => {
               </View>
             ) : menuLoadError ? (
               <View style={[styles.emptyState, { paddingHorizontal: 24 }]}>
-                <Ionicons
+                <AppIcon
                   name="cloud-offline-outline"
                   size={52}
                   color={colors.textTertiary}
@@ -2066,7 +2062,7 @@ const HomeScreen = ({ navigation, route }) => {
               ]}
               activeOpacity={0.7}
             >
-              <Ionicons 
+              <AppIcon 
                 name="remove-circle-outline" 
                 size={16} 
                 color={priceSort === 'none' ? colors.background : colors.text} 
@@ -2090,7 +2086,7 @@ const HomeScreen = ({ navigation, route }) => {
               ]}
               activeOpacity={0.7}
             >
-              <Ionicons 
+              <AppIcon 
                 name="arrow-up" 
                 size={16} 
                 color={priceSort === 'low-to-high' ? colors.background : colors.text} 
@@ -2114,7 +2110,7 @@ const HomeScreen = ({ navigation, route }) => {
               ]}
               activeOpacity={0.7}
             >
-              <Ionicons 
+              <AppIcon 
                 name="arrow-down" 
                 size={16} 
                 color={priceSort === 'high-to-low' ? colors.background : colors.text} 
@@ -2145,7 +2141,7 @@ const HomeScreen = ({ navigation, route }) => {
               ]}
               activeOpacity={0.7}
             >
-              <Ionicons 
+              <AppIcon 
                 name="apps-outline" 
                 size={16} 
                 color={dietaryFilter === 'all' ? colors.background : colors.text} 
@@ -2169,7 +2165,7 @@ const HomeScreen = ({ navigation, route }) => {
               ]}
               activeOpacity={0.7}
             >
-              <Ionicons 
+              <AppIcon 
                 name="leaf-outline" 
                 size={16} 
                 color={dietaryFilter === 'veg' ? colors.background : colors.text} 
@@ -2193,7 +2189,7 @@ const HomeScreen = ({ navigation, route }) => {
               ]}
               activeOpacity={0.7}
             >
-              <Ionicons 
+              <AppIcon 
                 name="restaurant-outline" 
                 size={16} 
                 color={dietaryFilter === 'non-veg' ? colors.background : colors.text} 
@@ -2240,7 +2236,7 @@ const HomeScreen = ({ navigation, route }) => {
               <View style={[styles.canteenPickerHeader, { borderBottomColor: colors.border }]}>
                 <Text style={[styles.canteenPickerTitle, { color: colors.text }]}>Select canteen</Text>
                 <TouchableOpacity onPress={() => setShowCanteenPicker(false)} hitSlop={12} activeOpacity={1}>
-                  <Ionicons name="close" size={24} color={colors.text} />
+                  <AppIcon name="close" size={24} color={colors.text} />
                 </TouchableOpacity>
               </View>
               <FlatList
@@ -2270,7 +2266,7 @@ const HomeScreen = ({ navigation, route }) => {
                         },
                       ]}
                     >
-                      <Ionicons name="storefront" size={22} color={selected ? '#000000' : colors.text} />
+                      <AppIcon name="storefront" size={22} color={selected ? '#000000' : colors.text} />
                       <Text style={[styles.canteenPickerCardText, { color: selected ? '#000000' : colors.text }]} numberOfLines={2}>
                         {c.name}
                       </Text>

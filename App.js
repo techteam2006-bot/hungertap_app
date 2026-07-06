@@ -36,7 +36,7 @@ if (typeof global !== 'undefined' && !global.Animated) {
   merge(TextInput);
 })();
 import * as Notifications from 'expo-notifications';
-import { Ionicons } from '@expo/vector-icons';
+import AppIcon from './components/AppIcon';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Screens
@@ -153,7 +153,7 @@ function MainTabs() {
         component={HomeTabWrapper}
         options={{
           tabBarIcon: ({ color, size, focused }) => (
-            <Ionicons name={focused ? 'home' : 'home-outline'} size={size} color={color} />
+            <AppIcon name={focused ? 'home' : 'home-outline'} size={size} color={color} />
           ),
         }}
         listeners={({ navigation, route }) => ({
@@ -183,7 +183,7 @@ function MainTabs() {
         options={{
           tabBarIcon: ({ color, size, focused }) => (
             <CartBadgeUpdater>
-              <Ionicons name={focused ? 'cart' : 'cart-outline'} size={size} color={color} />
+              <AppIcon name={focused ? 'cart' : 'cart-outline'} size={size} color={color} />
             </CartBadgeUpdater>
           ),
         }}
@@ -193,7 +193,7 @@ function MainTabs() {
         component={OrdersTabWrapper}
         options={{
           tabBarIcon: ({ color, size, focused }) => (
-            <Ionicons name={focused ? 'receipt' : 'receipt-outline'} size={size} color={color} />
+            <AppIcon name={focused ? 'receipt' : 'receipt-outline'} size={size} color={color} />
           ),
         }}
       />
@@ -202,7 +202,7 @@ function MainTabs() {
         component={ProfileTabWrapper}
         options={{
           tabBarIcon: ({ color, size, focused }) => (
-            <Ionicons name={focused ? 'person' : 'person-outline'} size={size} color={color} />
+            <AppIcon name={focused ? 'person' : 'person-outline'} size={size} color={color} />
           ),
         }}
       />

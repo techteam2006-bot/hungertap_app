@@ -14,7 +14,7 @@ import {
 import LegalitiesCard from '../components/LegalitiesCard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
+import AppIcon from '../components/AppIcon';
 import { useAuth } from '../lib/AuthContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../lib/ThemeContext';
@@ -36,7 +36,7 @@ async function openExternalUrl(url) {
   try {
     await Linking.openURL(url);
   } catch (e) {
-    Alert.alert('Cannot open link', e?.message || 'Please try again.');
+    Alert.alert('Cannot open link', 'This link could not be opened. Please try again.');
   }
 }
 
@@ -52,7 +52,7 @@ function ProfileRow({
   const content = (
     <>
       <View style={[styles.iconPill, { backgroundColor: colors.mutedRowBackground }]}>
-        <Ionicons name={icon} size={22} color={colors.textSecondary} />
+        <AppIcon name={icon} size={22} color={colors.textSecondary} />
       </View>
       <View style={styles.rowTextBlock}>
         <Text style={[styles.rowTitle, { color: colors.text }]} numberOfLines={1}>
@@ -64,7 +64,7 @@ function ProfileRow({
           </Text>
         ) : null}
       </View>
-      {right ?? <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />}
+      {right ?? <AppIcon name="chevron-forward" size={20} color={colors.textTertiary} />}
     </>
   );
 
@@ -232,10 +232,7 @@ const ProfileScreen = ({ navigation }) => {
           .eq('user_id', effectiveUserId);
         if (error) {
           setNotificationsEnabled(previous);
-          Alert.alert(
-            'Notifications',
-            `Could not update preference: ${error.message || 'Unknown error'}`
-          );
+          Alert.alert('Notifications', 'Could not save your preference. Please try again.');
           return;
         }
       }
@@ -243,7 +240,7 @@ const ProfileScreen = ({ navigation }) => {
     } catch (e) {
       setNotificationsEnabled(previous);
       console.error('Error toggling notifications:', e);
-      Alert.alert('Notifications', e?.message || 'Something went wrong. Please try again.');
+      Alert.alert('Notifications', 'Something went wrong. Please try again.');
     } finally {
       setNotifToggleBusy(false);
     }
@@ -295,7 +292,7 @@ const ProfileScreen = ({ navigation }) => {
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             activeOpacity={0.7}
           >
-            <Ionicons name="arrow-back" size={24} color={colors.text} />
+            <AppIcon name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
         </View>
         <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>
@@ -341,7 +338,7 @@ const ProfileScreen = ({ navigation }) => {
             </Text>
 
             <View style={styles.nameEmailRow}>
-              <Ionicons name="mail-outline" size={16} color={colors.textSecondary} style={styles.nameEmailIcon} />
+              <AppIcon name="mail-outline" size={16} color={colors.textSecondary} style={styles.nameEmailIcon} />
               <Text
                 style={[styles.nameEmailText, { color: colors.textSecondary }]}
                 numberOfLines={1}
@@ -490,7 +487,7 @@ const ProfileScreen = ({ navigation }) => {
             end={{ x: 1, y: 1 }}
             style={styles.signOutGradient}
           >
-            <Ionicons name="log-out-outline" size={22} color="#FFFFFF" style={styles.signOutIcon} />
+            <AppIcon name="log-out-outline" size={22} color="#FFFFFF" style={styles.signOutIcon} />
             <Text style={styles.signOutLabel}>Sign out</Text>
           </LinearGradient>
         </TouchableOpacity>

@@ -12,7 +12,7 @@ import {
   Animated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import AppIcon from '../components/AppIcon';
 import { LinearGradient } from 'expo-linear-gradient';
 import { CommonActions } from '@react-navigation/native';
 import { useCart } from '../lib/CartContext';
@@ -826,8 +826,8 @@ const CartScreen = ({ navigation }) => {
     if (placeOrderInFlightRef.current || isCreatingOrder) return;
     if (!CONFIG.CREATE_ORDER_V2_URL) {
       Alert.alert(
-        'Checkout unavailable',
-        'Payment is not configured. Set EXPO_PUBLIC_SUPABASE_URL or EXPO_PUBLIC_CREATE_ORDER_V2_URL in .env and restart the app.'
+        'Checkout Unavailable',
+        'Online payment is not available right now. Please try again later or contact support.'
       );
       return;
     }
@@ -949,7 +949,7 @@ const CartScreen = ({ navigation }) => {
               hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             >
               {quantity === 1 ? (
-                <Ionicons name="trash-outline" size={14} color={isDarkMode ? colors.error : '#000000'} />
+                <AppIcon name="trash-outline" size={14} color={isDarkMode ? colors.error : '#000000'} />
               ) : (
                 <View style={styles.minusLine} />
               )}
@@ -995,7 +995,7 @@ const CartScreen = ({ navigation }) => {
             end={{ x: 1, y: 1 }}
             style={styles.addonsIconBadge}
           >
-            <MaterialCommunityIcons name="bottle-soda-outline" size={18} color="#FFFFFF" />
+            <AppIcon name="cafe-outline" size={18} color="#FFFFFF" />
           </LinearGradient>
           <Text style={styles.recommendationsTitle}>Add-ons</Text>
         </View>
@@ -1106,7 +1106,7 @@ const CartScreen = ({ navigation }) => {
   const renderEmptyCart = () => (
     <View style={styles.emptyCartContainer}>
       <View style={styles.emptyCartCard}>
-        <Ionicons name="cart-outline" size={80} color="#999" />
+        <AppIcon name="cart-outline" size={80} color="#999" />
         <Text style={styles.emptyCartTitle}>
           Your cart is empty
         </Text>
@@ -1144,7 +1144,7 @@ const CartScreen = ({ navigation }) => {
             onPress={() => navigateBackFromCart(navigation)}
             style={styles.backButton}
           >
-            <Ionicons name="arrow-back" size={24} color="#4D4D4D" />
+            <AppIcon name="arrow-back" size={24} color="#4D4D4D" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Cart</Text>
           <View style={styles.headerClearButton}>
@@ -1152,7 +1152,7 @@ const CartScreen = ({ navigation }) => {
               <TouchableOpacity 
                 onPress={handleClearCart}
               >
-                <Ionicons name="trash-outline" size={24} color={isDarkMode ? colors.error : '#FF9999'} />
+                <AppIcon name="trash-outline" size={24} color={isDarkMode ? colors.error : '#FF9999'} />
               </TouchableOpacity>
             )}
           </View>
@@ -1197,10 +1197,10 @@ const CartScreen = ({ navigation }) => {
                 onPress={() => setIsTakeaway(!isTakeaway)}
               >
                 <View style={[styles.checkboxButton, isTakeaway && styles.checkboxButtonSelected]}>
-                  {isTakeaway && <Ionicons name="checkmark" size={14} color="white" />}
+                  {isTakeaway && <AppIcon name="checkmark" size={14} color="white" />}
                 </View>
                 <Text style={styles.globalTakeawayText}>Takeaway</Text>
-                <Ionicons name="basket-outline" size={18} color="#D99367" style={{ marginLeft: 6 }} />
+                <AppIcon name="basket-outline" size={18} color="#D99367" style={{ marginLeft: 6 }} />
               </TouchableOpacity>
               <Text style={styles.globalTakeawayDescription}>Pick up your order at Canteen Counter</Text>
             </View>
@@ -1214,7 +1214,7 @@ const CartScreen = ({ navigation }) => {
                     <View style={styles.toPayTitleRow}>
                       <View style={styles.toPayLeftColumn}>
                         <View style={styles.toPayLabelRow}>
-                          <Ionicons
+                          <AppIcon
                             name="receipt-outline"
                             size={28}
                             color={isDarkMode ? '#FFFFFF' : '#000000'}
@@ -1232,7 +1232,7 @@ const CartScreen = ({ navigation }) => {
                   onPress={() => setIsOrderSummaryExpanded(!isOrderSummaryExpanded)}
                   style={styles.expandButton}
                 >
-                  <Ionicons 
+                  <AppIcon 
                     name={isOrderSummaryExpanded ? "chevron-up" : "chevron-down"} 
                     size={24} 
                     color="#646464" 

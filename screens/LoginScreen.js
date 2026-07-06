@@ -20,7 +20,7 @@ import { StatusBar } from 'expo-status-bar';
 
 import { useAuth } from '../lib/AuthContext';
 import { useTheme } from '../lib/ThemeContext';
-import { Ionicons } from '@expo/vector-icons';
+import AppIcon from '../components/AppIcon';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { pxToPercentX, pxToPercentY } from '../utils/percent';
@@ -545,24 +545,24 @@ export default function LoginScreen({ navigation }) {
           console.error('Login error:', error?.message || error);
         }
 
-        let errorMessage = error.message;
+        const msg = (error.message || '').toLowerCase();
 
-        // Check for access denied (non-student role)
-        if (error.message.includes('Access denied') || error.message.includes('only for students')) {
-          errorMessage = 'Access denied. This app is only for students. Admin accounts cannot access the student app.';
-          Alert.alert('Access Denied', errorMessage, [{ text: 'OK' }]);
+        if (msg.includes('access denied') || msg.includes('only for students')) {
+          Alert.alert('Access Denied', 'This app is only for students. Admin accounts cannot sign in here.', [{ text: 'OK' }]);
           return;
         }
 
-        // Clerk error messages
-        if (error.message.includes('Identifier is invalid') ||
-          error.message.includes('identifier') ||
-          error.message.includes('password')) {
+        let errorMessage = 'Something went wrong. Please try again.';
+        if (msg.includes('invalid') || msg.includes('identifier') || msg.includes('password') || msg.includes('credentials')) {
           errorMessage = 'Invalid email or password. Please try again.';
-        } else if (error.message.includes('locked') || error.message.includes('Too many')) {
-          errorMessage = 'Too many login attempts. Please try again later.';
-        } else if (error.message.includes('not found') || error.message.includes('no user')) {
+        } else if (msg.includes('locked') || msg.includes('too many')) {
+          errorMessage = 'Too many login attempts. Please wait a moment and try again.';
+        } else if (msg.includes('not found') || msg.includes('no user')) {
           errorMessage = 'No account found with this email. Please sign up first.';
+        } else if (msg.includes('email') && msg.includes('confirm')) {
+          errorMessage = 'Please verify your email address before signing in. Check your inbox for a confirmation link.';
+        } else if (msg.includes('network') || msg.includes('fetch')) {
+          errorMessage = 'Connection error. Please check your internet and try again.';
         }
 
         Alert.alert('Login Failed', errorMessage);
@@ -622,9 +622,8 @@ export default function LoginScreen({ navigation }) {
           console.warn('Canteen lookup error:', canteenLookup.error?.message || canteenLookup.error);
         }
         Alert.alert(
-          'Could not verify canteen',
-          canteenLookup.error.message ||
-            'Check your connection. If this persists, the database may block guest reads on `canteens` — ask an admin to allow anonymous SELECT for signup.'
+          'Connection Error',
+          'Could not verify your canteen. Please check your internet connection and try again.'
         );
         return;
       }
@@ -681,7 +680,7 @@ export default function LoginScreen({ navigation }) {
         }
         Alert.alert(
           'Verify Your Email',
-          'A confirmation link is sent from Supabase when that option is on. Check spam/junk. If you never get email, set custom SMTP in Supabase (Authentication → Emails) and check Auth logs. After you open the link, sign in with the same email and password.',
+          'A confirmation link has been sent to your email address. Check your inbox (and spam/junk folder). Once you click the link, come back and sign in with your email and password.',
           [
             {
               text: 'OK',
@@ -810,7 +809,7 @@ export default function LoginScreen({ navigation }) {
                 {/* Full Name Input - Only for Sign Up */}
                 {!isLoginMode && (
                   <View style={styles.inputContainer} onLayout={(e) => { fieldPositions.fullName = e.nativeEvent.layout.y; }}>
-                    <Ionicons name="person-outline" size={20} color="#9CA3AF" style={styles.inputIcon} />
+                    <AppIcon name="person-outline" size={20} color="#9CA3AF" style={styles.inputIcon} />
                     <TextInput
                       ref={(r) => { inputRefs.fullName = r; }}
                       style={styles.input}
@@ -832,7 +831,7 @@ export default function LoginScreen({ navigation }) {
                 {/* Canteen ID Input (Canteen Name) - Only for Sign Up */}
                 {!isLoginMode && (
                   <View style={styles.inputContainer} onLayout={(e) => { fieldPositions.canteenName = e.nativeEvent.layout.y; }}>
-                    <Ionicons name="business-outline" size={20} color="#9CA3AF" style={styles.inputIcon} />
+                    <AppIcon name="business-outline" size={20} color="#9CA3AF" style={styles.inputIcon} />
                     <TextInput
                       ref={(r) => { inputRefs.canteenName = r; }}
                       style={styles.input}
@@ -856,7 +855,7 @@ export default function LoginScreen({ navigation }) {
 
                 {/* Email Input */}
                 <View style={styles.inputContainer} onLayout={(e) => { fieldPositions.email = e.nativeEvent.layout.y; }}>
-                  <Ionicons name="mail-outline" size={20} color="#9CA3AF" style={styles.inputIcon} />
+                  <AppIcon name="mail-outline" size={20} color="#9CA3AF" style={styles.inputIcon} />
                   <TextInput
                     ref={(r) => { inputRefs.email = r; }}
                     style={styles.input}
@@ -887,7 +886,7 @@ export default function LoginScreen({ navigation }) {
                 {/* Password — login only (separate state from signup) */}
                 {isLoginMode && (
                   <View style={styles.inputContainer} onLayout={(e) => { fieldPositions.password = e.nativeEvent.layout.y; }}>
-                    <Ionicons name="lock-closed-outline" size={20} color="#9CA3AF" style={styles.inputIcon} />
+                    <AppIcon name="lock-closed-outline" size={20} color="#9CA3AF" style={styles.inputIcon} />
                     <TextInput
                       ref={(r) => { inputRefs.loginPassword = r; }}
                       style={styles.input}
@@ -911,7 +910,7 @@ export default function LoginScreen({ navigation }) {
                       style={styles.passwordToggle}
                       disabled={loading}
                     >
-                      <Ionicons
+                      <AppIcon
                         name={loginPasswordVisible ? "eye" : "eye-off"}
                         size={20}
                         color="#9CA3AF"
@@ -923,7 +922,7 @@ export default function LoginScreen({ navigation }) {
                 {/* Password — signup only (separate from login) */}
                 {!isLoginMode && (
                   <View style={styles.inputContainer} onLayout={(e) => { fieldPositions.password = e.nativeEvent.layout.y; }}>
-                    <Ionicons name="lock-closed-outline" size={20} color="#9CA3AF" style={styles.inputIcon} />
+                    <AppIcon name="lock-closed-outline" size={20} color="#9CA3AF" style={styles.inputIcon} />
                     <TextInput
                       ref={(r) => { inputRefs.signupPassword = r; }}
                       style={styles.input}
@@ -947,7 +946,7 @@ export default function LoginScreen({ navigation }) {
                       style={styles.passwordToggle}
                       disabled={loading}
                     >
-                      <Ionicons
+                      <AppIcon
                         name={signupPasswordVisible ? "eye" : "eye-off"}
                         size={20}
                         color="#9CA3AF"
@@ -959,7 +958,7 @@ export default function LoginScreen({ navigation }) {
                 {/* Confirm Password Input - Only for Sign Up */}
                 {!isLoginMode && (
                   <View style={styles.inputContainer} onLayout={(e) => { fieldPositions.confirmPassword = e.nativeEvent.layout.y; }}>
-                    <Ionicons name="lock-closed-outline" size={20} color="#9CA3AF" style={styles.inputIcon} />
+                    <AppIcon name="lock-closed-outline" size={20} color="#9CA3AF" style={styles.inputIcon} />
                     <TextInput
                       ref={(r) => { inputRefs.confirmPassword = r; }}
                       style={styles.input}
@@ -983,7 +982,7 @@ export default function LoginScreen({ navigation }) {
                       style={styles.passwordToggle}
                       disabled={loading}
                     >
-                      <Ionicons
+                      <AppIcon
                         name={confirmPasswordVisible ? "eye" : "eye-off"}
                         size={20}
                         color="#9CA3AF"
@@ -1003,7 +1002,7 @@ export default function LoginScreen({ navigation }) {
                         hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
                       >
                         <View style={[styles.termsCheckbox, acceptTerms && styles.termsCheckboxChecked]}>
-                          {acceptTerms && <Ionicons name="checkmark" size={16} color="#ffffff" />}
+                          {acceptTerms && <AppIcon name="checkmark" size={16} color="#ffffff" />}
                         </View>
                       </TouchableOpacity>
                       <Text style={[styles.termsText, { flex: 1 }]}>
@@ -1048,7 +1047,7 @@ export default function LoginScreen({ navigation }) {
                       disabled={loading}
                     >
                       <View style={[styles.termsCheckbox, rememberMe && styles.termsCheckboxChecked]}>
-                        {rememberMe && <Ionicons name="checkmark" size={16} color="#ffffff" />}
+                        {rememberMe && <AppIcon name="checkmark" size={16} color="#ffffff" />}
                       </View>
                       <Text style={styles.rememberMeText}>Remember me</Text>
                     </TouchableOpacity>
