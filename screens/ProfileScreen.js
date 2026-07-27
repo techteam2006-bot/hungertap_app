@@ -10,6 +10,7 @@ import {
   StatusBar,
   Share,
   Linking,
+  Platform,
 } from 'react-native';
 import LegalitiesCard from '../components/LegalitiesCard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -20,6 +21,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../lib/ThemeContext';
 import { supabase } from '../lib/supabase';
 import { registerForPushNotificationsAsync } from '../lib/services/notifications';
+import NotificationService from '../lib/NotificationService';
 import { GlassCard } from '../components/ModernComponents';
 import { appTypography } from '../lib/darkThemeConfig';
 
@@ -31,6 +33,12 @@ const SOCIAL_LINKS = {
   twitter: 'https://twitter.com/HungerTap',
   facebook: 'https://www.facebook.com/profile.php?id=61563114927891',
 };
+
+/** Play Store listing for this app (`app.json` → android.package). */
+const APP_STORE_URL =
+  'https://play.google.com/store/apps/details?id=com.hungertap.app';
+const APP_SHARE_MESSAGE =
+  `Check out the HungerTap App!\n\nDownload here:\n${APP_STORE_URL}`;
 
 async function openExternalUrl(url) {
   try {
@@ -179,7 +187,15 @@ const ProfileScreen = ({ navigation }) => {
     setNotifToggleBusy(true);
     try {
       if (value === true) {
-        const { token, reason } = await registerForPushNotificationsAsync(effectiveUserId);
+        const { token, reason, localOnly } = await registerForPushNotificationsAsync(effectiveUserId);
+
+        // Expo Go: remote push unavailable — still enable in-app local notifications.
+        if (!token && reason === 'expo_go' && localOnly) {
+          await AsyncStorage.setItem('notificationsEnabled', JSON.stringify(true));
+          await NotificationService.initialize();
+          return;
+        }
+
         if (!token) {
           setNotificationsEnabled(previous);
           if (reason === 'permission_denied') {
@@ -206,7 +222,7 @@ const ProfileScreen = ({ navigation }) => {
           if (reason === 'no_project_id') {
             Alert.alert(
               'Configuration',
-              'Push setup is incomplete (missing EAS project id). Rebuild the app with a valid app.config / EAS project.'
+              'Push setup is incomplete (missing Firebase / EAS project config). Rebuild the app with google-services.json and a valid EAS project.'
             );
             return;
           }
@@ -225,6 +241,12 @@ const ProfileScreen = ({ navigation }) => {
           );
           return;
         }
+
+        await AsyncStorage.setItem('notificationsEnabled', JSON.stringify(true));
+        // Allow NotificationService to finish channel/permission setup after preference is on.
+        NotificationService.isInitialized = false;
+        await NotificationService.initialize();
+        return;
       } else if (effectiveUserId) {
         const { error } = await supabase
           .from('user_tokens')
@@ -235,8 +257,14 @@ const ProfileScreen = ({ navigation }) => {
           Alert.alert('Notifications', 'Could not save your preference. Please try again.');
           return;
         }
+        await NotificationService.clearAllNotifications();
+      } else {
+        await NotificationService.clearAllNotifications();
       }
       await AsyncStorage.setItem('notificationsEnabled', JSON.stringify(value));
+      if (value === false) {
+        NotificationService.isInitialized = false;
+      }
     } catch (e) {
       setNotificationsEnabled(previous);
       console.error('Error toggling notifications:', e);
@@ -266,11 +294,20 @@ const ProfileScreen = ({ navigation }) => {
 
   const handleShareApp = async () => {
     try {
-      await Share.share({
-        message: 'Check out the HungerTap App!',
-        url: 'https://play.google.com/store/apps/details?id=com.yourapp',
-        title: 'HungerTap App',
-      });
+      // Android ignores Share `url` — put the link in `message` so WhatsApp/etc. get a tappable URL.
+      await Share.share(
+        Platform.select({
+          ios: {
+            message: APP_SHARE_MESSAGE,
+            url: APP_STORE_URL,
+            title: 'HungerTap App',
+          },
+          default: {
+            message: APP_SHARE_MESSAGE,
+            title: 'HungerTap App',
+          },
+        })
+      );
     } catch (error) {
       console.log('Error sharing:', error);
     }

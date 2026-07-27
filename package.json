@@ -5,6 +5,8 @@
   "main": "node_modules/expo/AppEntry.js",
   "scripts": {
     "start": "npx expo start",
+    "start:clear": "npx expo start --clear",
+    "start:dev": "npx expo start --dev-client --clear",
     "android": "npx expo run:android",
     "ios": "npx expo run:ios",
     "web": "npx expo start --web",
@@ -29,6 +31,7 @@
     "expo-build-properties": "~1.0.10",
     "expo-clipboard": "~8.0.8",
     "expo-constants": "~18.0.13",
+    "expo-dev-client": "~6.0.21",
     "expo-device": "~8.0.10",
     "expo-font": "^14.0.9",
     "expo-linear-gradient": "~15.0.8",

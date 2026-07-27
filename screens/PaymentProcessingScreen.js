@@ -65,22 +65,23 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
       stuckTimerRef.current = null;
     }
     try {
-      await clearCart();
+      await clearCart({ silent: true });
     } catch (_) {}
 
     let orderToken = '';
     let total = Number(orderTotal) || 0;
     try {
-      if (!userId || !isValidOrderUuid(orderId)) return;
-      const { data: row } = await supabase
-        .from('orders')
-        .select('order_token, total_amount')
-        .eq('id', orderId)
-        .eq('placed_by', userId)
-        .maybeSingle();
-      orderToken = row?.order_token != null ? String(row.order_token) : '';
-      const ta = row?.total_amount != null ? Number(row.total_amount) : NaN;
-      if (Number.isFinite(ta) && ta > 0) total = ta;
+      if (userId && isValidOrderUuid(orderId)) {
+        const { data: row } = await supabase
+          .from('orders')
+          .select('order_token, total_amount')
+          .eq('id', orderId)
+          .eq('placed_by', userId)
+          .maybeSingle();
+        orderToken = row?.order_token != null ? String(row.order_token) : '';
+        const ta = row?.total_amount != null ? Number(row.total_amount) : NaN;
+        if (Number.isFinite(ta) && ta > 0) total = ta;
+      }
     } catch (_) {}
 
     navigation.replace('OrderConfirmation', {

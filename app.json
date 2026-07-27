@@ -59,6 +59,7 @@
       "bundler": "metro"
     },
     "plugins": [
+      "expo-dev-client",
       "expo-asset",
       "expo-secure-store",
       "expo-notifications",

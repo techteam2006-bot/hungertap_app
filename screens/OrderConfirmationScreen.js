@@ -16,6 +16,7 @@ import { useTheme } from '../lib/ThemeContext';
 import NotificationService from '../lib/NotificationService';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/AuthContext';
+import { useCart } from '../lib/CartContext';
 import { isValidOrderUuid } from '../lib/checkoutSecurity';
 import { resetNavigationToHome, resetNavigationToCart } from '../lib/navigateHome';
 import { getFontStyle } from '../lib/utils/fonts';
@@ -25,6 +26,7 @@ const { width } = Dimensions.get('window');
 
 const OrderConfirmationScreen = ({ navigation, route }) => {
   const { userId } = useAuth();
+  const { clearCart } = useCart();
   const {
     orderId,
     orderToken: passedOrderToken,
@@ -36,6 +38,14 @@ const OrderConfirmationScreen = ({ navigation, route }) => {
   const isFailure = outcome === 'failed' || outcome === 'payment_failed';
   const [token, setToken] = useState(passedOrderToken || '');
   const [tokenLoading, setTokenLoading] = useState(() => !passedOrderToken && Boolean(orderId));
+  const cartClearedRef = useRef(false);
+
+  // Safety net: always clear cart on successful payment confirmation.
+  useEffect(() => {
+    if (isFailure || cartClearedRef.current) return;
+    cartClearedRef.current = true;
+    clearCart({ silent: true }).catch(() => {});
+  }, [isFailure, clearCart]);
 
   const displayToken = useMemo(
     () => token || passedOrderToken || '—',
@@ -325,7 +335,7 @@ const OrderConfirmationScreen = ({ navigation, route }) => {
                 <AppIcon
                   name={row.icon}
                   size={20}
-                  color={row.emphasize ? (isFailure ? colors.error : colors.success) : colors.primary}
+                  color="#000000"
                 />
               </View>
               <View style={styles.rowText}>

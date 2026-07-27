@@ -275,78 +275,85 @@ export const AnimatedFoodCard = ({
           )}
         </View>
 
-        {/* Food Name */}
-        <Text style={[styles.newFoodName, { color: colors.text }]} numberOfLines={1}>
-          {item?.name || 'Food Item'}
-        </Text>
-
-        {/* Price and Currency Symbol */}
-        <View style={styles.newPriceContainer}>
-          <Text style={[styles.newCurrencySymbol, { color: colors.text }]}>₹</Text>
-          <Text style={[styles.newPrice, { color: colors.text }]}>{item?.price || '0'}</Text>
-        </View>
-
-        {/* Description */}
-        <Text style={[styles.newFoodDescription, { color: colors.textTertiary }]} numberOfLines={2}>
-          {item?.description || 'Delicious food item'}
-        </Text>
-
-        {/* Quantity Controls or Add Button */}
-        {quantity > 0 ? (
-          <View
-            style={[
-              styles.newQuantityContainer,
-              {
-                backgroundColor: colors.card,
-                borderWidth: 1,
-                borderColor: colors.border,
-              },
-            ]}
-          >
-            <TouchableOpacity
-              style={styles.newQuantityButton}
-              onPress={(e) => {
-                e.stopPropagation();
-                onDecrease && onDecrease();
-              }}
-              disabled={!onDecrease}
+        <View style={styles.newFoodMeta}>
+          <View style={styles.newFoodNamePriceRow}>
+            <Text
+              style={[styles.newFoodName, { color: colors.text }]}
+              textBreakStrategy="highQuality"
+              android_hyphenationFrequency="none"
             >
-              <AppIcon 
-                name={quantity === 1 ? "trash-outline" : "remove"} 
-                size={20} 
-                color={quantity === 1 ? "#EF4444" : colors.textSecondary} 
-              />
-            </TouchableOpacity>
-            <Text style={[styles.newQuantityText, { color: colors.text }]}>{quantity}</Text>
-            <TouchableOpacity
-              style={styles.newQuantityButton}
-              onPress={(e) => {
-                e.stopPropagation();
-                onIncrease && onIncrease();
-              }}
-              disabled={!onIncrease}
-            >
-              <AppIcon name="add" size={20} color={colors.textSecondary} />
-            </TouchableOpacity>
+              {item?.name || 'Food Item'}
+            </Text>
+            <View style={styles.newPriceContainer}>
+              <Text style={[styles.newCurrencySymbol, { color: colors.text }]}>₹</Text>
+              <Text style={[styles.newPrice, { color: colors.text }]}>{item?.price || '0'}</Text>
+            </View>
           </View>
-        ) : (
-          <TouchableOpacity
-            style={[
-              styles.newAddButton,
-              { backgroundColor: vegMode ? '#00BD32' : colors.brandYellow }
-            ]}
-            onPress={(e) => {
-              e.stopPropagation();
-              onAddToCart && onAddToCart();
-            }}
-            disabled={!item?.isAvailable}
-          >
-            <Text style={[
-              styles.newAddButtonText,
-              { color: '#000000' }
-            ]}>+ Add Items</Text>
-          </TouchableOpacity>
-        )}
+
+          <View style={styles.newDescActionRow}>
+            <Text
+              style={[styles.newFoodDescription, { color: colors.textTertiary }]}
+              numberOfLines={2}
+              textBreakStrategy="highQuality"
+              android_hyphenationFrequency="none"
+            >
+              {item?.description || 'Delicious food item'}
+            </Text>
+
+            {quantity > 0 ? (
+              <View
+                style={[
+                  styles.newQuantityContainer,
+                  {
+                    backgroundColor: colors.card,
+                    borderWidth: 1,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <TouchableOpacity
+                  style={styles.newQuantityButton}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    onDecrease && onDecrease();
+                  }}
+                  disabled={!onDecrease}
+                >
+                  <AppIcon
+                    name={quantity === 1 ? 'trash-outline' : 'remove'}
+                    size={20}
+                    color={quantity === 1 ? '#EF4444' : colors.textSecondary}
+                  />
+                </TouchableOpacity>
+                <Text style={[styles.newQuantityText, { color: colors.text }]}>{quantity}</Text>
+                <TouchableOpacity
+                  style={styles.newQuantityButton}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    onIncrease && onIncrease();
+                  }}
+                  disabled={!onIncrease}
+                >
+                  <AppIcon name="add" size={20} color={colors.textSecondary} />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={[
+                  styles.newAddButton,
+                  { backgroundColor: vegMode ? '#00BD32' : colors.brandYellow },
+                ]}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  onAddToCart && onAddToCart();
+                }}
+                disabled={!item?.isAvailable}
+              >
+                <Text style={[styles.newAddButtonText, { color: '#000000' }]}>+ Add Items</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
         </LinearGradient>
       </TouchableOpacity>
     </Animated.View>
@@ -1239,26 +1246,25 @@ const styles = StyleSheet.create({
   // New Food Card Styles (matching the image design) - Percentage-based for Poco M4 Pro 4G
   newFoodCard: {
     width: '95%',
-    height: height * 0.3, 
     marginHorizontal: '2.5%',
-    marginTop: height * 0.008, 
-    marginBottom: height * 0.02, 
+    marginTop: height * 0.008,
+    marginBottom: height * 0.02,
     borderRadius: 15,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.25,
     shadowRadius: 2,
     elevation: 10,
+    overflow: 'hidden',
   },
   newFoodCardTouchable: {
     width: '100%',
-    height: '100%',
     borderRadius: 15,
     overflow: 'hidden',
   },
   newFoodImageContainer: {
     width: '100%',
-    height: '66%', // 66% of card height
+    height: height * 0.2,
     borderRadius: 15,
     overflow: 'hidden',
     position: 'relative',
@@ -1302,53 +1308,65 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
   },
+  newFoodMeta: {
+    paddingHorizontal: pxToPercentX(48.6),
+    paddingTop: 8,
+    paddingBottom: 10,
+  },
+  newFoodNamePriceRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
   newFoodName: {
-    position: 'absolute',
-    left: pxToPercentX(48.6), // 4.5% from left (48.6px on Poco M4 Pro)
-    top: pxToPercentY(1680), // 70% from top of card (1680px on Poco M4 Pro)
-    fontSize: width * 0.05, // 5% of screen width
+    flex: 1,
+    minWidth: 0,
+    fontSize: width * 0.05,
     ...getFontStyle('bold'),
-    lineHeight: width * 0.055, // 5.5% of screen width
+    lineHeight: width * 0.055,
     color: 'black',
     textAlign: 'left',
-    width: '51%', // 51% of card width
+    flexShrink: 1,
   },
   newPriceContainer: {
-    position: 'absolute',
-    right: pxToPercentX(48.6), // 4.5% from right (48.6px on Poco M4 Pro)
-    top: pxToPercentY(1692), // 70.5% from top of card (1692px on Poco M4 Pro)
     flexDirection: 'row',
     alignItems: 'center',
+    flexShrink: 0,
+    paddingTop: 2,
   },
   newCurrencySymbol: {
-    fontSize: width * 0.045, // 4.5% of screen width
+    fontSize: width * 0.045,
     ...getFontStyle('bold'),
-    lineHeight: width * 0.055, // 5.5% of screen width
+    lineHeight: width * 0.055,
     color: 'black',
-    marginRight: width * 0.005, // 0.5% of screen width
+    marginRight: width * 0.005,
   },
   newPrice: {
-    fontSize: width * 0.045, // 4.5% of screen width
+    fontSize: width * 0.045,
     ...getFontStyle('bold'),
-    lineHeight: width * 0.055, // 5.5% of screen width
+    lineHeight: width * 0.055,
     color: 'black',
   },
+  newDescActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 6,
+    gap: 10,
+  },
   newFoodDescription: {
-    position: 'absolute',
-    left: pxToPercentX(48.6), // 4.5% from left (48.6px on Poco M4 Pro)
-    top: pxToPercentY(1968), // 82% from top of card (1968px on Poco M4 Pro)
-    fontSize: width * 0.028, // 2.8% of screen width
+    flex: 1,
+    minWidth: 0,
+    fontSize: width * 0.03,
     ...getFontStyle('medium'),
-    lineHeight: width * 0.04, // 4% of screen width
+    lineHeight: width * 0.04,
     color: '#8B8B8B',
     textAlign: 'left',
-    width: '56%', // 56% of card width
   },
   newAddButton: {
-    position: 'absolute',
-    right: pxToPercentX(30.24), // 2.8% from right (30.24px on Poco M4 Pro)
-    bottom: pxToPercentY(72), // 3% from bottom (72px on Poco M4 Pro)
-    width: 104, // Slightly scale down
+    flexShrink: 0,
+    width: 104,
     height: 38,
     backgroundColor: '#D4A017',
     borderRadius: 12,
@@ -1368,9 +1386,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   newQuantityContainer: {
-    position: 'absolute',
-    right: pxToPercentX(30.24), // 2.8% from right (30.24px on Poco M4 Pro)
-    bottom: pxToPercentY(72), // 3% from bottom (72px on Poco M4 Pro)
+    flexShrink: 0,
     flexDirection: 'row',
     alignItems: 'center',
     borderRadius: 10,

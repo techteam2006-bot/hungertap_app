@@ -63,7 +63,7 @@ import { FavoritesProvider } from './lib/FavoritesContext';
 import { CanteenStatusProvider, useCanteenStatus } from './lib/CanteenStatusContext';
 import CartBadgeUpdater from './components/CartBadgeUpdater';
 import AuthHelpScreen from './screens/AuthHelpScreen';
-import NotificationService from './lib/NotificationService';
+import NotificationService, { areUserNotificationsEnabled } from './lib/NotificationService';
 import { registerForPushNotificationsAsync, setupForegroundHandler } from './lib/services/notifications';
 import { backgroundTaskService } from './lib/BackgroundTaskService';
 
@@ -211,7 +211,7 @@ function MainTabs() {
 }
 
 function Navigation() {
-  const { user, userRole, isSignedIn, isLoaded } = useAuth();
+  const { user, userRole, isSignedIn, isLoaded, pendingSignupCompletion, pendingPasswordReset } = useAuth();
   const { colors } = useTheme();
   const [hasShownSplash, setHasShownSplash] = React.useState(null);
   const [isCheckingSplash, setIsCheckingSplash] = React.useState(true);
@@ -239,7 +239,13 @@ function Navigation() {
   
   // CRITICAL: Only allow 'student' role to access the app
   // Block 'canteen_admin' and 'super_admin' roles
-  const isStudentUser = isSignedIn && user && userRole === 'student';
+  // Keep guest stack during mid-signup / password-reset OTP flows
+  const isStudentUser =
+    isSignedIn &&
+    user &&
+    userRole === 'student' &&
+    !pendingSignupCompletion &&
+    !pendingPasswordReset;
   
   // Determine initial route
   const getInitialRoute = () => {
@@ -380,6 +386,10 @@ function AppNavigator() {
               newOrder.status !== oldOrder.status &&
               (newOrder.status === 'ready' || newOrder.status === 'delivered')
             ) {
+              if (!(await areUserNotificationsEnabled())) {
+                return;
+              }
+
               console.log('🔔 Sending local notification for status:', newOrder.status);
 
               const orderToken = newOrder.order_token;
@@ -431,7 +441,7 @@ function AppNavigator() {
 
     initializeBackgroundTasks();
 
-    // Handle deep linking for magic link authentication
+    // Handle deep linking for auth redirects (email OTP / recovery)
     const handleDeepLink = async ({ url }) => {
       try {
         // ✅ error handled — malformed deep links must not crash startup
@@ -442,7 +452,7 @@ function AppNavigator() {
           try {
             const urlParams = new URL(url);
             const email = urlParams.searchParams.get('email');
-            console.log('Magic link clicked, redirecting to login', email ?? '');
+            console.log('Auth deep link opened login', email ?? '');
           } catch (parseErr) {
             console.error('Deep link URL parse:', parseErr);
           }

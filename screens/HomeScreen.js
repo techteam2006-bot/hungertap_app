@@ -52,6 +52,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import CanteenClosedMessage from '../components/CanteenClosedMessage';
 import { pxToPercentX, pxToPercentY } from '../utils/percent';
 import { invalidateHttpMenuCache, menuFromHttpEnabled } from '../lib/menuHttp';
+import { invalidateCanteenMenuEdgeCache } from '../lib/canteenMenuEdge';
 
 const { width, height } = Dimensions.get('window');
 
@@ -113,8 +114,6 @@ const DEFAULT_CATEGORIES = [
 
 const HomeScreen = ({ navigation, route }) => {
   const { signOut, user } = useAuth();
-  // Get firstName from user metadata with safe fallback
-  const firstName = user?.user_metadata?.first_name || null;
   const { colors, isDarkMode } = useTheme();
   const insets = useSafeAreaInsets();
   const {
@@ -157,6 +156,8 @@ const HomeScreen = ({ navigation, route }) => {
   const FIXED_HEADER_HEIGHT = FIXED_HEADER_OFFSET_TOP + 60;
   const SEARCH_BAR_HEIGHT = 56;
   const CATEGORIES_SECTION_HEIGHT = 84;
+  /** Vertical gap between hero banner bottom and sticky search bar. */
+  const BANNER_SEARCH_GAP = 16;
   
   const bannerOpacity = scrollY.interpolate({
     inputRange: [0, bannerHeight * 0.8],
@@ -211,6 +212,7 @@ const HomeScreen = ({ navigation, route }) => {
   // Canteen switcher (only canteens of user's college)
   const [currentCanteenName, setCurrentCanteenName] = useState('');
   const [currentCanteenId, setCurrentCanteenId] = useState(null);
+  const [collegeName, setCollegeName] = useState('');
   /** When false, menu must not load unscoped items (avoids cart/order mismatch with `create_order_minimal`). */
   const [menuCanteenReady, setMenuCanteenReady] = useState(false);
   const [collegeCanteens, setCollegeCanteens] = useState([]);
@@ -594,6 +596,8 @@ const HomeScreen = ({ navigation, route }) => {
 
     if (menuFromHttpEnabled()) {
       invalidateHttpMenuCache();
+    } else {
+      invalidateCanteenMenuEdgeCache(currentCanteenId);
     }
 
     pagingInFlightRef.current = true;
@@ -612,7 +616,7 @@ const HomeScreen = ({ navigation, route }) => {
         canteenFilter,
         0,
         MENU_PAGE_SIZE,
-        { forceHttpRefresh: menuFromHttpEnabled() }
+        { forceRefresh: true }
       );
 
       const rows = transformRawToMenuRows(rawRows || []);
@@ -913,10 +917,26 @@ const HomeScreen = ({ navigation, route }) => {
           return;
         }
         if (!userRow?.college_id) {
+          setCollegeName('');
           return;
         }
         const collegeId = userRow.college_id;
         const userCanteenId = userRow.canteen_id || null;
+
+        const { data: collegeRow, error: collegeErr } = await supabase
+          .from('colleges')
+          .select('name')
+          .eq('id', collegeId)
+          .maybeSingle();
+        if (!mounted) return;
+        if (collegeErr) {
+          console.error('College name fetch:', collegeErr.message || collegeErr);
+          setCollegeName('');
+        } else if (collegeRow?.name) {
+          setCollegeName(String(collegeRow.name).trim());
+        } else {
+          setCollegeName('');
+        }
 
         const { data: canteens, error: cErr } = await supabase
           .from('canteens')
@@ -1604,8 +1624,8 @@ const HomeScreen = ({ navigation, route }) => {
         {/* Spacer for the fixed header only */}
         <View style={{ height: FIXED_HEADER_HEIGHT }} />
         {stickyBannerContent}
-        {/* Gap for the pinned search+categories bar — search starts right after banner */}
-        <View style={{ height: SEARCH_BAR_HEIGHT + CATEGORIES_SECTION_HEIGHT }} />
+        {/* Gap for the pinned search+categories bar — keep in sync with BANNER_SEARCH_GAP */}
+        <View style={{ height: SEARCH_BAR_HEIGHT + CATEGORIES_SECTION_HEIGHT + BANNER_SEARCH_GAP }} />
         <View style={styles.exploreItemsSection}>
           <Text style={[
             styles.exploreItemsText,
@@ -1614,7 +1634,7 @@ const HomeScreen = ({ navigation, route }) => {
         </View>
       </View>
     ),
-    [stickyBannerContent, FIXED_HEADER_HEIGHT, SEARCH_BAR_HEIGHT, CATEGORIES_SECTION_HEIGHT, vegMode]
+    [stickyBannerContent, FIXED_HEADER_HEIGHT, SEARCH_BAR_HEIGHT, CATEGORIES_SECTION_HEIGHT, BANNER_SEARCH_GAP, vegMode]
   );
 
   const renderLoadingItem = () => (
@@ -1781,7 +1801,9 @@ const HomeScreen = ({ navigation, route }) => {
             <View>
               <View style={styles.locationRow}>
                 <AppIcon name="location" size={14} color={isDarkMode ? '#FFFFFF' : '#000000'} />
-                <Text style={[styles.locationText, { color: isDarkMode ? '#FFFFFF' : '#000000' }]}>{firstName || 'IARE'}</Text>
+                <Text style={[styles.locationText, { color: isDarkMode ? '#FFFFFF' : '#000000' }]}>
+                  {collegeName || 'clg'}
+                </Text>
                 {currentCanteenName ? (
                   <TouchableOpacity
                     onPress={() => collegeCanteens.length > 1 ? setShowCanteenPicker(true) : undefined}
@@ -1877,7 +1899,7 @@ const HomeScreen = ({ navigation, route }) => {
               top: FIXED_HEADER_HEIGHT,
               transform: [{ translateY: scrollY.interpolate({
                 inputRange: [0, bannerHeight],
-                outputRange: [bannerHeight + 4, 0],
+                outputRange: [bannerHeight + BANNER_SEARCH_GAP, 0],
                 extrapolate: 'clamp',
               }) }],
               zIndex: 50,
@@ -1939,13 +1961,14 @@ const HomeScreen = ({ navigation, route }) => {
           bounces={filteredItems.length > 0}
           overScrollMode={filteredItems.length > 0 ? 'auto' : 'never'}
           onEndReached={handleMenuEndReached}
-          onEndReachedThreshold={0.5}
-          initialNumToRender={8}
-          maxToRenderPerBatch={10}
-          windowSize={10}
+          onEndReachedThreshold={0.4}
+          initialNumToRender={10}
+          maxToRenderPerBatch={6}
+          windowSize={7}
+          removeClippedSubviews={Platform.OS === 'android'}
           ListFooterComponent={
             loadingMore && filteredItems.length > 0 ? (
-              <View style={{ paddingVertical: 24, alignItems: 'center' }}>
+              <View style={{ paddingVertical: 16, alignItems: 'center' }}>
                 <ActivityIndicator size="small" color={colors.primary} />
               </View>
             ) : null
@@ -2041,7 +2064,7 @@ const HomeScreen = ({ navigation, route }) => {
               </View>
             )
           }
-          contentContainerStyle={{ paddingBottom: 80 + insets.bottom }}
+          contentContainerStyle={{ paddingBottom: 56 + insets.bottom }}
         />
 
         {/* Price Filter Dropdown */}

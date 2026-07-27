@@ -39,6 +39,7 @@ const OrdersScreen = ({ navigation }) => {
   const [activeStatus, setActiveStatus] = useState('all');
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [reorderingOrderId, setReorderingOrderId] = useState(null);
+  const [visibleOrderCount, setVisibleOrderCount] = useState(5);
   const searchInputRef = useRef(null);
   const isFetchingRef = useRef(false);
   const pollingIntervalRef = useRef(null);
@@ -254,19 +255,38 @@ const OrdersScreen = ({ navigation }) => {
         return '#00B330'; // Dark Green
       case 'cancelled':
       case 'payment_cancelled':
-        return '#95A5A6'; // Gray
+      case 'cancelled_by_user':
+      case 'cancelled_by_admin':
+      case 'cancelled_by_system':
+      case 'cancelled_by_canteen':
+      case 'cancelled_by_vendor':
+        return '#E74C3C'; // Red
       case 'pending_payment':
         return '#F39C12';
       case 'payment_failed':
       case 'failed':
         return '#E74C3C'; // Red
-      default:
+      default: {
+        if (String(status || '').startsWith('cancelled_by')) return '#E74C3C';
         return '#F39C12'; // Default to orange for preparing
+      }
     }
   };
 
   const getStatusIcon = (status) => {
-    // Keep the same icon for all statuses, only change color
+    if (status === 'delivered' || status === 'completed') {
+      return 'checkmark-circle';
+    }
+    const s = String(status || '');
+    if (
+      s === 'cancelled' ||
+      s === 'payment_cancelled' ||
+      s.startsWith('cancelled_by') ||
+      s === 'payment_failed' ||
+      s === 'failed'
+    ) {
+      return 'close-circle';
+    }
     return 'time-outline';
   };
 
@@ -285,14 +305,27 @@ const OrdersScreen = ({ navigation }) => {
       case 'completed':
         return 'Completed';
       case 'cancelled':
+      case 'cancelled_by_user':
+      case 'cancelled_by_admin':
+      case 'cancelled_by_system':
+      case 'cancelled_by_canteen':
+      case 'cancelled_by_vendor':
         return 'Cancelled';
       case 'payment_cancelled':
         return 'Payment Cancelled';
       case 'payment_failed':
       case 'failed':
         return 'Payment Failed';
-      default:
+      default: {
+        const s = String(status || '');
+        if (s.startsWith('cancelled_by')) {
+          return s
+            .replace(/_/g, ' ')
+            .trim()
+            .replace(/\b\w/g, (c) => c.toUpperCase());
+        }
         return 'Preparing';
+      }
     }
   };
 
@@ -621,7 +654,23 @@ const OrdersScreen = ({ navigation }) => {
     const q = debouncedQuery;
     return orders.filter((order) => {
       if (order.status === 'pending_payment') return false;
-      const statusOk = activeStatus === 'all' ? true : order.status === activeStatus;
+
+      let statusOk = true;
+      if (activeStatus === 'all') {
+        statusOk = true;
+      } else if (activeStatus === 'cancelled') {
+        const s = String(order.status || '');
+        statusOk =
+          s === 'cancelled' ||
+          s === 'payment_cancelled' ||
+          s.startsWith('cancelled_by') ||
+          s === 'payment_failed' ||
+          s === 'failed';
+      } else if (activeStatus === 'delivered') {
+        statusOk = order.status === 'delivered' || order.status === 'completed';
+      } else {
+        statusOk = order.status === activeStatus;
+      }
       if (!statusOk) return false;
       if (!q) return true;
       const token = String(order.order_token || '').toLowerCase();
@@ -635,6 +684,40 @@ const OrdersScreen = ({ navigation }) => {
       );
     });
   }, [orders, debouncedQuery, activeStatus, parseOrderSummary]);
+
+  // Reset pagination when search/filter changes
+  useEffect(() => {
+    setVisibleOrderCount(5);
+  }, [debouncedQuery, activeStatus]);
+
+  const visibleOrders = useMemo(
+    () => filteredOrders.slice(0, visibleOrderCount),
+    [filteredOrders, visibleOrderCount]
+  );
+
+  const hasMoreOrders = visibleOrderCount < filteredOrders.length;
+
+  const handleSeeMoreOrders = useCallback(() => {
+    setVisibleOrderCount((count) => count + 10);
+  }, []);
+
+  const renderOrdersFooter = useCallback(() => {
+    if (!hasMoreOrders || filteredOrders.length === 0) return null;
+    return (
+      <View style={styles.seeMoreFooter}>
+        <TouchableOpacity
+          style={styles.seeMoreButton}
+          onPress={handleSeeMoreOrders}
+          activeOpacity={0.65}
+          accessibilityRole="button"
+          accessibilityLabel="See more orders"
+        >
+          <Text style={styles.seeMoreText}>See more</Text>
+          <AppIcon name="chevron-down" size={16} color="#8E8E93" />
+        </TouchableOpacity>
+      </View>
+    );
+  }, [hasMoreOrders, filteredOrders.length, handleSeeMoreOrders]);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.pageBackground }]}>
@@ -776,15 +859,16 @@ const OrdersScreen = ({ navigation }) => {
         <PageLoader compact message="Loading your orders..." style={styles.loadingContainer} />
       ) : (
         <FlatList
-          data={filteredOrders}
+          data={visibleOrders}
           renderItem={({ item }) => renderOrderItem(item)}
           keyExtractor={(item) => item.id}
           contentContainerStyle={[
             styles.listContainer,
-            filteredOrders.length === 0 && styles.listContainerEmpty,
+            visibleOrders.length === 0 && styles.listContainerEmpty,
           ]}
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={renderEmptyState}
+          ListFooterComponent={renderOrdersFooter}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -904,6 +988,23 @@ const styles = StyleSheet.create({
   },
   listContainerEmpty: {
     flexGrow: 1,
+  },
+  seeMoreFooter: {
+    paddingTop: 4,
+    paddingBottom: 8,
+    alignItems: 'center',
+  },
+  seeMoreButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+  },
+  seeMoreText: {
+    fontSize: 14,
+    color: '#8E8E93',
+    fontFamily: appTypography.regular,
+    marginBottom: 2,
   },
   orderCard: {
     backgroundColor: 'white',

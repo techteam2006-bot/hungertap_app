@@ -29,11 +29,11 @@ const TIPS = [
   },
   {
     icon: 'key-outline',
-    text: 'Forgot your password? Use “Reset my password” above—no need to create a new account.',
+    text: 'We’ll email a 6-digit verification code. Enter it on the Verify Email screen—no password needed.',
   },
   {
     icon: 'shield-checkmark-outline',
-    text: 'After signing up, check your inbox (and spam) for verification or reset codes.',
+    text: 'If the code doesn’t arrive, check spam/junk, then tap Resend Code after the timer.',
   },
   {
     icon: 'wifi-outline',

@@ -33,8 +33,28 @@ import Svg, { Path } from 'react-native-svg';
 import QRCodeService from '../lib/QRCodeService';
 import PageLoader from '../components/PageLoader';
 import LoadingSpinner from '../components/LoadingSpinner';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 const SUPPORT_EMAIL = 'support@hungertap.online';
+
+const isCancelledStatus = (status) => {
+  const s = String(status || '');
+  return (
+    s === 'cancelled' ||
+    s === 'payment_cancelled' ||
+    s.startsWith('cancelled_by')
+  );
+};
+
+const formatStepTime = (isoOrDate) => {
+  if (!isoOrDate) return '--';
+  const d = isoOrDate instanceof Date ? isoOrDate : new Date(isoOrDate);
+  if (Number.isNaN(d.getTime())) return '--';
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
+
+const timelineStorageKey = (orderId) => `order_timeline_ts_${orderId}`;
 
 /** When line prices are missing but grand total is known (e.g. delivered snapshot), split total by quantity. */
 function allocateLineTotalsFromGrandTotal(items, grandTotal) {
@@ -67,6 +87,9 @@ const OrderStatusScreen = ({ navigation, route }) => {
   const [priceLookup, setPriceLookup] = useState({});
   const [reordering, setReordering] = useState(false);
   const [initialOrderHydrated, setInitialOrderHydrated] = useState(() => Boolean(order));
+  /** Client-side step timestamps recorded as tracking advances. */
+  const [stepTimestamps, setStepTimestamps] = useState({});
+  const prevStatusRef = useRef(null);
 
   const parseOrderSummary = useCallback((summary) => {
     if (!summary) return [];
@@ -97,6 +120,76 @@ const OrderStatusScreen = ({ navigation, route }) => {
   // Resolve a single source of truth for the order id regardless of navigation path
   const resolvedOrderId = orderIdParam || idParam || order?.id;
   console.log('Resolved order ID:', resolvedOrderId, 'User ID:', user?.id);
+
+  // Load + update frontend timeline timestamps as status advances
+  useEffect(() => {
+    if (!resolvedOrderId || !currentOrder?.status) return;
+    let cancelled = false;
+
+    const syncTimestamps = async () => {
+      let stored = {};
+      try {
+        const raw = await AsyncStorage.getItem(timelineStorageKey(resolvedOrderId));
+        if (raw) stored = JSON.parse(raw) || {};
+      } catch (_) {
+        stored = {};
+      }
+      if (cancelled) return;
+
+      const status = currentOrder.status;
+      const nowIso = new Date().toISOString();
+      const next = { ...stored };
+
+      if (currentOrder.created_at && !next.placed) {
+        next.placed = currentOrder.created_at;
+      }
+
+      const stamp = (key, preferred) => {
+        if (!next[key]) next[key] = preferred || nowIso;
+      };
+
+      if (status === 'preparing' || status === 'confirmed') {
+        stamp('preparing', currentOrder.updated_at);
+      }
+      if (status === 'ready' || status === 'on_way') {
+        stamp('ready', currentOrder.updated_at);
+      }
+      if (status === 'delivered' || status === 'completed' || status === 'paid') {
+        stamp('delivered', currentOrder.delivered_at || currentOrder.updated_at);
+      }
+      if (isCancelledStatus(status) || status === 'payment_failed' || status === 'failed') {
+        stamp('cancelled', currentOrder.updated_at);
+      }
+
+      // When status newly changes while screen is open, stamp "now"
+      const prev = prevStatusRef.current;
+      if (prev && prev !== status) {
+        if (status === 'preparing' || status === 'confirmed') next.preparing = nowIso;
+        if (status === 'ready' || status === 'on_way') next.ready = nowIso;
+        if (status === 'delivered' || status === 'completed') {
+          next.delivered = currentOrder.delivered_at || nowIso;
+        }
+        if (isCancelledStatus(status) || status === 'payment_failed' || status === 'failed') {
+          next.cancelled = nowIso;
+        }
+      }
+      prevStatusRef.current = status;
+
+      setStepTimestamps(next);
+      AsyncStorage.setItem(timelineStorageKey(resolvedOrderId), JSON.stringify(next)).catch(() => {});
+    };
+
+    syncTimestamps();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    resolvedOrderId,
+    currentOrder?.status,
+    currentOrder?.created_at,
+    currentOrder?.updated_at,
+    currentOrder?.delivered_at,
+  ]);
 
   const handlePaymentSupportContact = useCallback(async () => {
     const orderRef =
@@ -636,67 +729,74 @@ const OrderStatusScreen = ({ navigation, route }) => {
 
   // Order status timeline - strictly driven by current status
   const getOrderTimeline = (status) => {
-    const now = new Date();
-    const placedTime = currentOrder?.created_at ? new Date(currentOrder.created_at) : now;
+    const placedTime = formatStepTime(stepTimestamps.placed || currentOrder?.created_at);
+    const preparingTime = formatStepTime(stepTimestamps.preparing);
+    const readyTime = formatStepTime(stepTimestamps.ready);
+    const deliveredTime = formatStepTime(
+      stepTimestamps.delivered || currentOrder?.delivered_at
+    );
+    const cancelledTime = formatStepTime(
+      stepTimestamps.cancelled || currentOrder?.updated_at
+    );
 
-    // Determine current step from status (pending removed, preparing is first step)
     const stepFromStatus = (s) => {
+      if (isCancelledStatus(s) || s === 'payment_failed' || s === 'failed') return 0;
       switch (s) {
         case 'pending_payment':
           return 1;
         case 'preparing':
-          return 2; // Order placed + preparing should both be completed
+        case 'confirmed':
+          return 2;
         case 'ready':
+        case 'on_way':
           return 3;
         case 'delivered':
         case 'completed':
         case 'paid':
           return 4;
-        case 'payment_failed':
-        case 'failed':
-        case 'cancelled':
-          return 0; // terminal — not delivered progress
         default:
-          return 2; // Default to preparing progress
+          return 2;
       }
     };
 
     const currentStepLocal = stepFromStatus(status);
 
-
-    let timeline = [];
-    
-    // For cancelled orders, show only Order Placed and Order Cancelled
-    if (status === 'cancelled') {
-      timeline = [
+    // Cancelled: Order Placed → Cancelled (red cross)
+    if (isCancelledStatus(status)) {
+      return [
         {
           id: 1,
           title: 'Order Placed',
           description: 'Your order has been received.',
-          time: placedAtDisplay,
+          time: placedTime,
           completed: true,
-          icon: 'time',
-          color: colors.success
+          failed: false,
+          color: colors.success,
         },
         {
           id: 2,
-          title: 'Order Cancelled',
-          description: 'Your order has been cancelled.',
-          time: (currentOrder?.updated_at ? new Date(currentOrder.updated_at) : now).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          title: 'Cancelled',
+          description:
+            status === 'payment_cancelled'
+              ? 'Payment was cancelled for this order.'
+              : 'Your order has been cancelled.',
+          time: cancelledTime,
           completed: true,
-          icon: 'close-circle',
-          color: colors.error
-        }
+          failed: true,
+          color: colors.error,
+        },
       ];
-    } else if (status === 'payment_failed' || status === 'failed') {
-      timeline = [
+    }
+
+    if (status === 'payment_failed' || status === 'failed') {
+      return [
         {
           id: 1,
           title: 'Order Placed',
           description: 'Your order was created but payment did not complete.',
-          time: placedAtDisplay,
+          time: placedTime,
           completed: true,
-          icon: 'time',
+          failed: false,
           color: colors.success,
         },
         {
@@ -704,21 +804,23 @@ const OrderStatusScreen = ({ navigation, route }) => {
           title: 'Payment Failed',
           description:
             'Payment was not completed. If any amount was debited, it will be refunded within a few working days.',
-          time: (currentOrder?.updated_at ? new Date(currentOrder.updated_at) : now).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          time: cancelledTime,
           completed: true,
-          icon: 'close-circle',
+          failed: true,
           color: colors.error,
         },
       ];
-    } else if (status === 'pending_payment') {
-      timeline = [
+    }
+
+    if (status === 'pending_payment') {
+      return [
         {
           id: 1,
           title: 'Order created',
           description: 'Your order is saved. Complete payment to send it to the kitchen.',
-          time: placedAtDisplay,
+          time: placedTime,
           completed: true,
-          icon: 'time',
+          failed: false,
           color: colors.success,
         },
         {
@@ -727,88 +829,51 @@ const OrderStatusScreen = ({ navigation, route }) => {
           description: 'Complete payment during checkout to send your order to the kitchen.',
           time: '--',
           completed: false,
-          icon: 'wallet-outline',
+          failed: false,
           color: colors.warning,
         },
       ];
-    // For delivered orders, show only Order Placed and Delivered
-    } else if (status === 'delivered' || status === 'completed') {
-      timeline = [
-        {
-          id: 1,
-          title: 'Order Placed',
-          description: 'Your order has been received.',
-          time: placedAtDisplay,
-          completed: true,
-          icon: 'time',
-          color: colors.success
-        },
-        {
-          id: 2,
-          title: 'Delivered',
-          description: 'Your order has been Delivered Successfully.',
-          time: currentOrder?.delivered_at ? new Date(currentOrder.delivered_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--',
-          completed: true,
-          icon: 'time',
-          color: colors.success
-        }
-      ];
-    } else {
-      // For other statuses, show full timeline
-      timeline = [
-        {
-          id: 1,
-          title: 'Order Placed',
-          description: 'Your order has been received.',
-          time: placedAtDisplay,
-          completed: true,
-          icon: 'time',
-          color: colors.success
-        },
-        {
-          id: 2,
-          title: 'Preparing',
-          description: 'Your order is preparing in canteen',
-          time: '--',
-          completed: currentStepLocal >= 2,
-          icon: 'time',
-          color: currentStepLocal >= 2 ? colors.success : colors.textTertiary
-        },
-        {
-          id: 3,
-          title: 'Ready for Pickup',
-          description: 'Your order is ready for pickup at counter',
-          time: '--',
-          completed: currentStepLocal >= 3,
-          icon: 'time',
-          color: currentStepLocal >= 3 ? colors.success : colors.textTertiary
-        },
-        {
-          id: 4,
-          title: 'Delivered',
-          description: 'Your order has been Delivered Successfully.',
-          time: '--',
-          completed: currentStepLocal >= 4,
-          icon: 'time',
-          color: currentStepLocal >= 4 ? colors.success : colors.textTertiary
-        }
-      ];
     }
-    
-    // Handle special statuses
-    if (status === 'payment_cancelled') {
-      timeline.push({
-        id: 5,
-        title: 'Payment Cancelled',
-        description: 'Payment was cancelled',
-        time: (currentOrder?.updated_at ? new Date(currentOrder.updated_at) : now).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+
+    // Full progress timeline (Preparing → Ready → Delivered)
+    return [
+      {
+        id: 1,
+        title: 'Order Placed',
+        description: 'Your order has been received.',
+        time: placedTime,
         completed: true,
-        icon: 'close-circle',
-        color: colors.error
-      });
-    }
-    
-    return timeline;
+        failed: false,
+        color: colors.success,
+      },
+      {
+        id: 2,
+        title: 'Preparing',
+        description: 'Your order is preparing in canteen',
+        time: currentStepLocal >= 2 ? preparingTime : '--',
+        completed: currentStepLocal >= 2,
+        failed: false,
+        color: currentStepLocal >= 2 ? colors.success : colors.textTertiary,
+      },
+      {
+        id: 3,
+        title: 'Ready for Pickup',
+        description: 'Your order is ready for pickup at counter',
+        time: currentStepLocal >= 3 ? readyTime : '--',
+        completed: currentStepLocal >= 3,
+        failed: false,
+        color: currentStepLocal >= 3 ? colors.success : colors.textTertiary,
+      },
+      {
+        id: 4,
+        title: 'Delivered',
+        description: 'Your order has been Delivered Successfully.',
+        time: currentStepLocal >= 4 ? deliveredTime : '--',
+        completed: currentStepLocal >= 4,
+        failed: false,
+        color: currentStepLocal >= 4 ? colors.success : colors.textTertiary,
+      },
+    ];
   };
 
 
@@ -823,6 +888,7 @@ const OrderStatusScreen = ({ navigation, route }) => {
       case 'on_way':
         return colors.info; // Blue
       case 'delivered':
+      case 'completed':
         return colors.success; // Green
       case 'paid':
         return colors.success; // Green
@@ -832,8 +898,14 @@ const OrderStatusScreen = ({ navigation, route }) => {
       case 'failed':
         return colors.error; // Red
       case 'cancelled':
+      case 'cancelled_by_user':
+      case 'cancelled_by_admin':
+      case 'cancelled_by_system':
+      case 'cancelled_by_canteen':
+      case 'cancelled_by_vendor':
         return colors.error; // Red
       default:
+        if (String(status || '').startsWith('cancelled_by')) return colors.error;
         return colors.warning; // Default to preparing color
     }
   };
@@ -843,24 +915,36 @@ const OrderStatusScreen = ({ navigation, route }) => {
       case 'pending_payment':
         return 'Awaiting payment';
       case 'preparing':
-        return 'Preparing'; // First step (pending removed)
+        return 'Preparing';
       case 'ready':
-        return 'Ready for Pickup';
+        return 'Ready for pickup';
       case 'on_way':
-        return 'On the Way';
+        return 'On the way';
       case 'delivered':
         return 'Delivered';
+      case 'completed':
+        return 'Completed';
       case 'paid':
-        return 'Payment Successful';
+        return 'Paid';
       case 'payment_cancelled':
-        return 'Payment Cancelled';
+        return 'Payment cancelled';
       case 'payment_failed':
       case 'failed':
-        return 'Payment Failed';
+        return 'Payment failed';
       case 'cancelled':
+      case 'cancelled_by_user':
+      case 'cancelled_by_admin':
+      case 'cancelled_by_system':
+      case 'cancelled_by_canteen':
         return 'Cancelled';
-      default:
-        return status || 'Preparing'; // Default to preparing
+      default: {
+        if (!status) return 'Preparing';
+        // Humanize unknown snake_case statuses (e.g. cancelled_by_xyz)
+        return String(status)
+          .replace(/_/g, ' ')
+          .trim()
+          .replace(/\b\w/g, (c) => c.toUpperCase());
+      }
     }
   };
 
@@ -918,7 +1002,9 @@ const OrderStatusScreen = ({ navigation, route }) => {
   const isPaymentFailedLike =
     currentOrder.status === 'payment_failed' || currentOrder.status === 'failed';
   const isCancelledLike =
-    currentOrder.status === 'cancelled' || currentOrder.status === 'payment_cancelled';
+    currentOrder.status === 'cancelled' ||
+    currentOrder.status === 'payment_cancelled' ||
+    String(currentOrder.status || '').startsWith('cancelled_by');
   const isReorderEligible = isCancelledLike || isPaymentFailedLike || isDeliveredLike;
   const persistedTotal = parseCurrencyValue(currentOrder?.total_amount);
 
@@ -1093,7 +1179,7 @@ const OrderStatusScreen = ({ navigation, route }) => {
           >
           <View style={styles.billHeaderMainRow}>
             <View style={styles.billHeaderLeft}>
-              <AppIcon name="receipt" size={26} color={colors.text} />
+              <AppIcon name="receipt" size={26} color="#000000" />
               <Text style={[styles.billTitle, { color: colors.text }]}>Total Bill</Text>
             </View>
             <Text style={[styles.billAmount, { color: colors.accentGreen }]}>₹{totalAmountDisplay}</Text>
@@ -1139,7 +1225,13 @@ const OrderStatusScreen = ({ navigation, route }) => {
                     return (
                       <View key={index} style={styles.tableRow}>
                         <View style={styles.tableColumnItem}>
-                          <Text style={[styles.tableCellItem, { color: colors.text }]}>{name}</Text>
+                          <Text
+                            style={[styles.tableCellItem, { color: colors.text }]}
+                            textBreakStrategy="highQuality"
+                            android_hyphenationFrequency="none"
+                          >
+                            {name}
+                          </Text>
                         </View>
                         <View style={styles.tableColumnQty}>
                           <Text style={[styles.tableCellQty, { color: colors.text }]}>{qty}</Text>
@@ -1148,7 +1240,12 @@ const OrderStatusScreen = ({ navigation, route }) => {
                           <Text style={[styles.tableCellPrice, { color: colors.accentGreen }]}>{priceStr}</Text>
                         </View>
                         <View style={styles.tableColumnStatus}>
-                          <Text style={[styles.tableCellStatus, { color: colors.textSecondary }]} numberOfLines={1}>{statusLabel}</Text>
+                          <Text
+                            style={[styles.tableCellStatus, { color: colors.text }]}
+                            numberOfLines={2}
+                          >
+                            {statusLabel}
+                          </Text>
                         </View>
                       </View>
                     );
@@ -1194,30 +1291,57 @@ const OrderStatusScreen = ({ navigation, route }) => {
             <React.Fragment key={step.id}>
             <View style={styles.timelineItem}>
               <View style={styles.timelineLeft}>
-                <View style={[
-                  styles.timelineCircle,
-                  { 
-                    backgroundColor: step.completed ? (step.color || colors.success) : colors.textTertiary,
-                    borderColor: step.completed
-                      ? (isDarkMode ? 'rgba(16, 185, 129, 0.45)' : '#D4FFDA')
-                      : colors.border
-                  }
-                ]}>
-                  <AppIcon 
-                    name={
-                      step.id === 1 ? 'checkmark-circle' :
-                      step.id === 2 ? 'document-text' :
-                      step.id === 3 ? 'bag' : 'person'
-                    } 
-                    size={15} 
-                    color={step.completed ? '#FFFFFF' : colors.textSecondary} 
-                  />
-                </View>
+                {(() => {
+                  const accent = step.failed
+                    ? colors.error
+                    : step.completed
+                      ? colors.success
+                      : colors.textTertiary;
+                  const ring = step.failed
+                    ? isDarkMode
+                      ? 'rgba(239, 68, 68, 0.28)'
+                      : '#FFD6D6'
+                    : step.completed
+                      ? isDarkMode
+                        ? 'rgba(16, 185, 129, 0.28)'
+                        : '#D4FFDA'
+                      : isDarkMode
+                        ? 'rgba(255, 255, 255, 0.12)'
+                        : '#E8E8E8';
+                  return (
+                    <View style={[styles.timelineOuter, { backgroundColor: ring }]}>
+                      <View style={[styles.timelineMiddle, { backgroundColor: accent }]}>
+                        <View
+                          style={[
+                            styles.timelineInner,
+                            { backgroundColor: isDarkMode ? colors.elevatedSurface : '#FFFFFF' },
+                          ]}
+                        >
+                          {step.failed ? (
+                            <AppIcon name="close" size={11} color={accent} />
+                          ) : step.completed ? (
+                            <AppIcon name="checkmark" size={11} color={accent} />
+                          ) : (
+                            <View style={[styles.timelinePendingCore, { backgroundColor: accent }]} />
+                          )}
+                        </View>
+                      </View>
+                    </View>
+                  );
+                })()}
                 {index < timeline.length - 1 && (
-                  <View style={[
-                    styles.timelineLine,
-                    { backgroundColor: step.completed ? colors.success : colors.textTertiary }
-                  ]} />
+                  <View
+                    style={[
+                      styles.timelineLine,
+                      {
+                        backgroundColor: step.failed
+                          ? colors.error
+                          : step.completed
+                            ? colors.success
+                            : colors.textTertiary,
+                      },
+                    ]}
+                  />
                 )}
               </View>
               
@@ -1514,6 +1638,32 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 20,
   },
+  timelineOuter: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  timelineMiddle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  timelineInner: {
+    width: 14,
+    height: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  timelinePendingCore: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
   timelineCircle: {
     width: 49,
     height: 49,
@@ -1586,10 +1736,20 @@ const styles = StyleSheet.create({
     letterSpacing: 0.4,
     textAlign: 'right',
   },
-  tableColumnItem: { flex: 1, minWidth: 0, paddingRight: 8 },
-  tableColumnQty: { width: 40, alignItems: 'center', flexShrink: 0 },
-  tableColumnPrice: { width: 82, alignItems: 'center', flexShrink: 0 },
-  tableColumnStatus: { width: 76, alignItems: 'flex-end', flexShrink: 0 },
+  tableColumnItem: {
+    flex: 1,
+    minWidth: 0,
+    paddingRight: 8,
+    flexShrink: 1,
+  },
+  tableColumnQty: { width: 36, alignItems: 'center', flexShrink: 0 },
+  tableColumnPrice: { width: 70, alignItems: 'center', flexShrink: 0 },
+  tableColumnStatus: {
+    width: 72,
+    flexShrink: 0,
+    alignItems: 'flex-end',
+    paddingLeft: 4,
+  },
   tableDivider: {
     height: 1,
     backgroundColor: '#E3E3E3',
@@ -1606,13 +1766,13 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#333333',
     width: '100%',
+    flexShrink: 1,
   },
   tableCellQty: {
     fontSize: 14,
     fontWeight: '500',
     color: '#333333',
     textAlign: 'center',
-    marginTop: 1,
   },
   tableCellPrice: {
     fontSize: 14,
@@ -1620,16 +1780,14 @@ const styles = StyleSheet.create({
     color: '#00B330',
     textAlign: 'center',
     width: '100%',
-    marginTop: 1,
   },
   tableCellStatus: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
-    color: '#646464',
-    textTransform: 'capitalize',
-    marginTop: 2,
+    color: '#000000',
     textAlign: 'right',
-    flexShrink: 1,
+    lineHeight: 15,
+    width: '100%',
   },
   priceBreakdownItem: {
     flexDirection: 'row',

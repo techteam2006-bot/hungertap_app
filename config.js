@@ -33,6 +33,15 @@ const MENU_HTTP_URL = (process.env.EXPO_PUBLIC_MENU_HTTP_URL || `${ORDER_API_BAS
   ''
 );
 
+/**
+ * Cached menu Edge Function (preferred over direct `items` reads).
+ * Defaults to `{SUPABASE_URL}/functions/v1/get-canteen-menu`.
+ */
+const GET_CANTEEN_MENU_URL = (
+  process.env.EXPO_PUBLIC_GET_CANTEEN_MENU_URL ||
+  (SUPABASE_URL ? `${String(SUPABASE_URL).replace(/\/$/, '')}/functions/v1/get-canteen-menu` : '')
+).replace(/\/$/, '');
+
 /** Paid checkout: Edge Function creates order + Easebuzz session (webhook updates DB). */
 const CREATE_ORDER_V2_URL_RAW = (
   process.env.EXPO_PUBLIC_CREATE_ORDER_V2_URL || ''
@@ -62,6 +71,7 @@ export const CONFIG = {
   ORDER_API_BASE,
   ORDER_HTTP_ENABLED,
   MENU_HTTP_URL,
+  GET_CANTEEN_MENU_URL,
 
   /** POST with user JWT — returns final Easebuzz checkout payment_url (+ order_id, payment_id). */
   CREATE_ORDER_V2_URL,
@@ -77,7 +87,7 @@ export const CONFIG = {
     `exp://${DEV_IP}:${DEEP_LINK_PORT}/--/signup`,
   ],
   
-  // Magic Link Redirect URL
+  // Magic Link Redirect URL (legacy deep link; primary auth is email OTP)
   MAGIC_LINK_REDIRECT: `exp://${DEV_IP}/--/login`,
 };
 

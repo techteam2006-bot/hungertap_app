@@ -83,6 +83,15 @@ export default function AppIcon({ name, size = 24, color = 'black', style }) {
         <Path d="M160 288h249.44a8 8 0 0 0 7.85-6.43l28.8-144a8 8 0 0 0-7.85-9.57H128" fill="none" stroke={color} strokeWidth={32} strokeLinecap="round" strokeLinejoin="round" />
         </Svg>
       );
+    case 'cash-outline':
+      return (
+        <Svg viewBox="0 0 512 512" width={size} height={size} style={style}>
+        <Rect rx={16} ry={16} width={448} height={256} x={32} y={80} fill="none" stroke={color} strokeWidth={32} strokeLinejoin="round" />
+        <Path d="M64 384h384M96 432h320" fill="none" stroke={color} strokeWidth={32} strokeLinecap="round" strokeLinejoin="round" />
+        <Circle cx={256} cy={208} r={80} fill="none" stroke={color} strokeWidth={32} strokeLinecap="round" strokeLinejoin="round" />
+        <Path d="M480 160a80 80 0 0 1-80-80M32 160a80 80 0 0 0 80-80M480 256a80 80 0 0 0-80 80M32 256a80 80 0 0 1 80 80" fill="none" stroke={color} strokeWidth={32} strokeLinecap="round" strokeLinejoin="round" />
+        </Svg>
+      );
     case 'chatbubble-ellipses-outline':
       return (
         <Svg viewBox="0 0 512 512" width={size} height={size} style={style}>
@@ -102,7 +111,7 @@ export default function AppIcon({ name, size = 24, color = 'black', style }) {
     case 'checkmark':
       return (
         <Svg viewBox="0 0 512 512" width={size} height={size} style={style}>
-        <Path d="M416 128 192 384l-96-96" fill="none" stroke={color} strokeWidth={32} strokeLinecap="round" strokeLinejoin="round" />
+        <Path d="M416 128 192 384l-96-96" fill="none" stroke={color} strokeWidth={48} strokeLinecap="round" strokeLinejoin="round" />
         </Svg>
       );
     case 'checkmark-circle':
@@ -330,6 +339,18 @@ export default function AppIcon({ name, size = 24, color = 'black', style }) {
         <Svg viewBox="0 0 512 512" width={size} height={size} style={style}>
         <Path d="M320 146s24.36-12-64-12a160 160 0 1 0 160 160" fill="none" stroke={color} strokeWidth={32} strokeLinecap="round" />
         <Path d="m256 58 80 80-80 80" fill="none" stroke={color} strokeWidth={32} strokeLinecap="round" strokeLinejoin="round" />
+        </Svg>
+      );
+    case 'remove':
+      return (
+        <Svg viewBox="0 0 512 512" width={size} height={size} style={style}>
+        <Path d="M400 256H112" fill="none" stroke={color} strokeWidth={32} strokeLinecap="round" strokeLinejoin="round" />
+        </Svg>
+      );
+    case 'remove-outline':
+      return (
+        <Svg viewBox="0 0 512 512" width={size} height={size} style={style}>
+        <Path d="M400 256H112" fill="none" stroke={color} strokeWidth={32} strokeLinecap="round" strokeLinejoin="round" />
         </Svg>
       );
     case 'restaurant':
