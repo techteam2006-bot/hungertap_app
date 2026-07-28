@@ -238,12 +238,12 @@ const OrderConfirmationScreen = ({ navigation, route }) => {
         {
           icon: 'notifications-outline',
           title: 'Stay tuned',
-          subtitle: "We'll let you know when it's ready.",
+          subtitle: "We'll notify you when items are ready — pickup QR appears when the full order is ready.",
         },
         {
           icon: 'walk-outline',
           title: 'Collect',
-          subtitle: 'Pick it up when your order is marked ready.',
+          subtitle: 'Pick it up when your order is marked Ready.',
         },
       ];
 

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "34347963426",
+    "project_id": "hungertap-b1ee9",
+    "storage_bucket": "hungertap-b1ee9.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:34347963426:android:03d904b7c7fbc143ca667b",
+        "android_client_info": {
+          "package_name": "com.hungertap.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAenTPbJLB-f8lmeAL219SVgpVwEvsom3o"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

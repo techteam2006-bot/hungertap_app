@@ -22,6 +22,7 @@ import {
 } from '../lib/paymentDeepLink';
 import { isValidOrderUuid } from '../lib/checkoutSecurity';
 import { resetNavigationToCart } from '../lib/navigateHome';
+import { isOrderPlacedSuccessStatus } from '../lib/orderStatus';
 
 const POLL_MS = 2500;
 const STUCK_MS = 180000;
@@ -115,7 +116,7 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
   const applyOrderRow = useCallback(
     (status) => {
       if (!status || finalizedRef.current) return;
-      if (status === 'preparing' || status === 'ready' || status === 'delivered' || status === 'completed') {
+      if (isOrderPlacedSuccessStatus(status)) {
         finalizeSuccess();
         return;
       }

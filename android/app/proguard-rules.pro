@@ -18,6 +18,11 @@
 -keep class com.facebook.hermes.unicode.** { *; }
 -keep class com.facebook.jni.** { *; }
 
+# Sentry — keep native crash / ANR / NDK hooks when R8 minify is on
+-keepattributes SourceFile,LineNumberTable
+-keep class io.sentry.** { *; }
+-dontwarn io.sentry.**
+
 # Expo modules
 -keep class expo.modules.** { *; }
 

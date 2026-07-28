@@ -1,8 +1,10 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { Sentry } from '../lib/sentry';
 
 /**
  * Catches React render/lifecycle errors in children so the shell can recover without a hard OS kill.
+ * Reports to Sentry without swallowing the error context.
  */
 
 // ✅ crash prevention added
@@ -23,6 +25,18 @@ export default class AppErrorBoundary extends React.Component {
   componentDidCatch(error, info) {
     // ✅ error handled
     console.error('[AppErrorBoundary]', error?.message || error, info?.componentStack || '');
+    try {
+      if (global.__HUNGERTAP_SENTRY_INIT__) {
+        Sentry.captureException(error, {
+          contexts: {
+            react: { componentStack: info?.componentStack },
+          },
+          tags: { handler: 'AppErrorBoundary' },
+        });
+      }
+    } catch (_) {
+      // ignore reporting failures
+    }
   }
 
   handleRetry = () => {

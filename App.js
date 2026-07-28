@@ -77,6 +77,7 @@ import { supabase } from './lib/supabase';
 import { configureImageCache } from './lib/ImageCache';
 import AppErrorBoundary from './components/AppErrorBoundary';
 import PageLoader from './components/PageLoader';
+import { getOrderStatusNotificationBody, isNotifiableOrderStatus } from './lib/orderStatus';
 
 installGlobalErrorSafety();
 
@@ -325,11 +326,17 @@ function AppNavigator() {
       if (!user?.id) return;
       try {
         const raw = await AsyncStorage.getItem('notificationsEnabled');
-        const enabled = raw ? JSON.parse(raw) === true : false;
+        // Fresh installs: default ON so native FCM token is registered to user_tokens.fcm_token
+        const enabled = raw !== null ? JSON.parse(raw) === true : true;
         if (!enabled) return;
+        if (raw === null) {
+          await AsyncStorage.setItem('notificationsEnabled', JSON.stringify(true));
+        }
         const { token } = await registerForPushNotificationsAsync(user.id);
         if (!token) {
           console.log('⚠️ Push registration returned no token (permission or device)');
+        } else {
+          console.log('✅ FCM token saved to user_tokens.fcm_token');
         }
       } catch (error) {
         console.log('⚠️ Push token registration skipped:', error?.message || error);
@@ -381,40 +388,57 @@ function AppNavigator() {
             const oldOrder = payload?.old ?? null;
             if (!newOrder || !oldOrder) return;
 
-            // Only notify for status changes to 'ready' or 'delivered'
             if (
-              newOrder.status !== oldOrder.status &&
-              (newOrder.status === 'ready' || newOrder.status === 'delivered')
+              newOrder.status === oldOrder.status ||
+              !isNotifiableOrderStatus(newOrder.status)
             ) {
-              if (!(await areUserNotificationsEnabled())) {
-                return;
-              }
-
-              console.log('🔔 Sending local notification for status:', newOrder.status);
-
-              const orderToken = newOrder.order_token;
-              const title = orderToken ? `📦 Order #${orderToken}` : '📦 Your order';
-
-              // Show local notification (show order_token like the counter slip, not UUID)
-              await Notifications.scheduleNotificationAsync({
-                content: {
-                  title,
-                  body:
-                    newOrder.status === 'ready'
-                      ? 'Your order is ready for pickup!'
-                      : 'Your order has been delivered!',
-                  data: {
-                    orderId: newOrder.id,
-                    order_token: orderToken,
-                    status: newOrder.status,
-                    type: 'order_status',
-                  },
-                  sound: true,
-                  ...(Platform.OS === 'android' ? { channelId: 'orders' } : {}),
-                },
-                trigger: null,
-              });
+              return;
             }
+
+            if (!(await areUserNotificationsEnabled())) {
+              return;
+            }
+
+            console.log('🔔 Sending local notification for status:', newOrder.status);
+
+            let itemSummary = '';
+            try {
+              const { data: lines } = await supabase
+                .from('order_items')
+                .select('quantity, items ( name )')
+                .eq('order_id', newOrder.id);
+              if (Array.isArray(lines) && lines.length) {
+                itemSummary = lines
+                  .map((row) => {
+                    const name = row?.items?.name || 'Item';
+                    const qty = Number(row?.quantity) || 1;
+                    return qty > 1 ? `${name} (x${qty})` : name;
+                  })
+                  .filter(Boolean)
+                  .join(', ');
+              }
+            } catch (itemErr) {
+              console.log('Order item names for notification:', itemErr?.message || itemErr);
+            }
+
+            const orderToken = newOrder.order_token;
+            const title = orderToken ? `📦 Order #${orderToken}` : '📦 Your order';
+
+            await Notifications.scheduleNotificationAsync({
+              content: {
+                title,
+                body: getOrderStatusNotificationBody(newOrder.status, itemSummary),
+                data: {
+                  orderId: newOrder.id,
+                  order_token: orderToken,
+                  status: newOrder.status,
+                  type: 'order_status',
+                },
+                sound: true,
+                ...(Platform.OS === 'android' ? { channelId: 'orders' } : {}),
+              },
+              trigger: null,
+            });
           } catch (e) {
             console.error('Order status realtime notification:', e?.message || e);
           }
@@ -504,6 +528,11 @@ export default function App() {
   const [fontsLoaded, setFontsLoaded] = useState(false);
 
   useEffect(() => {
+    // D) JavaScript fatal after React has mounted (temporary probe)
+    if (process.env.EXPO_PUBLIC_SENTRY_CRASH_TEST === 'js-fatal') {
+      throw new Error('[SentryCrashTest] D: JavaScript fatal exception after React mount');
+    }
+
     const loadAppFonts = async () => {
       try {
         await loadFonts();

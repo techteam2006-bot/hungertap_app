@@ -25,6 +25,18 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { appTypography } from '../lib/darkThemeConfig';
 import PageLoader from '../components/PageLoader';
 import LoadingSpinner from '../components/LoadingSpinner';
+import {
+  ORDER_STATUS_FILTERS,
+  getOrderStatusColor,
+  getOrderStatusIcon,
+  getOrderStatusLabel,
+  getOrderStatusProgress,
+  getOrderActionButtonText,
+  isDeliveredLike,
+  isReorderEligibleStatus,
+  orderMatchesStatusFilter,
+} from '../lib/orderStatus';
+
 const OrdersScreen = ({ navigation }) => {
   const { colors, isDarkMode } = useTheme();
   const insets = useSafeAreaInsets();
@@ -79,8 +91,6 @@ const OrdersScreen = ({ navigation }) => {
         console.log('✅ Orders fetched successfully:', ordersData?.length || 0);
         const lineName = (oi) => String(oi?.item_name || oi?.items?.name || 'Item').trim();
 
-        const deliveredIdsNeedingSnapshot = [];
-
         const mapped = (ordersData || []).map((order) => {
           const rows = pickLineRowsFromOrderRow(order);
           const counts = {};
@@ -98,25 +108,13 @@ const OrdersScreen = ({ navigation }) => {
             order.item_count ||
             rows.reduce((sum, oi) => sum + (Number(oi?.quantity ?? 1) || 1), 0);
 
-          const isDeliveredLike =
-            order.status === 'delivered' || order.status === 'completed';
-
           const persistedItemName =
             order.item_name != null && String(order.item_name).trim() !== ''
               ? String(order.item_name).trim()
               : null;
 
-          let total_amount = resolveOrderHeaderTotalFromRows(order, rows);
-          let item_name = persistedItemName || itemSummaryFromRows || null;
-
-          if (isDeliveredLike) {
-            if (
-              !(Number.isFinite(total_amount) && total_amount > 0) ||
-              !item_name
-            ) {
-              deliveredIdsNeedingSnapshot.push(order.id);
-            }
-          }
+          const total_amount = resolveOrderHeaderTotalFromRows(order, rows);
+          const item_name = persistedItemName || itemSummaryFromRows || null;
 
           return {
             ...order,
@@ -127,37 +125,7 @@ const OrdersScreen = ({ navigation }) => {
           };
         });
 
-        let merged = mapped;
-        if (deliveredIdsNeedingSnapshot.length > 0) {
-          try {
-            const { data: archRows, error: archErr } = await supabase
-              .from('archived_orders')
-              .select('order_id, total_amount, item_name')
-              .in('order_id', deliveredIdsNeedingSnapshot);
-            if (!archErr && Array.isArray(archRows) && archRows.length > 0) {
-              const byId = Object.fromEntries(archRows.map((r) => [r.order_id, r]));
-              merged = mapped.map((o) => {
-                const ar = byId[o.id];
-                if (!ar) return o;
-                const isDel = o.status === 'delivered' || o.status === 'completed';
-                if (!isDel) return o;
-                let next = { ...o };
-                const at = ar.total_amount != null ? Number(ar.total_amount) : NaN;
-                if (Number.isFinite(at) && at > 0 && !(Number.isFinite(o.total_amount) && o.total_amount > 0)) {
-                  next = { ...next, total_amount: Number(at.toFixed(2)) };
-                }
-                if (ar.item_name != null && String(ar.item_name).trim() !== '' && !o.item_name) {
-                  next = { ...next, item_name: String(ar.item_name).trim() };
-                }
-                return next;
-              });
-            }
-          } catch (_) {
-            /* archived_orders may not exist */
-          }
-        }
-
-        setOrders(merged);
+        setOrders(mapped);
       }
     } catch (error) {
       console.error('❌ Error fetching orders:', error);
@@ -193,6 +161,16 @@ const OrdersScreen = ({ navigation }) => {
         filter: `placed_by=eq.${user.id}`,
       }, (payload) => {
         console.log('📦 Order updated via real-time:', payload);
+        fetchOrders({ silent: true });
+      })
+      .on('postgres_changes', {
+        // Canteen close deletes live rows — refetch pulls archieved_* / failed_* history
+        event: 'DELETE',
+        schema: 'public',
+        table: 'orders',
+        filter: `placed_by=eq.${user.id}`,
+      }, (payload) => {
+        console.log('📦 Order removed from live (likely canteen close):', payload);
         fetchOrders({ silent: true });
       })
       .subscribe();
@@ -242,129 +220,11 @@ const OrdersScreen = ({ navigation }) => {
     return () => clearTimeout(t);
   }, [searchQuery]);
 
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'preparing':
-        return '#F39C12'; // Orange
-      case 'confirmed':
-        return '#4A90E2'; // Blue
-      case 'ready':
-        return '#4A90E2'; // Blue
-      case 'delivered':
-      case 'completed':
-        return '#00B330'; // Dark Green
-      case 'cancelled':
-      case 'payment_cancelled':
-      case 'cancelled_by_user':
-      case 'cancelled_by_admin':
-      case 'cancelled_by_system':
-      case 'cancelled_by_canteen':
-      case 'cancelled_by_vendor':
-        return '#E74C3C'; // Red
-      case 'pending_payment':
-        return '#F39C12';
-      case 'payment_failed':
-      case 'failed':
-        return '#E74C3C'; // Red
-      default: {
-        if (String(status || '').startsWith('cancelled_by')) return '#E74C3C';
-        return '#F39C12'; // Default to orange for preparing
-      }
-    }
-  };
-
-  const getStatusIcon = (status) => {
-    if (status === 'delivered' || status === 'completed') {
-      return 'checkmark-circle';
-    }
-    const s = String(status || '');
-    if (
-      s === 'cancelled' ||
-      s === 'payment_cancelled' ||
-      s.startsWith('cancelled_by') ||
-      s === 'payment_failed' ||
-      s === 'failed'
-    ) {
-      return 'close-circle';
-    }
-    return 'time-outline';
-  };
-
-  const getStatusText = (status) => {
-    switch (status) {
-      case 'pending_payment':
-        return 'Awaiting payment';
-      case 'preparing':
-        return 'Preparing';
-      case 'confirmed':
-        return 'Confirmed';
-      case 'ready':
-        return 'Ready to Pickup';
-      case 'delivered':
-        return 'Delivered';
-      case 'completed':
-        return 'Completed';
-      case 'cancelled':
-      case 'cancelled_by_user':
-      case 'cancelled_by_admin':
-      case 'cancelled_by_system':
-      case 'cancelled_by_canteen':
-      case 'cancelled_by_vendor':
-        return 'Cancelled';
-      case 'payment_cancelled':
-        return 'Payment Cancelled';
-      case 'payment_failed':
-      case 'failed':
-        return 'Payment Failed';
-      default: {
-        const s = String(status || '');
-        if (s.startsWith('cancelled_by')) {
-          return s
-            .replace(/_/g, ' ')
-            .trim()
-            .replace(/\b\w/g, (c) => c.toUpperCase());
-        }
-        return 'Preparing';
-      }
-    }
-  };
-
-  const getActionButtonText = (status) => {
-    switch (status) {
-      case 'confirmed':
-      case 'preparing':
-      case 'ready':
-        return 'Track Status';
-      case 'delivered':
-      case 'completed':
-        return 'Re Order';
-      case 'cancelled':
-      case 'payment_cancelled':
-      case 'payment_failed':
-      case 'failed':
-        return 'Order Again';
-      default:
-        return 'Track Status';
-    }
-  };
-
-  const getStatusProgress = (status) => {
-    switch (status) {
-      case 'preparing':
-        return 25; // Start at 25% (pending removed, preparing is first step)
-      case 'confirmed':
-        return 50;
-      case 'ready':
-        return 85;
-      case 'delivered':
-      case 'completed':
-        return 100;
-      case 'cancelled':
-        return 0;
-      default:
-        return 25; // Default to preparing progress
-    }
-  };
+  const getStatusColor = (status) => getOrderStatusColor(status, colors);
+  const getStatusIcon = (status) => getOrderStatusIcon(status);
+  const getStatusText = (status) => getOrderStatusLabel(status);
+  const getActionButtonText = (status) => getOrderActionButtonText(status);
+  const getStatusProgress = (status) => getOrderStatusProgress(status);
 
   const formatDate = (dateString) => {
     const date = new Date(dateString);
@@ -502,8 +362,9 @@ const OrdersScreen = ({ navigation }) => {
       ? summaryItems.map(item => `${item.name} x${item.quantity}`).join(', ')
       : 'Items unavailable';
     const itemImage = 'https://imgs.search.brave.com/H0EimZaFKTJOiXJSOVv8oSPdubhwLF8M2SSwS__EhPM/rs:fit:860:0:0:0/g:ce/aHR0cHM6Ly90NC5m/dGNkbi5uZXQvanBn/LzA5LzE1LzIyLzk5/LzM2MF9GXzkxNTIy/OTk0M18yNnlGb0FJ/ZEVsUjVRMWNmNXF1/WkswNGp6RldNY2Jy/OS5qcGc';
-    const isFinalStatus = order.status === 'delivered' || order.status === 'completed';
-    const canReorder = ['cancelled', 'payment_cancelled', 'payment_failed', 'failed', 'delivered', 'completed'].includes(order.status);
+    const isFinalStatus =
+      isDeliveredLike(order.status) || order.status === 'pickup_failed';
+    const canReorder = isReorderEligibleStatus(order.status);
     const canteenName = order?.canteens?.name || 'HungerTap, Hyderabad';
 
     const handleViewOrder = () => {
@@ -639,39 +500,14 @@ const OrdersScreen = ({ navigation }) => {
     </View>
   );
 
-  const statusFilters = useMemo(
-    () => [
-      { id: 'all', label: 'All' },
-      { id: 'preparing', label: 'Preparing' },
-      { id: 'ready', label: 'Ready' },
-      { id: 'delivered', label: 'Delivered' },
-      { id: 'cancelled', label: 'Cancelled' },
-    ],
-    []
-  );
+  const statusFilters = useMemo(() => ORDER_STATUS_FILTERS, []);
 
   const filteredOrders = useMemo(() => {
     const q = debouncedQuery;
     return orders.filter((order) => {
       if (order.status === 'pending_payment') return false;
 
-      let statusOk = true;
-      if (activeStatus === 'all') {
-        statusOk = true;
-      } else if (activeStatus === 'cancelled') {
-        const s = String(order.status || '');
-        statusOk =
-          s === 'cancelled' ||
-          s === 'payment_cancelled' ||
-          s.startsWith('cancelled_by') ||
-          s === 'payment_failed' ||
-          s === 'failed';
-      } else if (activeStatus === 'delivered') {
-        statusOk = order.status === 'delivered' || order.status === 'completed';
-      } else {
-        statusOk = order.status === activeStatus;
-      }
-      if (!statusOk) return false;
+      if (!orderMatchesStatusFilter(order.status, activeStatus)) return false;
       if (!q) return true;
       const token = String(order.order_token || '').toLowerCase();
       const itemsText = parseOrderSummary(order.item_name)
@@ -680,7 +516,8 @@ const OrdersScreen = ({ navigation }) => {
       return (
         token.includes(q) ||
         itemsText.includes(q) ||
-        String(order.status || '').toLowerCase().includes(q)
+        String(order.status || '').toLowerCase().includes(q) ||
+        getOrderStatusLabel(order.status).toLowerCase().includes(q)
       );
     });
   }, [orders, debouncedQuery, activeStatus, parseOrderSummary]);

@@ -34,18 +34,21 @@ import QRCodeService from '../lib/QRCodeService';
 import PageLoader from '../components/PageLoader';
 import LoadingSpinner from '../components/LoadingSpinner';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  getOrderStatusColor,
+  getOrderStatusLabel,
+  getOrderTimelineStep,
+  isCancelledLike,
+  isDeliveredLike,
+  isPaymentFailedLike,
+  isPartiallyReady,
+  isPickupFailed,
+  isReorderEligibleStatus,
+  canShowPickupQr,
+} from '../lib/orderStatus';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 const SUPPORT_EMAIL = 'support@hungertap.online';
-
-const isCancelledStatus = (status) => {
-  const s = String(status || '');
-  return (
-    s === 'cancelled' ||
-    s === 'payment_cancelled' ||
-    s.startsWith('cancelled_by')
-  );
-};
 
 const formatStepTime = (isoOrDate) => {
   if (!isoOrDate) return '--';
@@ -148,16 +151,24 @@ const OrderStatusScreen = ({ navigation, route }) => {
         if (!next[key]) next[key] = preferred || nowIso;
       };
 
-      if (status === 'preparing' || status === 'confirmed') {
+      if (status === 'preparing' || status === 'confirmed' || status === 'partially_ready') {
         stamp('preparing', currentOrder.updated_at);
+      }
+      if (status === 'partially_ready') {
+        stamp('partially_ready', currentOrder.updated_at);
       }
       if (status === 'ready' || status === 'on_way') {
         stamp('ready', currentOrder.updated_at);
+        stamp('partially_ready', currentOrder.updated_at);
+      }
+      if (status === 'pickup_failed') {
+        stamp('ready', currentOrder.updated_at);
+        stamp('pickup_failed', currentOrder.updated_at);
       }
       if (status === 'delivered' || status === 'completed' || status === 'paid') {
         stamp('delivered', currentOrder.delivered_at || currentOrder.updated_at);
       }
-      if (isCancelledStatus(status) || status === 'payment_failed' || status === 'failed') {
+      if (isCancelledLike(status) || isPaymentFailedLike(status)) {
         stamp('cancelled', currentOrder.updated_at);
       }
 
@@ -165,11 +176,19 @@ const OrderStatusScreen = ({ navigation, route }) => {
       const prev = prevStatusRef.current;
       if (prev && prev !== status) {
         if (status === 'preparing' || status === 'confirmed') next.preparing = nowIso;
+        if (status === 'partially_ready') {
+          next.preparing = next.preparing || nowIso;
+          next.partially_ready = nowIso;
+        }
         if (status === 'ready' || status === 'on_way') next.ready = nowIso;
+        if (status === 'pickup_failed') {
+          next.ready = next.ready || nowIso;
+          next.pickup_failed = nowIso;
+        }
         if (status === 'delivered' || status === 'completed') {
           next.delivered = currentOrder.delivered_at || nowIso;
         }
-        if (isCancelledStatus(status) || status === 'payment_failed' || status === 'failed') {
+        if (isCancelledLike(status) || isPaymentFailedLike(status)) {
           next.cancelled = nowIso;
         }
       }
@@ -288,7 +307,7 @@ const OrderStatusScreen = ({ navigation, route }) => {
           .map(([name, qty]) => `${name} (${qty})`)
           .join(', ');
 
-        const isDeliveredLike =
+        const deliveredLike =
           data.status === 'delivered' || data.status === 'completed';
 
         const snapshotName =
@@ -298,27 +317,20 @@ const OrderStatusScreen = ({ navigation, route }) => {
         let item_name = snapshotName || itemSummaryFromRows || null;
         let total_amount = resolveOrderHeaderTotalFromRows(data, orderItemsRows);
 
-        const needsArchiveSnapshot =
-          isDeliveredLike &&
-          (!item_name || !(Number.isFinite(total_amount) && total_amount > 0));
-        if (needsArchiveSnapshot) {
-          try {
-            const { data: arc, error: arcErr } = await supabase
-              .from('archived_orders')
-              .select('total_amount, item_name')
-              .eq('order_id', data.id)
-              .maybeSingle();
-            if (!arcErr && arc) {
-              const at = arc.total_amount != null ? Number(arc.total_amount) : NaN;
-              if (Number.isFinite(at) && at > 0 && total_amount < 0.01) {
-                total_amount = Number(at.toFixed(2));
-              }
-              if (arc.item_name != null && String(arc.item_name).trim() !== '') {
-                item_name = String(arc.item_name).trim();
-              }
-            }
-          } catch (_) {
-            /* archived_orders table may not exist */
+        // Live delivered still uses order_items until canteen close; history rows
+        // already carry item_name / totals from archieved_* / failed_*.
+        if (
+          deliveredLike &&
+          data._historySource === 'archieved' &&
+          (!item_name || !(Number.isFinite(total_amount) && total_amount > 0))
+        ) {
+          // Keep whatever the archive header already provided via `data`
+          if (data.item_name != null && String(data.item_name).trim() !== '') {
+            item_name = String(data.item_name).trim();
+          }
+          const at = data.total_amount != null ? Number(data.total_amount) : NaN;
+          if (Number.isFinite(at) && at > 0 && !(Number.isFinite(total_amount) && total_amount > 0)) {
+            total_amount = Number(at.toFixed(2));
           }
         }
 
@@ -396,6 +408,19 @@ const OrderStatusScreen = ({ navigation, route }) => {
           if (payload.new) {
             fetchLatestOrderStatus();
           }
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          // Canteen close deletes live row — refetch loads archieved_* / failed_*
+          event: 'DELETE',
+          schema: 'public',
+          table: 'orders',
+          filter: `id=eq.${resolvedOrderId}`,
+        },
+        () => {
+          fetchLatestOrderStatus();
         }
       )
       .subscribe();
@@ -731,6 +756,7 @@ const OrderStatusScreen = ({ navigation, route }) => {
   const getOrderTimeline = (status) => {
     const placedTime = formatStepTime(stepTimestamps.placed || currentOrder?.created_at);
     const preparingTime = formatStepTime(stepTimestamps.preparing);
+    const partiallyReadyTime = formatStepTime(stepTimestamps.partially_ready);
     const readyTime = formatStepTime(stepTimestamps.ready);
     const deliveredTime = formatStepTime(
       stepTimestamps.delivered || currentOrder?.delivered_at
@@ -739,30 +765,11 @@ const OrderStatusScreen = ({ navigation, route }) => {
       stepTimestamps.cancelled || currentOrder?.updated_at
     );
 
-    const stepFromStatus = (s) => {
-      if (isCancelledStatus(s) || s === 'payment_failed' || s === 'failed') return 0;
-      switch (s) {
-        case 'pending_payment':
-          return 1;
-        case 'preparing':
-        case 'confirmed':
-          return 2;
-        case 'ready':
-        case 'on_way':
-          return 3;
-        case 'delivered':
-        case 'completed':
-        case 'paid':
-          return 4;
-        default:
-          return 2;
-      }
-    };
-
-    const currentStepLocal = stepFromStatus(status);
+    const currentStepLocal = getOrderTimelineStep(status);
+    const partial = isPartiallyReady(status);
 
     // Cancelled: Order Placed → Cancelled (red cross)
-    if (isCancelledStatus(status)) {
+    if (isCancelledLike(status)) {
       return [
         {
           id: 1,
@@ -788,7 +795,7 @@ const OrderStatusScreen = ({ navigation, route }) => {
       ];
     }
 
-    if (status === 'payment_failed' || status === 'failed') {
+    if (isPaymentFailedLike(status)) {
       return [
         {
           id: 1,
@@ -835,7 +842,52 @@ const OrderStatusScreen = ({ navigation, route }) => {
       ];
     }
 
-    // Full progress timeline (Preparing → Ready → Delivered)
+    // Ready order not collected before canteen close
+    if (isPickupFailed(status)) {
+      const pickupFailedTime = formatStepTime(
+        stepTimestamps.pickup_failed || currentOrder?.updated_at
+      );
+      return [
+        {
+          id: 1,
+          title: 'Order Placed',
+          description: 'Your order has been received.',
+          time: placedTime,
+          completed: true,
+          failed: false,
+          color: colors.success,
+        },
+        {
+          id: 2,
+          title: 'Preparing',
+          description: 'Your order is preparing in canteen',
+          time: preparingTime,
+          completed: true,
+          failed: false,
+          color: colors.success,
+        },
+        {
+          id: 3,
+          title: 'Ready for Pickup',
+          description: 'Your order was ready at the counter',
+          time: readyTime !== '--' ? readyTime : pickupFailedTime,
+          completed: true,
+          failed: false,
+          color: colors.success,
+        },
+        {
+          id: 4,
+          title: 'Not Picked Up',
+          description: 'Not picked up before the canteen closed. No automatic refund.',
+          time: pickupFailedTime,
+          completed: true,
+          failed: true,
+          color: colors.error,
+        },
+      ];
+    }
+
+    // Full progress: Preparing → (Partially Ready in-progress) → Ready → Delivered
     return [
       {
         id: 1,
@@ -857,12 +909,24 @@ const OrderStatusScreen = ({ navigation, route }) => {
       },
       {
         id: 3,
-        title: 'Ready for Pickup',
-        description: 'Your order is ready for pickup at counter',
-        time: currentStepLocal >= 3 ? readyTime : '--',
+        title: partial ? 'Partially Ready' : 'Ready for Pickup',
+        description: partial
+          ? 'Some items in your order are ready'
+          : 'Your order is ready for pickup at counter',
+        time: partial
+          ? partiallyReadyTime
+          : currentStepLocal >= 3
+            ? readyTime
+            : '--',
+        // Fully ready completes this step; partially_ready stays between preparing & ready.
         completed: currentStepLocal >= 3,
+        active: partial,
         failed: false,
-        color: currentStepLocal >= 3 ? colors.success : colors.textTertiary,
+        color: currentStepLocal >= 3
+          ? colors.success
+          : partial
+            ? colors.info || colors.warning
+            : colors.textTertiary,
       },
       {
         id: 4,
@@ -877,80 +941,11 @@ const OrderStatusScreen = ({ navigation, route }) => {
   };
 
 
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'pending_payment':
-        return colors.info;
-      case 'preparing':
-        return colors.warning; // Orange (first step, pending removed)
-      case 'ready':
-        return colors.success; // Green
-      case 'on_way':
-        return colors.info; // Blue
-      case 'delivered':
-      case 'completed':
-        return colors.success; // Green
-      case 'paid':
-        return colors.success; // Green
-      case 'payment_cancelled':
-        return colors.error; // Red
-      case 'payment_failed':
-      case 'failed':
-        return colors.error; // Red
-      case 'cancelled':
-      case 'cancelled_by_user':
-      case 'cancelled_by_admin':
-      case 'cancelled_by_system':
-      case 'cancelled_by_canteen':
-      case 'cancelled_by_vendor':
-        return colors.error; // Red
-      default:
-        if (String(status || '').startsWith('cancelled_by')) return colors.error;
-        return colors.warning; // Default to preparing color
-    }
-  };
+  const getStatusColor = (status) => getOrderStatusColor(status, colors);
+  const getStatusText = (status) =>
+    status === 'ready' ? 'Ready for pickup' : getOrderStatusLabel(status);
 
-  const getStatusText = (status) => {
-    switch (status) {
-      case 'pending_payment':
-        return 'Awaiting payment';
-      case 'preparing':
-        return 'Preparing';
-      case 'ready':
-        return 'Ready for pickup';
-      case 'on_way':
-        return 'On the way';
-      case 'delivered':
-        return 'Delivered';
-      case 'completed':
-        return 'Completed';
-      case 'paid':
-        return 'Paid';
-      case 'payment_cancelled':
-        return 'Payment cancelled';
-      case 'payment_failed':
-      case 'failed':
-        return 'Payment failed';
-      case 'cancelled':
-      case 'cancelled_by_user':
-      case 'cancelled_by_admin':
-      case 'cancelled_by_system':
-      case 'cancelled_by_canteen':
-        return 'Cancelled';
-      default: {
-        if (!status) return 'Preparing';
-        // Humanize unknown snake_case statuses (e.g. cancelled_by_xyz)
-        return String(status)
-          .replace(/_/g, ' ')
-          .trim()
-          .replace(/\b\w/g, (c) => c.toUpperCase());
-      }
-    }
-  };
-
-  // Check if QR code should be expired (30 minutes after delivery)
-  // QR codes are only shown when status is 'ready' and are automatically removed
-  // 30 minutes after the order is marked as 'delivered'
+  // QR only when status === 'ready' (not partially_ready); removed 30 min after delivered
   const isQRExpired = () => {
     if (currentOrder.status !== 'delivered' || !currentOrder.delivered_at) {
       return false;
@@ -959,36 +954,13 @@ const OrderStatusScreen = ({ navigation, route }) => {
     const deliveredTime = new Date(currentOrder.delivered_at);
     const currentTime = new Date();
     const timeDifference = currentTime - deliveredTime;
-    const thirtyMinutes = 30 * 60 * 1000; // 30 minutes in milliseconds
+    const thirtyMinutes = 30 * 60 * 1000;
     
     return timeDifference > thirtyMinutes;
   };
 
   const timeline = getOrderTimeline(currentOrder.status);
-  
-  // Get current step for better debugging (pending removed, preparing is first step)
-  const getCurrentStep = (status) => {
-    switch (status) {
-      case 'pending_payment':
-        return 1;
-      case 'preparing':
-        return 2; // Order placed + preparing completed
-      case 'ready':
-        return 3;
-      case 'delivered':
-      case 'completed':
-      case 'paid':
-        return 4;
-      case 'payment_failed':
-      case 'failed':
-      case 'cancelled':
-        return 0;
-      default:
-        return 2; // Default to preparing progress
-    }
-  };
-  
-  const currentStep = getCurrentStep(currentOrder.status);
+  const currentStep = getOrderTimelineStep(currentOrder.status);
   const qrPayloadValue = String(
     currentOrder?.barcode ||
       encryptedQRCode ||
@@ -997,19 +969,14 @@ const OrderStatusScreen = ({ navigation, route }) => {
       'order'
   );
 
-  const isDeliveredLike =
-    currentOrder.status === 'delivered' || currentOrder.status === 'completed';
-  const isPaymentFailedLike =
-    currentOrder.status === 'payment_failed' || currentOrder.status === 'failed';
-  const isCancelledLike =
-    currentOrder.status === 'cancelled' ||
-    currentOrder.status === 'payment_cancelled' ||
-    String(currentOrder.status || '').startsWith('cancelled_by');
-  const isReorderEligible = isCancelledLike || isPaymentFailedLike || isDeliveredLike;
+  const orderIsDelivered = isDeliveredLike(currentOrder.status);
+  const orderIsPaymentFailed = isPaymentFailedLike(currentOrder.status);
+  const orderIsPickupFailed = isPickupFailed(currentOrder.status);
+  const isReorderEligible = isReorderEligibleStatus(currentOrder.status);
   const persistedTotal = parseCurrencyValue(currentOrder?.total_amount);
 
   const finalTotal = (() => {
-    if (isDeliveredLike) {
+    if (orderIsDelivered) {
       if (computedTotal > 0.005) {
         return computedTotal;
       }
@@ -1030,7 +997,7 @@ const OrderStatusScreen = ({ navigation, route }) => {
   }, 0);
 
   const billLineItems =
-    isDeliveredLike &&
+    orderIsDelivered &&
     finalTotal > 0 &&
     orderItems.length > 0 &&
     pricedLinesSum < 0.01
@@ -1132,7 +1099,7 @@ const OrderStatusScreen = ({ navigation, route }) => {
                 </View>
               </View>
             </View>
-          ) : isPaymentFailedLike ? (
+          ) : orderIsPaymentFailed ? (
             <View style={[styles.successStrip, { backgroundColor: failedStripBg }]}>
               <View style={[styles.successContent, { flexWrap: 'wrap' }]}>
                 <AppIcon name="close-circle" size={20} color={colors.error} style={{ marginTop: 2 }} />
@@ -1152,6 +1119,19 @@ const OrderStatusScreen = ({ navigation, route }) => {
                       contact us
                     </Text>
                     .
+                  </Text>
+                </View>
+              </View>
+            </View>
+          ) : orderIsPickupFailed ? (
+            <View style={[styles.successStrip, { backgroundColor: failedStripBg }]}>
+              <View style={[styles.successContent, { flexWrap: 'wrap' }]}>
+                <AppIcon name="close-circle" size={20} color={colors.error} style={{ marginTop: 2 }} />
+                <View style={[styles.successTextContainer, { flex: 1, minWidth: 0 }]}>
+                  <Text style={[styles.successTitle, { color: colors.text }]}>Not picked up</Text>
+                  <Text style={[styles.successInfoLine, { color: colors.textSecondary }]}>
+                    Your order was not picked up before the canteen closed. There is no automatic refund for uncollected ready
+                    items.
                   </Text>
                 </View>
               </View>
@@ -1296,7 +1276,9 @@ const OrderStatusScreen = ({ navigation, route }) => {
                     ? colors.error
                     : step.completed
                       ? colors.success
-                      : colors.textTertiary;
+                      : step.active
+                        ? colors.info || colors.warning
+                        : colors.textTertiary;
                   const ring = step.failed
                     ? isDarkMode
                       ? 'rgba(239, 68, 68, 0.28)'
@@ -1305,9 +1287,13 @@ const OrderStatusScreen = ({ navigation, route }) => {
                       ? isDarkMode
                         ? 'rgba(16, 185, 129, 0.28)'
                         : '#D4FFDA'
-                      : isDarkMode
-                        ? 'rgba(255, 255, 255, 0.12)'
-                        : '#E8E8E8';
+                      : step.active
+                        ? isDarkMode
+                          ? 'rgba(59, 130, 246, 0.28)'
+                          : '#D6E8FF'
+                        : isDarkMode
+                          ? 'rgba(255, 255, 255, 0.12)'
+                          : '#E8E8E8';
                   return (
                     <View style={[styles.timelineOuter, { backgroundColor: ring }]}>
                       <View style={[styles.timelineMiddle, { backgroundColor: accent }]}>
@@ -1352,7 +1338,7 @@ const OrderStatusScreen = ({ navigation, route }) => {
               
               <Text style={[styles.timelineTime, { color: colors.textTertiary }]}>{step.time}</Text>
             </View>
-            {step.id === 3 && currentOrder?.status === 'ready' && !isQRExpired() && (
+            {step.id === 3 && canShowPickupQr(currentOrder?.status) && !isQRExpired() && (
               <View style={styles.qrCodeSection}>
                 <View style={[styles.qrCodeCard, { backgroundColor: colors.elevatedSurface }, cardOutline]}>
                   <Text style={[styles.qrCodeTitle, { color: colors.text }]}>Show this QR code at the counter</Text>

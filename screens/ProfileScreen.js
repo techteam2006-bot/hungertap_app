@@ -101,7 +101,7 @@ const ProfileScreen = ({ navigation }) => {
   const { colors, isDarkMode, toggleTheme } = useTheme();
   const insets = useSafeAreaInsets();
   const { user, userId, signOut } = useAuth();
-  const [notificationsEnabled, setNotificationsEnabled] = React.useState(false);
+  const [notificationsEnabled, setNotificationsEnabled] = React.useState(true);
   const [notifToggleBusy, setNotifToggleBusy] = React.useState(false);
   const [vegModeEnabled, setVegModeEnabled] = React.useState(false);
 
@@ -122,9 +122,8 @@ const ProfileScreen = ({ navigation }) => {
     (async () => {
       try {
         const saved = await AsyncStorage.getItem('notificationsEnabled');
-        if (saved !== null) {
-          setNotificationsEnabled(JSON.parse(saved));
-        }
+        // Unset → ON (same default as FCM auto-register on fresh installs)
+        setNotificationsEnabled(saved !== null ? JSON.parse(saved) === true : true);
       } catch (e) {
         console.error('Error loading settings:', e);
       }

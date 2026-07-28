@@ -2,7 +2,7 @@
   "name": "canteen-app",
   "version": "1.0.0",
   "type": "commonjs",
-  "main": "node_modules/expo/AppEntry.js",
+  "main": "index.js",
   "scripts": {
     "start": "npx expo start",
     "start:clear": "npx expo start --clear",
@@ -24,6 +24,7 @@
     "@react-navigation/bottom-tabs": "^6.6.1",
     "@react-navigation/native": "^6.1.9",
     "@react-navigation/native-stack": "^6.9.17",
+    "@sentry/react-native": "^8.20.0",
     "@supabase/supabase-js": "^2.105.3",
     "expo": "~54.0.34",
     "expo-asset": "~12.0.12",

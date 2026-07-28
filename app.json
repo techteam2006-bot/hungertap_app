@@ -26,6 +26,7 @@
     },
     "android": {
       "package": "com.hungertap.app",
+      "googleServicesFile": "./google-services.json",
       "icon": "./assets/hungertap_launcher_icon.png",
       "versionCode": 1,
       "softwareKeyboardLayoutMode": "pan",

@@ -6,19 +6,28 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "SENTRY_ENVIRONMENT": "development"
+      }
     },
     "preview": {
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "SENTRY_ENVIRONMENT": "preview"
       }
     },
     "apk": {
       "extends": "preview",
       "android": {
         "buildType": "apk",
-        "credentialsSource": "local"
+        "credentialsSource": "remote"
+      },
+      "env": {
+        "SENTRY_ENVIRONMENT": "preview"
       }
     },
     "production": {
@@ -26,7 +35,12 @@
       "distribution": "store",
       "android": {
         "buildType": "app-bundle",
-        "credentialsSource": "local"
+        "credentialsSource": "remote"
+      },
+      "env": {
+        "SENTRY_ENVIRONMENT": "production",
+        "SENTRY_RELEASE": "com.hungertap.app@1.0.0+1",
+        "SENTRY_DIST": "1"
       }
     }
   },
