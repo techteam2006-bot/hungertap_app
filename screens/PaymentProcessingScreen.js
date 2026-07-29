@@ -22,7 +22,7 @@ import {
 } from '../lib/paymentDeepLink';
 import { isValidOrderUuid } from '../lib/checkoutSecurity';
 import { resetNavigationToCart } from '../lib/navigateHome';
-import { isOrderPlacedSuccessStatus } from '../lib/orderStatus';
+import { isOrderPlacedSuccessStatus, isCancelledLike } from '../lib/orderStatus';
 
 const POLL_MS = 2500;
 const STUCK_MS = 180000;
@@ -124,26 +124,7 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
         finalizeCancel();
         return;
       }
-      if (status === 'cancelled' || status === 'payment_failed') {
-        finalizeFailure();
-      }
-    },
-    [finalizeSuccess, finalizeCancel, finalizeFailure]
-  );
-
-  const applyPaymentRow = useCallback(
-    (status) => {
-      if (!status || finalizedRef.current) return;
-      const s = String(status).toLowerCase();
-      if (s === 'success' || s === 'paid' || s === 'captured') {
-        finalizeSuccess();
-        return;
-      }
-      if (s === 'cancelled') {
-        finalizeCancel();
-        return;
-      }
-      if (s === 'failed') {
+      if (isCancelledLike(status) || status === 'payment_failed') {
         finalizeFailure();
       }
     },
@@ -160,21 +141,10 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
         .eq('placed_by', userId)
         .maybeSingle();
       if (ord?.status) applyOrderRow(ord.status);
-
-      const payId = activePaymentId;
-      if (payId && !finalizedRef.current) {
-        const { data: pay } = await supabase
-          .from('payments')
-          .select('status, order_id')
-          .eq('id', payId)
-          .maybeSingle();
-        if (pay?.order_id && String(pay.order_id) !== String(orderId)) return;
-        if (pay?.status) applyPaymentRow(pay.status);
-      }
     } catch (_) {
       /* network — next poll */
     }
-  }, [orderId, userId, activePaymentId, applyOrderRow, applyPaymentRow]);
+  }, [orderId, userId, applyOrderRow]);
 
   pollOnceRef.current = refreshPaymentStatus;
 
@@ -223,26 +193,6 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
       )
       .subscribe();
 
-    let payChannel = null;
-    if (activePaymentId) {
-      payChannel = supabase
-        .channel(`payment-row-${activePaymentId}`)
-        .on(
-          'postgres_changes',
-          {
-            event: 'UPDATE',
-            schema: 'public',
-            table: 'payments',
-            filter: `id=eq.${activePaymentId}`,
-          },
-          (payload) => {
-            const s = payload.new?.status;
-            if (s) applyPaymentRow(s);
-          }
-        )
-        .subscribe();
-    }
-
     refreshPaymentStatus();
     pollTimer = setInterval(() => pollOnceRef.current?.(), POLL_MS);
 
@@ -274,15 +224,12 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
         stuckTimerRef.current = null;
       }
       supabase.removeChannel(orderChannel);
-      if (payChannel) supabase.removeChannel(payChannel);
       linkSub.remove();
     };
   }, [
     orderId,
     userId,
-    activePaymentId,
     applyOrderRow,
-    applyPaymentRow,
     navigation,
     refreshPaymentStatus,
     handlePaymentReturnUrl,

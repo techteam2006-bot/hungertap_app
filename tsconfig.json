@@ -1,4 +1,38 @@
 {
-  "compilerOptions": {},
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "jsx": "react-native",
+    "moduleResolution": "node",
+    "target": "ESNext",
+    "module": "ESNext",
+    "lib": [
+      "ESNext"
+    ],
+    "skipLibCheck": true,
+    "strict": false,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "isolatedModules": true
+  },
+  "include": [
+    "App.js",
+    "index.js",
+    "app.config.js",
+    "babel.config.js",
+    "config.js",
+    "components/**/*.js",
+    "lib/**/*.js",
+    "screens/**/*.js",
+    "utils/**/*.js",
+    "scripts/**/*.js",
+    "scripts/**/*.mjs"
+  ],
+  "exclude": [
+    "node_modules",
+    "android",
+    ".expo"
+  ],
   "extends": "expo/tsconfig.base"
 }

@@ -42,7 +42,6 @@ import {
   GlassCard,
   EnhancedLoadingShimmer,
 } from '../components/ModernComponents';
-import NotificationService from '../lib/NotificationService';
 import BottomSnackbar from '../components/BottomSnackbar';
 import { sortItemsByTime, getTimeSortingInfo, getTimePeriodDescription } from '../lib/utils/timeBasedSorting';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -213,7 +212,7 @@ const HomeScreen = ({ navigation, route }) => {
   const [currentCanteenName, setCurrentCanteenName] = useState('');
   const [currentCanteenId, setCurrentCanteenId] = useState(null);
   const [collegeName, setCollegeName] = useState('');
-  /** When false, menu must not load unscoped items (avoids cart/order mismatch with `create_order_minimal`). */
+  /** When false, menu must not load unscoped items (avoids cart/order mismatch with checkout). */
   const [menuCanteenReady, setMenuCanteenReady] = useState(false);
   const [collegeCanteens, setCollegeCanteens] = useState([]);
   const [showCanteenPicker, setShowCanteenPicker] = useState(false);

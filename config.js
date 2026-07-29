@@ -16,8 +16,8 @@ function envTruth(v) {
 }
 
 /**
- * When false (default), checkout uses Supabase `create_order_minimal` in the app (no local server).
- * Set EXPO_PUBLIC_USE_ORDER_HTTP=true only if you run backend order API + worker (POST /order).
+ * Legacy local HTTP order API (POST /order). App checkout uses Edge `create-order-v2` instead.
+ * Set EXPO_PUBLIC_USE_ORDER_HTTP=true only if you still run that optional worker.
  */
 const ORDER_HTTP_ENABLED = envTruth(process.env.EXPO_PUBLIC_USE_ORDER_HTTP);
 

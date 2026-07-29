@@ -17,7 +17,6 @@ const FILES = [
   'components/CanteenClosedMessage.js',
   'components/LegalitiesCard.js',
   'components/ModernComponents.js',
-  'components/NotificationStatus.js',
   'screens/AuthHelpScreen.js',
   'screens/CartScreen.js',
   'screens/ContactUsScreen.js',

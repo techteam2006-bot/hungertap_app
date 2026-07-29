@@ -18,11 +18,9 @@ import { CommonActions } from '@react-navigation/native';
 import { useCart } from '../lib/CartContext';
 import { useTheme } from '../lib/ThemeContext';
 import { shouldShowRecommendations } from '../lib/utils/recommendations';
-import NotificationService from '../lib/NotificationService';
-import NotificationStatus from '../components/NotificationStatus';
 import {
   supabase,
-  prepareCreateOrderMinimalArgs,
+  prepareCheckoutOrderArgs,
   getUserCanteenId,
   validateCartItemsForUserCanteen,
   deriveItemIsAvailable,
@@ -863,7 +861,7 @@ const CartScreen = ({ navigation }) => {
         return;
       }
 
-      const args = prepareCreateOrderMinimalArgs(linesForOrder, isTakeaway);
+      const args = prepareCheckoutOrderArgs(linesForOrder, isTakeaway);
       if (!args.ok) {
         Alert.alert('Cannot place order', toAlertMessage(args.error, 'Invalid cart.'));
         return;
