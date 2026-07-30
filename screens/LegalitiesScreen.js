@@ -1,6 +1,7 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, StatusBar } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import AppIcon from '../components/AppIcon';
+import BrandYellowStrip from '../components/BrandYellowStrip';
 import { useTheme } from '../lib/ThemeContext';
 import { appTypography } from '../lib/darkThemeConfig';
 import LegalitiesCard from '../components/LegalitiesCard';
@@ -10,8 +11,7 @@ const LegalitiesScreen = ({ navigation }) => {
 
   return (
     <View style={[styles.root, { backgroundColor: colors.contentBackground }]}>
-      <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} backgroundColor={colors.brandYellow} />
-      <View style={[styles.strip, { backgroundColor: colors.brandYellow }]} />
+      <BrandYellowStrip barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
 
       <View style={[styles.header, { backgroundColor: colors.elevatedSurface }]}>
         <View style={styles.headerSide}>

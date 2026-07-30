@@ -11,6 +11,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { useTheme } from '../lib/ThemeContext';
+import BrandYellowStrip from '../components/BrandYellowStrip';
 import { appTypography } from '../lib/darkThemeConfig';
 import { supabase } from '../lib/supabase';
 import { useCart } from '../lib/CartContext';
@@ -264,15 +265,7 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
 
   return (
     <View style={[styles.root, { backgroundColor: colors.contentBackground }]}>
-      <View
-        style={[
-          styles.topStrip,
-          {
-            height: Math.max(34, insets.top + 12),
-            backgroundColor: colors.brandYellow,
-          },
-        ]}
-      />
+      <BrandYellowStrip />
 
       <View style={[styles.header, { backgroundColor: colors.elevatedSurface, borderBottomColor: colors.border }]}>
         <Text

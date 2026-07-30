@@ -1,9 +1,10 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import AppIcon from './AppIcon';
 import { GlassCard } from './ModernComponents';
 import { appTypography } from '../lib/darkThemeConfig';
-import { LEGAL_LINKS, openLegalUrl } from '../lib/legalLinks';
+import { openLegalPage } from '../lib/legalLinks';
 
 function LegalitiesRow({ icon, title, onPress, colors, isLast }) {
   return (
@@ -26,6 +27,8 @@ function LegalitiesRow({ icon, title, onPress, colors, isLast }) {
 }
 
 export default function LegalitiesCard({ colors, style }) {
+  const navigation = useNavigation();
+
   return (
     <GlassCard
       style={[styles.card, { borderColor: colors.border, backgroundColor: colors.elevatedSurface }, style]}
@@ -34,20 +37,20 @@ export default function LegalitiesCard({ colors, style }) {
         icon="document-text-outline"
         title="Terms of Service"
         colors={colors}
-        onPress={() => openLegalUrl(LEGAL_LINKS.termsOfService)}
+        onPress={() => openLegalPage(navigation, 'termsOfService')}
       />
       <LegalitiesRow
         icon="refresh-outline"
         title="Refund Policies"
         colors={colors}
-        onPress={() => openLegalUrl(LEGAL_LINKS.refundPolicy)}
+        onPress={() => openLegalPage(navigation, 'refundPolicy')}
       />
       <LegalitiesRow
         icon="shield-checkmark-outline"
         title="Privacy Policy"
         colors={colors}
         isLast
-        onPress={() => openLegalUrl(LEGAL_LINKS.privacyPolicy)}
+        onPress={() => openLegalPage(navigation, 'privacyPolicy')}
       />
     </GlassCard>
   );

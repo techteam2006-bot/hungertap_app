@@ -7,10 +7,10 @@ import {
   ScrollView,
   Animated,
   Vibration,
-  SafeAreaView,
   Dimensions,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AppIcon from '../components/AppIcon';
 import { useTheme } from '../lib/ThemeContext';
 import NotificationService from '../lib/NotificationService';
@@ -20,6 +20,7 @@ import { useCart } from '../lib/CartContext';
 import { isValidOrderUuid } from '../lib/checkoutSecurity';
 import { resetNavigationToHome, resetNavigationToCart } from '../lib/navigateHome';
 import { getFontStyle } from '../lib/utils/fonts';
+import BrandYellowStrip from '../components/BrandYellowStrip';
 import LoadingSpinner from '../components/LoadingSpinner';
 
 const { width } = Dimensions.get('window');
@@ -27,6 +28,7 @@ const { width } = Dimensions.get('window');
 const OrderConfirmationScreen = ({ navigation, route }) => {
   const { userId } = useAuth();
   const { clearCart } = useCart();
+  const insets = useSafeAreaInsets();
   const {
     orderId,
     orderToken: passedOrderToken,
@@ -176,7 +178,7 @@ const OrderConfirmationScreen = ({ navigation, route }) => {
           value: 'Order not paid',
         },
         {
-          icon: 'location-outline',
+          icon: 'location',
           label: 'Pickup',
           value: 'Canteen counter',
         },
@@ -194,7 +196,7 @@ const OrderConfirmationScreen = ({ navigation, route }) => {
       ]
     : [
         {
-          icon: 'location-outline',
+          icon: 'location',
           label: 'Pickup',
           value: 'Canteen counter',
         },
@@ -250,21 +252,21 @@ const OrderConfirmationScreen = ({ navigation, route }) => {
   const sectionTitleNext = isFailure ? 'What you can do' : 'What happens next';
 
   return (
-    <SafeAreaView style={[styles.root, { backgroundColor: colors.contentBackground }]}>
-      <View style={[styles.topStrip, { backgroundColor: colors.brandYellow }]} />
+    <View style={[styles.root, { backgroundColor: colors.contentBackground }]}>
+      <BrandYellowStrip />
       <ScrollView
         style={styles.scroll}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollInner}
+        contentContainerStyle={[styles.scrollInner, { paddingBottom: 36 + insets.bottom }]}
       >
         <LinearGradient colors={heroGradient} locations={[0, 0.45, 1]} style={styles.hero}>
           <TouchableOpacity
             style={[styles.backPill, { backgroundColor: colors.elevatedSurface, borderColor: colors.border }]}
             onPress={handleBackToHome}
             accessibilityRole="button"
-            accessibilityLabel="Close and go home"
+            accessibilityLabel="Go back"
           >
-            <AppIcon name="close" size={22} color={colors.text} />
+            <AppIcon name="arrow-back" size={22} color={colors.text} />
           </TouchableOpacity>
 
           <Animated.View
@@ -420,7 +422,7 @@ const OrderConfirmationScreen = ({ navigation, route }) => {
           </TouchableOpacity>
         </Animated.View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 };
 
@@ -429,7 +431,6 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   topStrip: {
-    height: 34,
     width: '100%',
   },
   scroll: {

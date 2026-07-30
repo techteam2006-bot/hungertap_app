@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import Constants from 'expo-constants';
 import AppIcon from '../components/AppIcon';
+import BrandYellowStrip from '../components/BrandYellowStrip';
 import { useTheme } from '../lib/ThemeContext';
 import { useAuth } from '../lib/AuthContext';
 import { useCart } from '../lib/CartContext';
@@ -25,6 +26,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { appTypography } from '../lib/darkThemeConfig';
 import PageLoader from '../components/PageLoader';
 import LoadingSpinner from '../components/LoadingSpinner';
+import { APP_LOGO } from '../lib/appLogo';
 import {
   ORDER_STATUS_FILTERS,
   getOrderStatusColor,
@@ -361,7 +363,6 @@ const OrdersScreen = ({ navigation }) => {
     const summaryText = summaryItems.length
       ? summaryItems.map(item => `${item.name} x${item.quantity}`).join(', ')
       : 'Items unavailable';
-    const itemImage = 'https://imgs.search.brave.com/H0EimZaFKTJOiXJSOVv8oSPdubhwLF8M2SSwS__EhPM/rs:fit:860:0:0:0/g:ce/aHR0cHM6Ly90NC5m/dGNkbi5uZXQvanBn/LzA5LzE1LzIyLzk5/LzM2MF9GXzkxNTIy/OTk0M18yNnlGb0FJ/ZEVsUjVRMWNmNXF1/WkswNGp6RldNY2Jy/OS5qcGc';
     const isFinalStatus =
       isDeliveredLike(order.status) || order.status === 'pickup_failed';
     const canReorder = isReorderEligibleStatus(order.status);
@@ -383,7 +384,6 @@ const OrdersScreen = ({ navigation }) => {
           }),
           total: order.total_amount,
           items: summaryItems,
-          image: itemImage
         }
       });
     };
@@ -413,9 +413,8 @@ const OrdersScreen = ({ navigation }) => {
         
         <View style={styles.orderContent}>
           <View style={styles.imageContainer}>
-            <Image source={{ uri: itemImage }} style={styles.orderImage} />
+            <Image source={APP_LOGO} style={styles.orderImage} resizeMode="contain" />
           </View>
-          
           <View style={styles.orderDetails}>
             <Text style={[styles.orderNumber, { color: colors.text }]}>
               Order #{order.order_token || String(Math.floor(Math.random() * 9000) + 1000)}
@@ -558,8 +557,7 @@ const OrdersScreen = ({ navigation }) => {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.pageBackground }]}>
-      {/* Top status strip */}
-      <View style={[styles.topStrip, { backgroundColor: colors.brandYellow }]} />
+      <BrandYellowStrip />
       
       {/* Header — back (32) + title (flex) + spacer (32) for true horizontal center */}
       <View

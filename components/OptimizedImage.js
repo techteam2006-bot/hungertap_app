@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
-import { View, Image, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, Image, ActivityIndicator, StyleSheet, Platform } from 'react-native';
 import { useTheme } from '../lib/ThemeContext';
 import { ITEM_IMAGE_FALLBACK } from '../lib/appLogo';
 
@@ -19,92 +19,84 @@ const OptimizedImage = ({
   style,
   resizeMode = 'cover',
   fallbackIcon: _fallbackIcon = 'restaurant',
-  showLoadingIndicator = false,
+  showLoadingIndicator = true,
   priority = 'normal', // 'high', 'normal', 'low'
   ...props
 }) => {
   const { colors } = useTheme();
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(false);
-  const [imageLoaded, setImageLoaded] = useState(false);
-
   const key = useMemo(() => sourceKey(source), [source]);
+  const uri = typeof source === 'object' && source?.uri ? source.uri : null;
+  const alreadyCached = !!(uri && imageCache.has(uri));
 
-  // Remote URI may change while `useMemo` on `source?.uri` alone stays `undefined` for
-  // bundled assets — and `error` must reset when switching items or the next image never shows.
+  const [loading, setLoading] = useState(!alreadyCached && !!uri);
+  const [error, setError] = useState(false);
+  const [imageLoaded, setImageLoaded] = useState(alreadyCached);
+
+  // Remote URI may change — reset load state when switching items.
   useEffect(() => {
+    const cached = !!(uri && imageCache.has(uri));
     setError(false);
-    setLoading(false);
-    setImageLoaded(false);
-  }, [key]);
+    setLoading(!cached && !!uri);
+    setImageLoaded(cached);
+  }, [key, uri]);
 
   const memoizedSource = useMemo(() => {
     if (source == null) return null;
     if (typeof source === 'number') return source;
     if (typeof source === 'object' && source.uri) {
-      const uri = source.uri;
-      if (imageCache.has(uri)) {
-        return { ...source, cached: true };
-      }
-      return source;
+      // Do not force iOS disk cache — it can blank images on first paint.
+      return { uri: source.uri };
     }
     return source;
   }, [key, source]);
 
-  // Optimized prefetch with priority handling
+  // Prefetch in background (does not gate display)
   useEffect(() => {
-    if (memoizedSource?.uri && !prefetchQueue.has(memoizedSource.uri)) {
-      prefetchQueue.add(memoizedSource.uri);
-
-      if (priority === 'high') {
-        Image.prefetch(memoizedSource.uri)
-          .then(() => {
-            imageCache.set(memoizedSource.uri, true);
-            prefetchQueue.delete(memoizedSource.uri);
-          })
-          .catch(() => {
-            prefetchQueue.delete(memoizedSource.uri);
-          });
-      } else {
-        const delay = priority === 'low' ? 1000 : 100;
-        setTimeout(() => {
-          Image.prefetch(memoizedSource.uri)
-            .then(() => {
-              imageCache.set(memoizedSource.uri, true);
-              prefetchQueue.delete(memoizedSource.uri);
-            })
-            .catch(() => {
-              prefetchQueue.delete(memoizedSource.uri);
-            });
-        }, delay);
-      }
+    const prefetchUri = memoizedSource?.uri;
+    if (!prefetchUri || prefetchQueue.has(prefetchUri) || imageCache.has(prefetchUri)) {
+      return undefined;
     }
-  }, [memoizedSource?.uri, priority]);
+    prefetchQueue.add(prefetchUri);
+    let cancelled = false;
+    Image.prefetch(prefetchUri)
+      .then(() => {
+        if (!cancelled) imageCache.set(prefetchUri, true);
+      })
+      .catch(() => {})
+      .finally(() => {
+        prefetchQueue.delete(prefetchUri);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [memoizedSource?.uri]);
 
   const handleLoadStart = useCallback(() => {
     setLoading(true);
     setError(false);
   }, []);
 
-  const handleLoadEnd = useCallback(() => {
+  const handleLoad = useCallback(() => {
     setLoading(false);
     setImageLoaded(true);
-    if (memoizedSource?.uri) {
-      imageCache.set(memoizedSource.uri, true);
-    }
-  }, [memoizedSource?.uri]);
+    setError(false);
+    if (uri) imageCache.set(uri, true);
+  }, [uri]);
+
+  const handleLoadEnd = useCallback(() => {
+    setLoading(false);
+  }, []);
 
   const handleError = useCallback(() => {
     setLoading(false);
+    setImageLoaded(false);
     setError(true);
-    if (memoizedSource?.uri) {
-      imageCache.delete(memoizedSource.uri);
-    }
-  }, [memoizedSource?.uri]);
+    if (uri) imageCache.delete(uri);
+  }, [uri]);
 
   if (!memoizedSource || error) {
     return (
-      <View style={[styles.fallbackContainer, style, { backgroundColor: colors.surface }]}>
+      <View style={[styles.fallbackContainer, style, { backgroundColor: colors.surface || '#F3F4F6' }]}>
         <Image
           source={ITEM_IMAGE_FALLBACK}
           style={styles.fallbackLogo}
@@ -115,33 +107,44 @@ const OptimizedImage = ({
     );
   }
 
+  const showSpinner = !imageLoaded && (loading || showLoadingIndicator);
+
   return (
-    <View style={style}>
+    <View style={[styles.frame, style, { backgroundColor: colors.surface || '#F3F4F6' }]}>
       <Image
         key={key}
         source={memoizedSource}
-        style={[StyleSheet.absoluteFillObject, { borderRadius: style?.borderRadius || 0 }]}
+        style={styles.image}
         resizeMode={resizeMode}
         onLoadStart={handleLoadStart}
+        onLoad={handleLoad}
         onLoadEnd={handleLoadEnd}
         onError={handleError}
-        fadeDuration={0}
-        loadingIndicatorSource={null}
-        progressiveRenderingEnabled={true}
-        removeClippedSubviews={true}
+        fadeDuration={Platform.OS === 'android' ? 0 : undefined}
+        accessibilityIgnoresInvertColors
         {...props}
       />
 
-      {loading && (priority === 'high' || showLoadingIndicator) && !imageLoaded && (
-        <View style={[styles.loadingContainer, { backgroundColor: colors.surface }]}>
+      {showSpinner ? (
+        <View style={[styles.loadingContainer, { backgroundColor: colors.surface || '#F3F4F6' }]}>
           <ActivityIndicator size="small" color={colors.primary} />
         </View>
-      )}
+      ) : null}
     </View>
   );
 };
 
 const styles = StyleSheet.create({
+  frame: {
+    overflow: 'hidden',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  image: {
+    ...StyleSheet.absoluteFillObject,
+    width: '100%',
+    height: '100%',
+  },
   fallbackContainer: {
     justifyContent: 'center',
     alignItems: 'center',
@@ -156,7 +159,6 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     justifyContent: 'center',
     alignItems: 'center',
-    borderRadius: 8,
   },
 });
 

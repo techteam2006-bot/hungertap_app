@@ -1,10 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Animated, TouchableOpacity, Platform } from 'react-native';
 import AppIcon from './AppIcon';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+/**
+ * Sits above the tab bar inside the screen content area.
+ * Do not add safe-area bottom padding here — the tab bar already owns the home-indicator inset.
+ */
 const BottomSnackbar = ({ visible, onPressViewCart, onHidden }) => {
-  const insets = useSafeAreaInsets();
   const [rendered, setRendered] = useState(visible);
   const translateY = useRef(new Animated.Value(100)).current;
   const opacity = useRef(new Animated.Value(0)).current;
@@ -12,7 +14,6 @@ const BottomSnackbar = ({ visible, onPressViewCart, onHidden }) => {
   useEffect(() => {
     if (visible) {
       setRendered(true);
-      // Enter: spring slide-up + fade-in (350ms)
       Animated.parallel([
         Animated.spring(translateY, {
           toValue: 0,
@@ -27,12 +28,10 @@ const BottomSnackbar = ({ visible, onPressViewCart, onHidden }) => {
         }),
       ]).start();
     } else if (rendered) {
-      // Exit: ease-in slide-down + fade-out
       Animated.parallel([
         Animated.timing(translateY, {
           toValue: 100,
           duration: 250,
-          easing: undefined,
           useNativeDriver: true,
         }),
         Animated.timing(opacity, {
@@ -56,7 +55,6 @@ const BottomSnackbar = ({ visible, onPressViewCart, onHidden }) => {
       style={[
         styles.container,
         {
-          paddingBottom: Math.max(insets.bottom, 12),
           transform: [{ translateY }],
           opacity,
         },
@@ -80,13 +78,13 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 12,
     right: 12,
-    bottom: 12,
+    bottom: 8,
     zIndex: 9999,
   },
   content: {
     backgroundColor: '#00B330',
     borderRadius: 12,
-    paddingVertical: 12,
+    paddingVertical: 10,
     paddingHorizontal: 16,
     flexDirection: 'row',
     alignItems: 'center',
@@ -115,5 +113,3 @@ const styles = StyleSheet.create({
 });
 
 export default BottomSnackbar;
-
-

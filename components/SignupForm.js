@@ -7,6 +7,7 @@ import {
   StyleSheet,
   Animated,
   Easing,
+  Alert,
 } from 'react-native';
 import AppIcon from './AppIcon';
 import LoadingButton from './LoadingButton';
@@ -19,6 +20,7 @@ import { useTheme } from '../lib/ThemeContext';
 import { appTypography } from '../lib/darkThemeConfig';
 import { describeOtpFailure, describeSignUpFailure, isEmailAlreadyInUseError } from '../lib/authErrorMessages';
 import { lookupCanteenForSignup } from '../lib/canteenLookup';
+import { openLegalPage } from '../lib/legalLinks';
 
 const BRAND_GOLD = '#D4A017';
 const EMAIL_RE = /^\S+@\S+\.\S+$/;
@@ -252,7 +254,12 @@ export default function SignupForm({ navigation, onSwitchToLogin, style }) {
       }
 
       setGeneralError('');
-      setGeneralSuccess('Account created successfully.');
+      setGeneralSuccess('Account created. Please sign in.');
+      onSwitchToLogin?.({
+        email: String(email || '').trim().toLowerCase(),
+        password: String(password || ''),
+      });
+      Alert.alert('Account created', 'Your email and password are filled in. Tap Sign In to continue.');
     } catch (e) {
       console.warn('SignupForm handleSignUp:', e?.message || e);
       setGeneralError('Network error. Please check your connection and try again.');
@@ -530,7 +537,7 @@ export default function SignupForm({ navigation, onSwitchToLogin, style }) {
             I read & accepted{' '}
             <Text
               style={styles.termsLink}
-              onPress={() => navigation.navigate('Legalities')}
+              onPress={() => openLegalPage(navigation, 'termsOfService')}
               accessibilityRole="link"
             >
               Terms of Service

@@ -7,27 +7,33 @@
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "owner": "24951a66p9",
-    "icon": "./assets/hungertap_launcher_icon.png",
+    "icon": "./assets/icon.png",
     "splash": {
-      "image": "./assets/hungertap-global-loading.png",
+      "image": "./assets/logo.png",
       "resizeMode": "contain",
       "backgroundColor": "#FFFFFF"
     },
     "assetBundlePatterns": [
+      "assets/logo.png",
+      "assets/icon.png",
+      "assets/adaptive-icon.png",
       "assets/home-banner.webp",
-      "assets/login-logo-transparent.png",
-      "assets/hungertap-global-loading.png",
-      "assets/no-items-empty-state.png",
       "assets/fonts/*.ttf"
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.hungertap.app"
+      "bundleIdentifier": "com.hungertap.app",
+      "icon": "./assets/icon.png",
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "fetch"
+        ]
+      }
     },
     "android": {
       "package": "com.hungertap.app",
       "googleServicesFile": "./google-services.json",
-      "icon": "./assets/hungertap_launcher_icon.png",
+      "icon": "./assets/icon.png",
       "versionCode": 1,
       "softwareKeyboardLayoutMode": "pan",
       "permissions": [
@@ -52,7 +58,7 @@
         }
       ],
       "adaptiveIcon": {
-        "foregroundImage": "./assets/hungertap_launcher_icon.png",
+        "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#FFFFFF"
       }
     },
@@ -64,6 +70,7 @@
       "expo-asset",
       "expo-secure-store",
       "expo-notifications",
+      "expo-background-fetch",
       [
         "expo-build-properties",
         {

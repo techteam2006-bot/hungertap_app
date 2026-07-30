@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import AppIcon from '../components/AppIcon';
+import BrandYellowStrip from '../components/BrandYellowStrip';
 import { CommonActions } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../lib/ThemeContext';
@@ -925,7 +926,7 @@ const OrderStatusScreen = ({ navigation, route }) => {
         color: currentStepLocal >= 3
           ? colors.success
           : partial
-            ? colors.info || colors.warning
+            ? colors.brandYellow || '#F5BC3B'
             : colors.textTertiary,
       },
       {
@@ -945,7 +946,7 @@ const OrderStatusScreen = ({ navigation, route }) => {
   const getStatusText = (status) =>
     status === 'ready' ? 'Ready for pickup' : getOrderStatusLabel(status);
 
-  // QR only when status === 'ready' (not partially_ready); removed 30 min after delivered
+  // QR when ready or partially_ready; hidden 30 min after delivered
   const isQRExpired = () => {
     if (currentOrder.status !== 'delivered' || !currentOrder.delivered_at) {
       return false;
@@ -1053,8 +1054,7 @@ const OrderStatusScreen = ({ navigation, route }) => {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.pageBackground }]}>
-      {/* Top Yellow Strip */}
-      <View style={[styles.topYellowStrip, { backgroundColor: colors.brandYellow }]} />
+      <BrandYellowStrip />
       
       {/* Header */}
       <View style={[styles.header, { backgroundColor: colors.elevatedSurface }]}>
@@ -1221,7 +1221,7 @@ const OrderStatusScreen = ({ navigation, route }) => {
                         </View>
                         <View style={styles.tableColumnStatus}>
                           <Text
-                            style={[styles.tableCellStatus, { color: colors.text }]}
+                            style={[styles.tableCellStatus, { color: getStatusColor(currentOrder?.status) }]}
                             numberOfLines={2}
                           >
                             {statusLabel}
@@ -1277,7 +1277,7 @@ const OrderStatusScreen = ({ navigation, route }) => {
                     : step.completed
                       ? colors.success
                       : step.active
-                        ? colors.info || colors.warning
+                        ? colors.brandYellow || '#F5BC3B'
                         : colors.textTertiary;
                   const ring = step.failed
                     ? isDarkMode
@@ -1289,8 +1289,8 @@ const OrderStatusScreen = ({ navigation, route }) => {
                         : '#D4FFDA'
                       : step.active
                         ? isDarkMode
-                          ? 'rgba(59, 130, 246, 0.28)'
-                          : '#D6E8FF'
+                          ? 'rgba(245, 188, 59, 0.28)'
+                          : '#FFF3D1'
                         : isDarkMode
                           ? 'rgba(255, 255, 255, 0.12)'
                           : '#E8E8E8';

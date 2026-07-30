@@ -7,15 +7,14 @@ import {
   TouchableOpacity,
   Alert,
   Switch,
-  StatusBar,
   Share,
   Linking,
   Platform,
 } from 'react-native';
 import LegalitiesCard from '../components/LegalitiesCard';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import AppIcon from '../components/AppIcon';
+import BrandYellowStrip from '../components/BrandYellowStrip';
 import { useAuth } from '../lib/AuthContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../lib/ThemeContext';
@@ -29,7 +28,7 @@ const fetchUserVegModeEnabled = async () => null;
 const updateUserVegModeEnabled = async () => ({ ok: true, error: null });
 
 const SOCIAL_LINKS = {
-  instagram: 'https://www.instagram.com/hungertap/',
+  instagram: 'https://www.instagram.com/hungertap.iare/',
   twitter: 'https://twitter.com/HungerTap',
   facebook: 'https://www.facebook.com/profile.php?id=61563114927891',
 };
@@ -99,7 +98,6 @@ function ProfileRow({
 
 const ProfileScreen = ({ navigation }) => {
   const { colors, isDarkMode, toggleTheme } = useTheme();
-  const insets = useSafeAreaInsets();
   const { user, userId, signOut } = useAuth();
   const [notificationsEnabled, setNotificationsEnabled] = React.useState(true);
   const [notifToggleBusy, setNotifToggleBusy] = React.useState(false);
@@ -317,8 +315,7 @@ const ProfileScreen = ({ navigation }) => {
 
   return (
     <View style={[styles.root, { backgroundColor: colors.contentBackground }]}>
-      <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} backgroundColor={colors.brandYellow} />
-      <View style={[styles.strip, { backgroundColor: colors.brandYellow }]} />
+      <BrandYellowStrip barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
 
       <View style={[styles.header, { backgroundColor: colors.elevatedSurface }]}>
         <View style={styles.headerSide}>
@@ -499,35 +496,25 @@ const ProfileScreen = ({ navigation }) => {
             onPress={handleShareApp}
           />
         </GlassCard>
-      </ScrollView>
 
-      <View
-        style={[
-          styles.signOutFooter,
-          {
-            backgroundColor: colors.elevatedSurface,
-            borderTopColor: colors.border,
-            paddingBottom: Math.max(insets.bottom, 14),
-            shadowOpacity: isDarkMode ? 0.35 : 0.1,
-          },
-        ]}
-      >
-        <TouchableOpacity
-          onPress={handleSignOut}
-          activeOpacity={0.88}
-          style={styles.signOutTouchable}
-        >
-          <LinearGradient
-            colors={['#FF5C5C', '#DC2626', '#B91C1C']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.signOutGradient}
+        <View style={styles.signOutInSection}>
+          <TouchableOpacity
+            onPress={handleSignOut}
+            activeOpacity={0.88}
+            style={styles.signOutTouchable}
           >
-            <AppIcon name="log-out-outline" size={22} color="#FFFFFF" style={styles.signOutIcon} />
-            <Text style={styles.signOutLabel}>Sign out</Text>
-          </LinearGradient>
-        </TouchableOpacity>
-      </View>
+            <LinearGradient
+              colors={['#FF5C5C', '#DC2626', '#B91C1C']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.signOutGradient}
+            >
+              <AppIcon name="log-out-outline" size={22} color="#FFFFFF" style={styles.signOutIcon} />
+              <Text style={styles.signOutLabel}>Sign out</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
       </View>
     </View>
   );
@@ -577,16 +564,11 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 16,
     paddingTop: 4,
-    paddingBottom: 20,
+    paddingBottom: 8,
   },
-  signOutFooter: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 16,
-    paddingTop: 14,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -6 },
-    shadowRadius: 12,
-    elevation: 12,
+  signOutInSection: {
+    marginTop: 8,
+    marginBottom: 0,
   },
   signOutTouchable: {
     width: '100%',

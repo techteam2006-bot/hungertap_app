@@ -73,6 +73,7 @@ import ContactUsScreen from './screens/ContactUsScreen';
 import PrivacyPolicyScreen from './screens/PrivacyPolicyScreen';
 import TermsOfServiceScreen from './screens/TermsOfServiceScreen';
 import LegalitiesScreen from './screens/LegalitiesScreen';
+import LegalWebViewScreen from './screens/LegalWebViewScreen';
 import { supabase } from './lib/supabase';
 import { configureImageCache } from './lib/ImageCache';
 import AppErrorBoundary from './components/AppErrorBoundary';
@@ -125,15 +126,21 @@ function MainTabs() {
       screenOptions={{
         headerShown: false,
         tabBarShowLabel: false,
+        // Prevent RN from stacking another bottom inset on top of our padding (iOS tall tab).
+        safeAreaInsets: { top: 0, bottom: 0, left: 0, right: 0 },
         tabBarStyle: hideTabBarKitchenClosed ? {
           display: 'none',
         } : {
           backgroundColor: colors.tabBarBackground,
           borderTopColor: colors.tabBarBorder,
           borderTopWidth: StyleSheet.hairlineWidth,
-          height: 58 + insets.bottom,
-          paddingBottom: insets.bottom,
-          paddingTop: 8,
+          height: Platform.OS === 'ios'
+            ? 48 + Math.max(insets.bottom - 8, 6)
+            : 56 + Math.max(insets.bottom, 0),
+          paddingBottom: Platform.OS === 'ios'
+            ? Math.max(insets.bottom - 8, 6)
+            : Math.max(insets.bottom, 6),
+          paddingTop: Platform.OS === 'ios' ? 4 : 6,
           elevation: 12,
           shadowColor: '#000',
           shadowOffset: { width: 0, height: -3 },
@@ -145,7 +152,8 @@ function MainTabs() {
         tabBarActiveBackgroundColor: 'transparent',
         tabBarInactiveBackgroundColor: 'transparent',
         tabBarItemStyle: {
-          paddingVertical: 4,
+          paddingVertical: 0,
+          justifyContent: 'center',
         },
       }}
     >
@@ -278,6 +286,7 @@ function Navigation() {
           <Stack.Screen name="Splash" component={SplashScreen} />
           <Stack.Screen name="Login" component={LoginScreen} />
           <Stack.Screen name="Legalities" component={LegalitiesScreen} />
+          <Stack.Screen name="LegalWebView" component={LegalWebViewScreen} />
           <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
           <Stack.Screen name="AuthHelp" component={AuthHelpScreen} />
         </>
@@ -298,6 +307,7 @@ function Navigation() {
           <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
           <Stack.Screen name="TermsOfService" component={TermsOfServiceScreen} />
           <Stack.Screen name="Legalities" component={LegalitiesScreen} />
+          <Stack.Screen name="LegalWebView" component={LegalWebViewScreen} />
         </>
       )}
     </Stack.Navigator>

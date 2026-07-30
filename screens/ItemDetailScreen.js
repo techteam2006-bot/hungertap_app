@@ -3,17 +3,16 @@ import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   TouchableOpacity,
   ScrollView,
   Dimensions,
 } from 'react-native';
 import AppIcon from '../components/AppIcon';
+import BrandYellowStrip from '../components/BrandYellowStrip';
 import BottomSnackbar from '../components/BottomSnackbar';
 import { useTheme } from '../lib/ThemeContext';
 import { useCart } from '../lib/CartContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { pxToPercentX, pxToPercentY } from '../utils/percent';
 import OptimizedImage from '../components/OptimizedImage';
 import { appTypography } from '../lib/darkThemeConfig';
 import { getItemImageSource } from '../lib/itemImage';
@@ -28,7 +27,7 @@ const { width } = Dimensions.get('window');
 
 const ItemDetailScreen = ({ route, navigation }) => {
   const { colors } = useTheme();
-  const { cartItems, addToCart, getItemQuantity, increaseQuantity, decreaseQuantity, removeFromCart } = useCart();
+  const { cartItems, addToCart, getItemQuantity, increaseQuantity, decreaseQuantity } = useCart();
   const [snackbarVisible, setSnackbarVisible] = useState(false);
   const snackbarHideTimer = React.useRef(null);
   const insets = useSafeAreaInsets();
@@ -54,10 +53,13 @@ const ItemDetailScreen = ({ route, navigation }) => {
     typeof detailImageSource === 'object' &&
     !!detailImageSource.uri;
 
+  const footerPadBottom = Math.max(12, insets.bottom);
+
   // Add fallback in case item is undefined
   if (!item) {
     return (
-      <SafeAreaView style={[styles.container, { backgroundColor: colors.pageBackground }]}>
+      <View style={[styles.container, { backgroundColor: colors.pageBackground }]}>
+        <BrandYellowStrip />
         <View style={[styles.simpleHeader, { backgroundColor: colors.elevatedSurface }]}>
           <TouchableOpacity
             onPress={() => navigation.goBack()}
@@ -71,7 +73,7 @@ const ItemDetailScreen = ({ route, navigation }) => {
         <View style={{ padding: 24 }}>
           <Text style={[styles.itemName, { color: colors.text }]}>No item data received</Text>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
@@ -118,29 +120,26 @@ const ItemDetailScreen = ({ route, navigation }) => {
   ];
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.pageBackground }]}>
-      {/* Top strip from home screen */}
-      <View style={[styles.topWhiteStrip, { backgroundColor: colors.brandYellow }]} />
-      
+    <View style={[styles.container, { backgroundColor: colors.pageBackground }]}>
+      <BrandYellowStrip />
+
+      <View style={[styles.simpleHeader, { backgroundColor: colors.elevatedSurface }]}>
+        <TouchableOpacity
+          onPress={() => navigation.goBack()}
+          style={styles.backButton}
+        >
+          <AppIcon name="arrow-back" size={24} color={colors.text} />
+        </TouchableOpacity>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Recipe Details</Text>
+        <View style={styles.headerSpacer} />
+      </View>
+
       <ScrollView
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={styles.scrollContent}
       >
-        {/* Header */}
-        <View style={styles.headerWrapper}>
-          <View style={[styles.simpleHeader, { backgroundColor: colors.elevatedSurface }]}>
-            <TouchableOpacity
-              onPress={() => navigation.goBack()}
-              style={styles.backButton}
-            >
-              <AppIcon name="arrow-back" size={24} color={colors.text} />
-            </TouchableOpacity>
-            <Text style={[styles.headerTitle, { color: colors.text }]}>Recipe Details</Text>
-            <View style={styles.headerSpacer} />
-          </View>
-        </View>
         {/* Item Image */}
         <View style={styles.imageContainer}>
           <View style={styles.imageShadow}>
@@ -180,11 +179,10 @@ const ItemDetailScreen = ({ route, navigation }) => {
             ))}
           </View>
         </View>
-
       </ScrollView>
 
       {/* Fixed Footer */}
-      <View style={[styles.footer, { backgroundColor: colors.elevatedSurface, paddingBottom: Math.max(20, insets.bottom + 10) }]}>
+      <View style={[styles.footer, { backgroundColor: colors.elevatedSurface, paddingBottom: footerPadBottom }]}>
         <View
           style={[
             styles.quantityContainer,
@@ -218,11 +216,9 @@ const ItemDetailScreen = ({ route, navigation }) => {
               ]} />
             )}
           </TouchableOpacity>
-          <Text style={[
-            styles.quantityText,
-            { color: colors.text },
-            !item.isAvailable && styles.quantityTextDisabled
-          ]}>{displayQuantity}</Text>
+          
+          <Text style={[styles.quantityText, { color: colors.text }]}>{displayQuantity}</Text>
+          
           <TouchableOpacity
             style={[
               styles.quantityButton,
@@ -232,19 +228,19 @@ const ItemDetailScreen = ({ route, navigation }) => {
             onPress={handleIncreaseQuantity}
             disabled={!item.isAvailable}
           >
-            <Text style={[
-              styles.plusText,
-              { color: colors.text },
-              !item.isAvailable && styles.plusTextDisabled
-            ]}>+</Text>
+            <AppIcon 
+              name="add" 
+              size={18} 
+              color={!item.isAvailable ? '#999' : colors.text} 
+            />
           </TouchableOpacity>
         </View>
 
-        <TouchableOpacity 
+        <TouchableOpacity
           style={[
-            styles.addToCartButton, 
-            !item.isAvailable && styles.addToCartButtonDisabled
-          ]} 
+            styles.addToCartButton,
+            { backgroundColor: item.isAvailable ? colors.brandYellow : '#CCC' }
+          ]}
           onPress={handleAddToCart}
           disabled={!item.isAvailable}
         >
@@ -265,7 +261,16 @@ const ItemDetailScreen = ({ route, navigation }) => {
           )}
         </TouchableOpacity>
       </View>
-    </SafeAreaView>
+
+      <BottomSnackbar
+        visible={snackbarVisible}
+        onPressViewCart={() => {
+          setSnackbarVisible(false);
+          navigation.navigate('CartTab');
+        }}
+        onHidden={() => {}}
+      />
+    </View>
   );
 };
 
@@ -274,24 +279,15 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F7F7F8',
   },
-  topWhiteStrip: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 34,
-    backgroundColor: '#f5bc3b',
-    zIndex: 1000,
-  },
-  headerWrapper: {
-    marginTop: pxToPercentY(190), // Account for top strip + extra margin
+  topStrip: {
+    width: '100%',
   },
   simpleHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingVertical: 14,
     backgroundColor: 'white',
   },
   backButton: {
@@ -303,206 +299,163 @@ const styles = StyleSheet.create({
   headerTitle: {
     textAlign: 'center',
     color: '#4D4D4D',
-    fontSize: 22,
-    fontWeight: '800',
+    fontSize: 20,
+    fontFamily: appTypography.bold,
     flex: 1,
   },
   headerSpacer: {
-    width: 32, // Same width as back button to center the title
+    width: 32,
   },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
-    flexGrow: 1,
-    paddingBottom: 8,
+    paddingBottom: 24,
   },
   imageContainer: {
-    paddingHorizontal: pxToPercentX(48),
-    marginBottom: pxToPercentY(140),
-    marginTop: pxToPercentY(60),
+    paddingHorizontal: 20,
+    marginTop: 16,
+    marginBottom: 16,
   },
   imageShadow: {
     borderRadius: 18,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
-      height: 6,
+      height: 2,
     },
-    shadowOpacity: 0.15,
-    shadowRadius: 10,
-    elevation: 10,
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
   },
   imageCard: {
     borderRadius: 18,
     overflow: 'hidden',
-    backgroundColor: '#FFFFFF',
   },
   itemImage: {
     width: '100%',
-    aspectRatio: 16 / 9,
+    height: width * 0.55,
+    borderRadius: 18,
   },
   itemInfoContainer: {
-    paddingHorizontal: pxToPercentX(48),
-    marginBottom: pxToPercentY(40),
+    paddingHorizontal: 20,
+    marginBottom: 16,
   },
   titleRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
-    marginBottom: pxToPercentY(8),
+    marginBottom: 8,
   },
   itemName: {
-    color: 'black',
-    fontSize: 24,
-    fontFamily: appTypography.bold,
     flex: 1,
+    fontSize: 22,
+    fontFamily: appTypography.bold,
+    marginRight: 12,
   },
   priceContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end',
   },
   priceText: {
-    color: '#00B330',
-    fontSize: 24,
+    fontSize: 22,
     fontFamily: appTypography.bold,
+    color: '#00B330',
   },
   itemDescription: {
-    color: '#8B8B8B',
-    fontSize: 13,
-    fontFamily: appTypography.semiBold,
+    fontSize: 15,
+    fontFamily: appTypography.regular,
     lineHeight: 22,
   },
   sectionContainer: {
-    marginHorizontal: pxToPercentX(48),
-    marginTop: pxToPercentY(80),
-    marginBottom: pxToPercentY(10),
-    backgroundColor: 'white',
+    marginHorizontal: 20,
+    marginBottom: 16,
+    padding: 16,
     borderRadius: 16,
-    paddingHorizontal: 20,
-    paddingVertical: 22,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 6,
-    },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 6,
   },
   sectionTitle: {
-    color: 'black',
     fontSize: 17,
     fontFamily: appTypography.bold,
-    marginBottom: pxToPercentY(16),
+    marginBottom: 12,
   },
   ingredientsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    gap: 8,
   },
   ingredientTag: {
-    borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(0, 0, 0, 0.18)',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    marginRight: 10,
-    marginBottom: 10,
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
   },
   ingredientText: {
-    color: '#3A3A3A',
-    fontSize: 12,
-    fontFamily: appTypography.bold,
+    fontSize: 13,
+    fontFamily: appTypography.regular,
   },
   footer: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 32,
-    paddingVertical: 20,
-    backgroundColor: 'white',
-    borderTopLeftRadius: 15,
-    borderTopRightRadius: 15,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: -2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 2,
-    elevation: 4,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(0,0,0,0.08)',
+    gap: 12,
   },
   quantityContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(235, 236, 255, 0.47)',
-    borderRadius: 10,
-    paddingHorizontal: 5,
-    paddingVertical: 5,
-    marginRight: pxToPercentX(20),
+    borderRadius: 12,
+    paddingHorizontal: 4,
+    paddingVertical: 4,
   },
   quantityButton: {
-    width: 32,
-    height: 32,
-    backgroundColor: 'white',
+    width: 36,
+    height: 36,
     borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
   },
+  quantityButtonDisabled: {
+    opacity: 0.45,
+  },
   minusLine: {
-    width: 12,
+    width: 14,
     height: 2,
-    backgroundColor: 'black',
+    borderRadius: 1,
+  },
+  minusLineDisabled: {
+    opacity: 0.45,
   },
   quantityText: {
-    color: 'black',
-    fontSize: 24,
-    fontFamily: appTypography.semiBold,
-    marginHorizontal: 20,
-  },
-  plusText: {
-    color: 'black',
-    fontSize: 24,
-    fontFamily: appTypography.regular,
+    minWidth: 28,
+    textAlign: 'center',
+    fontSize: 16,
+    fontFamily: appTypography.bold,
   },
   addToCartButton: {
     flex: 1,
-    backgroundColor: '#F5BC3B',
-    borderRadius: 10,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 12,
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
   },
   cartIcon: {
-    marginRight: pxToPercentX(8),
+    marginRight: 8,
   },
   addToCartText: {
-    color: 'white',
+    color: '#FFFFFF',
     fontSize: 15,
-    fontFamily: appTypography.semiBold,
-  },
-  priceInButtonText: {
-    color: 'white',
-    fontSize: 15,
-    fontFamily: appTypography.semiBold,
-  },
-  addToCartButtonDisabled: {
-    backgroundColor: '#ccc',
+    fontFamily: appTypography.bold,
   },
   addToCartTextDisabled: {
     color: '#999',
   },
-  quantityButtonDisabled: {
-    backgroundColor: '#f0f0f0',
-  },
-  minusLineDisabled: {
-    backgroundColor: '#999',
-  },
-  quantityTextDisabled: {
-    color: '#999',
-  },
-  plusTextDisabled: {
-    color: '#999',
+  priceInButtonText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontFamily: appTypography.bold,
   },
 });
 

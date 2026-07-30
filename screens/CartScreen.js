@@ -47,6 +47,12 @@ import {
   MSG_POOR_NETWORK,
 } from '../lib/orderFlowErrors';
 import LoadingButton from '../components/LoadingButton';
+import BrandYellowStrip from '../components/BrandYellowStrip';
+import {
+  CART_MAX_ORDER_TOTAL,
+  CART_MAX_ORDER_TOTAL_MESSAGE,
+  exceedsMaxOrderTotal,
+} from '../lib/cartRules';
 
 const { width, height } = Dimensions.get('window');
 
@@ -59,6 +65,24 @@ const createCartStyles = (colors, height) =>
   topStrip: {
     height: 34,
     backgroundColor: colors.brandYellow,
+  },
+  orderLimitBanner: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  orderLimitBannerText: {
+    flex: 1,
+    fontSize: 13,
+    fontFamily: appTypography.semiBold,
+    lineHeight: 18,
   },
   header: {
     flexDirection: 'row',
@@ -172,6 +196,7 @@ const createCartStyles = (colors, height) =>
   quantitySelector: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: colors.elevatedSurface,
     borderRadius: 8,
     borderWidth: 1,
@@ -179,7 +204,6 @@ const createCartStyles = (colors, height) =>
     width: 88,
     height: 32,
     paddingHorizontal: 4,
-    paddingVertical: 2,
     marginTop: 12,
   },
   quantityButton: {
@@ -194,19 +218,26 @@ const createCartStyles = (colors, height) =>
     width: 9,
     height: 2,
     backgroundColor: colors.text,
+    borderRadius: 1,
   },
   quantityText: {
     fontSize: 14,
     fontFamily: appTypography.bold,
     color: colors.text,
     marginHorizontal: 6,
+    lineHeight: 18,
+    textAlign: 'center',
+    includeFontPadding: false,
+    textAlignVertical: 'center',
   },
   plusText: {
     fontSize: 16,
     fontFamily: appTypography.bold,
     color: colors.text,
     textAlign: 'center',
-    lineHeight: 14,
+    lineHeight: 18,
+    includeFontPadding: false,
+    textAlignVertical: 'center',
   },
   takeawaySection: {
     marginTop: 15,
@@ -327,14 +358,14 @@ const createCartStyles = (colors, height) =>
     marginRight: 4,
   },
   recommendationName: {
-    fontSize: 12,
+    fontSize: 15,
     fontFamily: appTypography.bold,
     color: colors.text,
     marginBottom: 2,
-    maxWidth: 86,
+    maxWidth: 110,
   },
   recommendationPrice: {
-    fontSize: 11,
+    fontSize: 14,
     fontFamily: appTypography.bold,
     color: colors.accentGreen,
   },
@@ -362,6 +393,9 @@ const createCartStyles = (colors, height) =>
     fontFamily: appTypography.bold,
     color: '#FFFFFF',
     lineHeight: 20,
+    includeFontPadding: false,
+    textAlignVertical: 'center',
+    textAlign: 'center',
   },
   toPaySection: {
     backgroundColor: colors.elevatedSurface,
@@ -464,7 +498,8 @@ const createCartStyles = (colors, height) =>
     backgroundColor: colors.elevatedSurface,
     borderTopLeftRadius: 15,
     borderTopRightRadius: 15,
-    paddingVertical: 20,
+    paddingTop: 12,
+    paddingBottom: 12,
     paddingHorizontal: 20,
     shadowColor: colors.shadow,
     shadowOffset: { width: 0, height: -2 },
@@ -478,7 +513,7 @@ const createCartStyles = (colors, height) =>
     paddingVertical: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 48,
+    minHeight: 44,
   },
   placeOrderButtonDisabled: {
     opacity: 0.55,
@@ -726,6 +761,41 @@ const CartScreen = ({ navigation }) => {
   const [isOrderSummaryExpanded, setIsOrderSummaryExpanded] = useState(false); // State for Order Summary dropdown
   const [isTakeaway, setIsTakeaway] = useState(false); // Global takeaway checkbox (default OFF)
 
+  const finalPayableTotal = getFinalTotal();
+  const orderOverLimit = exceedsMaxOrderTotal(finalPayableTotal);
+
+  const handleTakeawayToggle = () => {
+    if (isTakeaway) {
+      setIsTakeaway(false);
+      return;
+    }
+    // Preview total with takeaway on (charge helper currently gates on isTakeaway)
+    const applicableItemsCount = cartItems.reduce((total, item) => {
+      const category = String(item?.category || '').toLowerCase();
+      const name = String(item?.name || '').toLowerCase();
+      const isBeverage =
+        category.includes('beverage') ||
+        category.includes('drink') ||
+        name.includes('tea') ||
+        name.includes('coffee') ||
+        name.includes('juice') ||
+        name.includes('shake') ||
+        name.includes('water') ||
+        name.includes('cola') ||
+        name.includes('sprite') ||
+        name.includes('pepsi') ||
+        name.includes('fanta');
+      if (isBeverage) return total;
+      return total + (item.quantity || 1);
+    }, 0);
+    const projected = getTotalPrice() + applicableItemsCount * 10;
+    if (exceedsMaxOrderTotal(projected)) {
+      Alert.alert('Order limit', CART_MAX_ORDER_TOTAL_MESSAGE);
+      return;
+    }
+    setIsTakeaway(true);
+  };
+
   // Get authenticated user ID (required by RLS policies)
   const getUserId = () => user?.id;
 
@@ -819,6 +889,10 @@ const CartScreen = ({ navigation }) => {
   const handlePayment = async () => {
     if (cartItems.length === 0) {
       Alert.alert('Empty Cart', 'Please add some items to your cart first.');
+      return;
+    }
+    if (exceedsMaxOrderTotal(getFinalTotal())) {
+      Alert.alert('Order limit', CART_MAX_ORDER_TOTAL_MESSAGE);
       return;
     }
     if (placeOrderInFlightRef.current || isCreatingOrder) return;
@@ -960,7 +1034,7 @@ const CartScreen = ({ navigation }) => {
               onPress={() => increaseQuantity(item.id)}
               hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             >
-              <Text style={styles.plusText}>+</Text>
+              <AppIcon name="add" size={16} color={colors.text} />
             </TouchableOpacity>
           </View>
         </View>
@@ -1126,7 +1200,7 @@ const CartScreen = ({ navigation }) => {
 
   return (
     <View style={styles.container}> 
-      <View style={styles.topStrip} />
+      <BrandYellowStrip />
 
       <ScrollView
         style={styles.scrollView}
@@ -1158,6 +1232,23 @@ const CartScreen = ({ navigation }) => {
 
         {/* Separator Line */}
         <View style={styles.separator} />
+
+        {cartItems.length > 0 && orderOverLimit ? (
+          <View
+            style={[
+              styles.orderLimitBanner,
+              {
+                backgroundColor: isDarkMode ? 'rgba(239,68,68,0.15)' : '#FFF1F0',
+                borderColor: isDarkMode ? 'rgba(239,68,68,0.45)' : '#FFC9C9',
+              },
+            ]}
+          >
+            <AppIcon name="alert-circle-outline" size={20} color={colors.error || '#EF4444'} />
+            <Text style={[styles.orderLimitBannerText, { color: colors.error || '#B91C1C' }]}>
+              Maximum order is ₹{CART_MAX_ORDER_TOTAL} (including takeaway). Reduce items or turn off takeaway to place this order.
+            </Text>
+          </View>
+        ) : null}
 
         {cartItems.length === 0 ? (
           renderEmptyCart()
@@ -1192,7 +1283,7 @@ const CartScreen = ({ navigation }) => {
             <View style={styles.globalTakeawayContainer}>
               <TouchableOpacity 
                 style={styles.globalTakeawayToggle}
-                onPress={() => setIsTakeaway(!isTakeaway)}
+                onPress={handleTakeawayToggle}
               >
                 <View style={[styles.checkboxButton, isTakeaway && styles.checkboxButtonSelected]}>
                   {isTakeaway && <AppIcon name="checkmark" size={14} color="white" />}
@@ -1288,11 +1379,16 @@ const CartScreen = ({ navigation }) => {
       {cartItems.length > 0 && (
         <View style={styles.bottomBar}>
           <LoadingButton
-            title={`Place Order ₹${getFinalTotal()}`}
+            title={
+              orderOverLimit
+                ? `Over ₹${CART_MAX_ORDER_TOTAL} limit`
+                : `Place Order ₹${getFinalTotal()}`
+            }
             loadingTitle="Starting checkout..."
             loading={isCreatingOrder}
             onPress={handlePayment}
-            style={styles.placeOrderButton}
+            disabled={orderOverLimit}
+            style={[styles.placeOrderButton, orderOverLimit && { opacity: 0.55 }]}
             textStyle={styles.placeOrderText}
             indicatorColor="#FFFFFF"
           />
@@ -1305,7 +1401,7 @@ const CartScreen = ({ navigation }) => {
             position: 'absolute',
             left: 16,
             right: 16,
-            bottom: (cartItems.length > 0 ? 96 : 32) + Math.max(insets.bottom, 8),
+            bottom: (cartItems.length > 0 ? 72 : 24) + 8,
           }}
         >
           <View

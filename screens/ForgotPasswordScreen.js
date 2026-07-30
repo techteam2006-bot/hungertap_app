@@ -9,13 +9,13 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  SafeAreaView,
   Dimensions,
-  StatusBar,
   Image,
   ActivityIndicator,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import AppIcon from '../components/AppIcon';
+import BrandYellowStrip from '../components/BrandYellowStrip';
 import OTPInput from '../components/OTPInput';
 import CountdownTimer from '../components/CountdownTimer';
 import PasswordRuleList, { passwordMeetsAllRules } from '../components/PasswordRuleList';
@@ -451,12 +451,8 @@ const ForgotPasswordScreen = ({ navigation, route }) => {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <View style={[styles.topStrip, { backgroundColor: colors.brandYellow }]} />
-      <StatusBar
-        barStyle="dark-content"
-        backgroundColor={colors.brandYellow}
-      />
+    <SafeAreaView style={styles.safeArea} edges={['bottom', 'left', 'right']}>
+      <BrandYellowStrip />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardAvoidingView}

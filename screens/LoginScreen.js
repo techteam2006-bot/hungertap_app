@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -263,6 +263,14 @@ export default function LoginScreen({ navigation }) {
   const scrollRef = useRef(null);
   const emailRef = useRef(null);
   const passwordRef = useRef(null);
+
+  const switchToLogin = useCallback((creds) => {
+    setIsLoginMode(true);
+    if (creds && typeof creds === 'object') {
+      if (creds.email) setEmail(String(creds.email).trim());
+      if (creds.password != null) setLoginPassword(String(creds.password));
+    }
+  }, []);
 
   useEffect(() => {
     if (pendingSignupCompletion) {
@@ -587,7 +595,7 @@ export default function LoginScreen({ navigation }) {
               ) : (
                 <SignupForm
                   navigation={navigation}
-                  onSwitchToLogin={() => setIsLoginMode(true)}
+                  onSwitchToLogin={switchToLogin}
                 />
               )}
             </View>

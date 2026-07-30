@@ -3,20 +3,20 @@ import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
   TouchableOpacity,
   Dimensions,
-  StatusBar,
   Linking,
   Alert,
   Image,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Clipboard from 'expo-clipboard';
 import AppIcon from '../components/AppIcon';
+import BrandYellowStrip from '../components/BrandYellowStrip';
 import { useTheme } from '../lib/ThemeContext';
 import { appTypography } from '../lib/darkThemeConfig';
-import splashCatLogo from '../assets/hungertap-global-loading.png';
+import splashCatLogo from '../assets/logo.png';
 
 const { width, height } = Dimensions.get('window');
 
@@ -242,9 +242,8 @@ const AuthHelpScreen = ({ navigation }) => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={[styles.topStrip, { backgroundColor: colors.brandYellow }]} />
-      <StatusBar barStyle="dark-content" backgroundColor={colors.brandYellow} />
+    <SafeAreaView style={styles.container} edges={['bottom', 'left', 'right']}>
+      <BrandYellowStrip />
       <View style={styles.body}>
         <View style={styles.header}>
           <TouchableOpacity

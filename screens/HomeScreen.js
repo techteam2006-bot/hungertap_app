@@ -8,7 +8,6 @@ import {
   Alert,
   FlatList,
   ActivityIndicator,
-  SafeAreaView,
   KeyboardAvoidingView,
   Platform,
   Dimensions,
@@ -17,7 +16,6 @@ import {
   Image,
   Animated,
   TextInput,
-  StatusBar,
   ScrollView,
   Easing,
   Modal,
@@ -45,9 +43,10 @@ import {
 import BottomSnackbar from '../components/BottomSnackbar';
 import { sortItemsByTime, getTimeSortingInfo, getTimePeriodDescription } from '../lib/utils/timeBasedSorting';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { LOADING_MASCOT, CANTEEN_STATUS_LOGO, NO_ITEMS_EMPTY_ILLUSTRATION } from '../lib/appLogo';
+import { LOADING_MASCOT, CANTEEN_STATUS_LOGO } from '../lib/appLogo';
 import { appTypography } from '../lib/darkThemeConfig';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import BrandYellowStrip, { useBrandStripHeight } from '../components/BrandYellowStrip';
 import CanteenClosedMessage from '../components/CanteenClosedMessage';
 import { pxToPercentX, pxToPercentY } from '../utils/percent';
 import { invalidateHttpMenuCache, menuFromHttpEnabled } from '../lib/menuHttp';
@@ -115,6 +114,7 @@ const HomeScreen = ({ navigation, route }) => {
   const { signOut, user } = useAuth();
   const { colors, isDarkMode } = useTheme();
   const insets = useSafeAreaInsets();
+  const brandStripHeight = useBrandStripHeight();
   const {
     cartItems: cart,
     addToCart,
@@ -143,20 +143,26 @@ const HomeScreen = ({ navigation, route }) => {
   // New trendy UI state
   const [refreshing, setRefreshing] = useState(false);
   const [isAtTop, setIsAtTop] = useState(true);
+  const [isStickyPinned, setIsStickyPinned] = useState(false);
   const flatListRef = useRef(null);
   const bannerFlatListRef = useRef(null);
   const scrollY = useRef(new Animated.Value(0)).current;
   const isAtTopRef = useRef(true);
+  const isStickyPinnedRef = useRef(false);
 
   const bannerHeight = (width - 32) * (550 / 1280); // original aspect ratio
-  /** Same as CartScreen `styles.topStrip.height` (34) */
-  const TOP_STRIP_HEIGHT = 34;
+  /** Yellow status band — same height as BrandYellowStrip / other screens. */
+  const TOP_STRIP_HEIGHT = brandStripHeight;
   const FIXED_HEADER_OFFSET_TOP = TOP_STRIP_HEIGHT;
   const FIXED_HEADER_HEIGHT = FIXED_HEADER_OFFSET_TOP + 60;
   const SEARCH_BAR_HEIGHT = 56;
   const CATEGORIES_SECTION_HEIGHT = 84;
+  /** Matches `styles.banner.marginTop` — keep pin math in sync with layout. */
+  const BANNER_TOP_MARGIN = 8;
   /** Vertical gap between hero banner bottom and sticky search bar. */
   const BANNER_SEARCH_GAP = 16;
+  /** Distance sticky bar travels from resting (under banner) to pinned (under header). */
+  const STICKY_PIN_DISTANCE = BANNER_TOP_MARGIN + bannerHeight + BANNER_SEARCH_GAP;
   
   const bannerOpacity = scrollY.interpolate({
     inputRange: [0, bannerHeight * 0.8],
@@ -186,7 +192,12 @@ const HomeScreen = ({ navigation, route }) => {
       isAtTopRef.current = atTop;
       setIsAtTop(atTop);
     }
-  }, []);
+    const pinned = y >= STICKY_PIN_DISTANCE - 0.5;
+    if (pinned !== isStickyPinnedRef.current) {
+      isStickyPinnedRef.current = pinned;
+      setIsStickyPinned(pinned);
+    }
+  }, [STICKY_PIN_DISTANCE]);
   
   // Handle viewable items change for banner tracking
   const handleViewableItemsChanged = useCallback(({ viewableItems }) => {
@@ -1453,7 +1464,7 @@ const HomeScreen = ({ navigation, route }) => {
         onDecrease={() => (kitchenConfirmedClosed ? null : decreaseQuantity(item.id))}
         disabled={kitchenConfirmedClosed}
         vegMode={vegMode}
-        imagePriority="normal"
+        imagePriority="high"
       />
     );
   };
@@ -1461,8 +1472,11 @@ const HomeScreen = ({ navigation, route }) => {
   const searchChrome = useMemo(
     () => ({
       bar: {
-        backgroundColor: isDarkMode ? 'rgba(0, 0, 0, 0.92)' : 'rgba(255, 255, 255, 0.9)',
-        borderColor: isDarkMode ? 'rgba(255,255,255,0.12)' : 'rgba(0, 0, 0, 0.1)',
+        backgroundColor: isDarkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
+        borderWidth: 0,
+        borderColor: 'transparent',
+        shadowOpacity: 0,
+        elevation: 0,
       },
       input: { color: colors.text },
       placeholder: colors.textMuted,
@@ -1472,15 +1486,61 @@ const HomeScreen = ({ navigation, route }) => {
     [colors, isDarkMode]
   );
 
-  /** Hero banner + search; counter-translates after `pinScrollY` so it freezes with the search bar. */
+  const renderSearchAndCategories = useCallback(
+    () => (
+      <View>
+        <View style={styles.stickySearchRow}>
+          <View style={[styles.animatedSearchBar, searchChrome.bar]}>
+            <AppIcon name="search" size={20} color={searchChrome.icon} style={styles.searchIcon} />
+            <TextInput
+              style={[styles.searchInput, searchChrome.input]}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              onSubmitEditing={handleSearchSubmit}
+              placeholder={dynamicPlaceholder}
+              placeholderTextColor={searchChrome.placeholder}
+            />
+            {searchQuery?.length > 0 && (
+              <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearIcon}>
+                <AppIcon name="close-circle" size={18} color={searchChrome.icon} />
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+        <FlatList
+          data={showCategorySkeleton ? [1, 2, 3, 4, 5] : quickActions}
+          renderItem={showCategorySkeleton ? (() => null) : renderQuickAction}
+          keyExtractor={(item) => (showCategorySkeleton ? `skeleton-${item}` : item.id)}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={{ height: CATEGORIES_SECTION_HEIGHT }}
+          contentContainerStyle={styles.quickActionsList}
+          extraData={activeFilter}
+        />
+      </View>
+    ),
+    [
+      searchChrome,
+      searchQuery,
+      handleSearchSubmit,
+      dynamicPlaceholder,
+      showCategorySkeleton,
+      quickActions,
+      renderQuickAction,
+      activeFilter,
+      CATEGORIES_SECTION_HEIGHT,
+    ]
+  );
+
+  /** Hero banner; scrolls with the list so search never paints over it mid-scroll. */
   const stickyBannerContent = useMemo(
     () => (
-      <Animated.View
+      <View
         style={[
           styles.bannerPinWrapper,
-          { 
-            backgroundColor: colors.contentBackground,
-            opacity: bannerOpacity,
+          {
+            backgroundColor: 'transparent',
+            opacity: 1,
           },
         ]}
       >
@@ -1563,14 +1623,12 @@ const HomeScreen = ({ navigation, route }) => {
         </View>
 
       </View>
-    </Animated.View>
+    </View>
     ),
     [
-      colors,
       banners,
       activeBannerIndex,
       width,
-      height,
       handleViewableItemsChanged,
     ]
   );
@@ -1620,11 +1678,11 @@ const HomeScreen = ({ navigation, route }) => {
   const listHeaderWithStickyBanner = useMemo(
     () => (
       <View>
-        {/* Spacer for the fixed header only */}
         <View style={{ height: FIXED_HEADER_HEIGHT }} />
         {stickyBannerContent}
-        {/* Gap for the pinned search+categories bar — keep in sync with BANNER_SEARCH_GAP */}
-        <View style={{ height: SEARCH_BAR_HEIGHT + CATEGORIES_SECTION_HEIGHT + BANNER_SEARCH_GAP }} />
+        <View style={{ height: BANNER_SEARCH_GAP }} />
+        {/* In-flow search scrolls with banner — never paints over it mid-scroll */}
+        {renderSearchAndCategories()}
         <View style={styles.exploreItemsSection}>
           <Text style={[
             styles.exploreItemsText,
@@ -1633,7 +1691,13 @@ const HomeScreen = ({ navigation, route }) => {
         </View>
       </View>
     ),
-    [stickyBannerContent, FIXED_HEADER_HEIGHT, SEARCH_BAR_HEIGHT, CATEGORIES_SECTION_HEIGHT, BANNER_SEARCH_GAP, vegMode]
+    [
+      stickyBannerContent,
+      renderSearchAndCategories,
+      FIXED_HEADER_HEIGHT,
+      BANNER_SEARCH_GAP,
+      vegMode,
+    ]
   );
 
   const renderLoadingItem = () => (
@@ -1686,23 +1750,7 @@ const HomeScreen = ({ navigation, route }) => {
       : 'Fetching today’s menu and item details for you.';
     return (
       <View style={[styles.container, { backgroundColor: colors.contentBackground }]}>
-        <StatusBar
-          translucent
-          backgroundColor={colors.brandYellow}
-          barStyle="dark-content"
-        />
-        <View
-          pointerEvents="none"
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            height: FIXED_HEADER_OFFSET_TOP,
-            backgroundColor: colors.brandYellow,
-            zIndex: 99,
-          }}
-        />
+        <BrandYellowStrip absolute />
         <View style={[styles.cleanLoadingContainer, { paddingBottom: insets.bottom }]}>
           <Animated.Image
             source={LOADING_MASCOT}
@@ -1733,9 +1781,8 @@ const HomeScreen = ({ navigation, route }) => {
   // Full closed UI only after server confirms is_open === false (not on fetch/network errors).
   if (!canteenStatus.loading && kitchenConfirmedClosed) {
     return (
-      <SafeAreaView style={[styles.container, { backgroundColor: colors.contentBackground }]}>
-        <StatusBar backgroundColor={colors.brandYellow} barStyle="dark-content" />
-        <View style={{ height: 34, backgroundColor: colors.brandYellow }} />
+      <View style={[styles.container, { backgroundColor: colors.contentBackground }]}>
+        <BrandYellowStrip />
         <View
           style={
             isDarkMode
@@ -1756,30 +1803,13 @@ const HomeScreen = ({ navigation, route }) => {
         <CanteenClosedMessage
           onRefresh={() => checkCanteenStatus({ showAlertOnFailure: true })}
         />
-      </SafeAreaView>
+      </View>
     );
   }
 
   return (
     <View style={[styles.container, { backgroundColor: colors.contentBackground }]}> 
-      <StatusBar
-        translucent
-        backgroundColor={colors.brandYellow}
-        barStyle="dark-content"
-      />
-      <View
-        pointerEvents="none"
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          height: FIXED_HEADER_OFFSET_TOP,
-          backgroundColor: colors.brandYellow,
-          zIndex: 99,
-        }}
-      />
-
+      <BrandYellowStrip absolute />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardView}
@@ -1797,25 +1827,20 @@ const HomeScreen = ({ navigation, route }) => {
           ]}
         >
           <View style={styles.fixedHeaderContent}>
-            <View>
               <View style={styles.locationRow}>
                 <AppIcon name="location" size={14} color={isDarkMode ? '#FFFFFF' : '#000000'} />
-                <Text style={[styles.locationText, { color: isDarkMode ? '#FFFFFF' : '#000000' }]}>
-                  {collegeName || 'clg'}
+                <Text style={[styles.locationText, { color: isDarkMode ? '#FFFFFF' : '#000000' }]} numberOfLines={1}>
+                  {(collegeName || 'College').toUpperCase()}
                 </Text>
                 {currentCanteenName ? (
-                  <TouchableOpacity
-                    onPress={() => collegeCanteens.length > 1 ? setShowCanteenPicker(true) : undefined}
-                    style={[styles.canteenSmallSelector, { backgroundColor: '#F5B041', borderWidth: 0 }]}
-                    activeOpacity={collegeCanteens.length > 1 ? 0.72 : 1}
-                  >
+                  <View style={[styles.canteenSmallSelector, { backgroundColor: '#F5B041' }]}>
                     <AppIcon name="storefront-outline" size={11} color="#FFFFFF" />
-                    <Text style={styles.canteenSmallText} numberOfLines={1}>{currentCanteenName}</Text>
-                    {collegeCanteens.length > 1 && <AppIcon name="chevron-down" size={11} color="#FFFFFF" />}
-                  </TouchableOpacity>
+                    <Text style={styles.canteenSmallText} numberOfLines={1}>
+                      {currentCanteenName}
+                    </Text>
+                  </View>
                 ) : null}
               </View>
-            </View>
             <TouchableOpacity
               onPress={handleVegModeToggle}
               activeOpacity={0.92}
@@ -1826,12 +1851,9 @@ const HomeScreen = ({ navigation, route }) => {
                 height: 30,
                 borderRadius: 15,
                 justifyContent: 'center',
-                overflow: 'visible',
-                shadowColor: vegMode ? '#00B330' : 'transparent',
-                shadowOffset: { width: 0, height: 0 },
-                shadowOpacity: vegMode ? 0.75 : 0,
-                shadowRadius: vegMode ? 10 : 0,
-                elevation: vegMode ? 8 : 0,
+                overflow: 'hidden',
+                shadowOpacity: 0,
+                elevation: 0,
               }}>
                 <View style={{
                   ...StyleSheet.absoluteFillObject,
@@ -1855,11 +1877,8 @@ const HomeScreen = ({ navigation, route }) => {
                   height: 24,
                   borderRadius: 12,
                   backgroundColor: '#FFFFFF',
-                  shadowColor: '#000',
-                  shadowOffset: { width: 0, height: 2 },
-                  shadowOpacity: 0.28,
-                  shadowRadius: 4,
-                  elevation: 5,
+                  shadowOpacity: 0,
+                  elevation: 0,
                   justifyContent: 'center',
                   alignItems: 'center',
                   transform: [{
@@ -1890,60 +1909,26 @@ const HomeScreen = ({ navigation, route }) => {
           </View>
         </View>
 
-        {/* Layer 2: Sticky Search + Categories */}
+        {/* Pinned search — invisible until banner fully scrolled away (no mid-scroll overlay) */}
         <Animated.View
+          pointerEvents={isStickyPinned ? 'auto' : 'none'}
           style={[
             styles.stickyCategoriesLayer,
             {
               top: FIXED_HEADER_HEIGHT,
-              transform: [{ translateY: scrollY.interpolate({
-                inputRange: [0, bannerHeight],
-                outputRange: [bannerHeight + BANNER_SEARCH_GAP, 0],
+              height: SEARCH_BAR_HEIGHT + CATEGORIES_SECTION_HEIGHT,
+              backgroundColor: colors.contentBackground,
+              opacity: scrollY.interpolate({
+                inputRange: [STICKY_PIN_DISTANCE - 1, STICKY_PIN_DISTANCE],
+                outputRange: [0, 1],
                 extrapolate: 'clamp',
-              }) }],
+              }),
               zIndex: 50,
-            }
+              elevation: 0,
+            },
           ]}
         >
-          {/* Search bar row */}
-          <View style={styles.stickySearchRow}>
-            {/* Solid background that fades in as the search bar reaches the pinned state, preventing items from scrolling visibly behind the transparent corners */}
-            <Animated.View style={[StyleSheet.absoluteFill, { 
-                backgroundColor: colors.contentBackground,
-                opacity: scrollY.interpolate({
-                  inputRange: [bannerHeight - 28 - 20, bannerHeight - 28],
-                  outputRange: [0, 1],
-                  extrapolate: 'clamp',
-                })
-             }]} />
-            <View style={[styles.animatedSearchBar, searchChrome.bar]}>
-              <AppIcon name="search" size={20} color={searchChrome.icon} style={styles.searchIcon} />
-              <TextInput
-                style={[styles.searchInput, searchChrome.input]}
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-                onSubmitEditing={handleSearchSubmit}
-                placeholder={dynamicPlaceholder}
-                placeholderTextColor={searchChrome.placeholder}
-              />
-              {searchQuery?.length > 0 && (
-                <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearIcon}>
-                  <AppIcon name="close-circle" size={18} color={searchChrome.icon} />
-                </TouchableOpacity>
-              )}
-            </View>
-          </View>
-          {/* Category circles row */}
-          <FlatList
-            data={showCategorySkeleton ? [1, 2, 3, 4, 5] : quickActions}
-            renderItem={showCategorySkeleton ? (() => null) : renderQuickAction}
-            keyExtractor={(item) => showCategorySkeleton ? `skeleton-${item}` : item.id}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={{ backgroundColor: colors.contentBackground }}
-            contentContainerStyle={styles.quickActionsList}
-            extraData={activeFilter}
-          />
+          {renderSearchAndCategories()}
         </Animated.View>
 
         <AnimatedFlatList
@@ -1972,7 +1957,7 @@ const HomeScreen = ({ navigation, route }) => {
               </View>
             ) : null
           }
-          scrollEventThrottle={16}
+          scrollEventThrottle={1}
           onScroll={Animated.event(
             [{ nativeEvent: { contentOffset: { y: scrollY } } }],
             { useNativeDriver: true, listener: handleMainListScroll }
@@ -2025,15 +2010,6 @@ const HomeScreen = ({ navigation, route }) => {
               </View>
             ) : (
               <View style={styles.emptyState}>
-                <Image
-                  source={NO_ITEMS_EMPTY_ILLUSTRATION}
-                  style={{
-                    width: '92%',
-                    height: height * 0.3,
-                    maxHeight: height * 0.38,
-                  }}
-                  resizeMode="contain"
-                />
                 <Text style={[styles.emptyStateTitle, { color: colors.text }]}>
                   {debouncedSearchQuery.trim()
                     ? 'No results found'
@@ -2063,7 +2039,7 @@ const HomeScreen = ({ navigation, route }) => {
               </View>
             )
           }
-          contentContainerStyle={{ paddingBottom: 56 + insets.bottom }}
+          contentContainerStyle={{ paddingBottom: 12 + Math.max(insets.bottom, 0) }}
         />
 
         {/* Price Filter Dropdown */}
@@ -2237,7 +2213,8 @@ const HomeScreen = ({ navigation, route }) => {
         )}
       </KeyboardAvoidingView>
 
-      {/* Canteen picker modal — slide bar of canteens in user's college */}
+      {/* Canteen switching disabled for now */}
+      {false && (
       <Modal
         visible={showCanteenPicker}
         transparent
@@ -2305,6 +2282,7 @@ const HomeScreen = ({ navigation, route }) => {
           </View>
         </GestureHandlerRootView>
       </Modal>
+      )}
       
       <BottomSnackbar
         visible={snackbarVisible}
@@ -2351,31 +2329,34 @@ const styles = StyleSheet.create({
   locationRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 6,
+    flexWrap: 'nowrap',
+    maxWidth: width * 0.62,
   },
   locationText: {
-    fontSize: 14,
+    fontSize: Platform.OS === 'ios' ? 14 : 13,
     ...getFontStyle('bold'),
     color: '#D4A017',
+    letterSpacing: 0.4,
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    flexShrink: 1,
   },
   canteenSmallSelector: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(44,62,107,0.18)',
+    backgroundColor: '#F5B041',
     paddingHorizontal: 9,
     paddingVertical: 4,
     borderRadius: 20,
-    marginLeft: 6,
     gap: 4,
-    borderWidth: 1,
-    borderColor: 'rgba(44,62,107,0.3)',
+    flexShrink: 1,
+    maxWidth: width * 0.32,
   },
   canteenSmallText: {
     fontSize: 12,
     color: '#FFFFFF',
     ...getFontStyle('semiBold'),
+    flexShrink: 1,
   },
   headerVegToggle: {
     position: 'relative',
@@ -2386,7 +2367,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    height: 140, // SEARCH_BAR_HEIGHT(56) + CATEGORIES_SECTION_HEIGHT(84)
+    overflow: 'hidden',
   },
   stickySearchRow: {
     height: 56,
@@ -2613,12 +2594,14 @@ const styles = StyleSheet.create({
   animatedSearchBar: {
     position: 'relative',
     height: height * 0.062, // 6.2% of screen height
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
     borderRadius: height * 0.031, // 3.1% of screen height
     paddingHorizontal: width * 0.05, // 5% of screen width
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(0, 0, 0, 0.1)',
+    borderWidth: 0,
+    borderColor: 'transparent',
+    shadowOpacity: 0,
+    elevation: 0,
   },
   searchInput: {
     fontSize: width * 0.04, // 4% of screen width
@@ -2706,15 +2689,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 50,
-    borderWidth: 1,
+    borderWidth: 0,
     marginHorizontal: 4,
     gap: 7,
-    // subtle depth
-    shadowColor: '#D4A017',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.18,
-    shadowRadius: 3,
-    elevation: 2,
+    shadowOpacity: 0,
+    elevation: 0,
   },
   quickActionChipImage: {
     width: 22,
@@ -2999,29 +2978,29 @@ const styles = StyleSheet.create({
   emptyState: {
     marginHorizontal: 6,
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 6,
+    justifyContent: 'center',
+    paddingVertical: 48,
+    paddingHorizontal: 20,
+    minHeight: height * 0.28,
   },
   emptyStateTitle: {
-    fontSize: 22,
-    marginTop: 6,
-    marginBottom: 6,
+    fontSize: 20,
+    marginBottom: 10,
     textAlign: 'center',
-    letterSpacing: 0.35,
-    lineHeight: 30,
-    fontFamily: appTypography.bold,
+    letterSpacing: 0.2,
+    lineHeight: 28,
+    ...getFontStyle('bold'),
   },
   emptyStateSubtitle: {
-    fontSize: 14,
+    fontSize: 15,
     ...getFontStyle('regular'),
     textAlign: 'center',
     lineHeight: 22,
-    marginTop: 4,
-    paddingHorizontal: 18,
+    paddingHorizontal: 12,
     maxWidth: 340,
   },
   emptyStateClearBtn: {
-    marginTop: 16,
+    marginTop: 18,
     paddingVertical: 8,
     paddingHorizontal: 16,
   },

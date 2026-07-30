@@ -3,16 +3,16 @@ import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   TouchableOpacity,
   Linking,
   Alert,
   ScrollView,
-  StatusBar,
   Image,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Clipboard from 'expo-clipboard';
 import AppIcon from '../components/AppIcon';
+import BrandYellowStrip from '../components/BrandYellowStrip';
 import { useTheme } from '../lib/ThemeContext';
 import { appTypography } from '../lib/darkThemeConfig';
 import { pxToPercentX, pxToPercentY } from '../utils/percent';
@@ -25,10 +25,6 @@ const createStyles = (colors) =>
     container: {
       flex: 1,
       backgroundColor: colors.pageBackground,
-    },
-    topStrip: {
-      height: 34,
-      width: '100%',
     },
     header: {
       flexDirection: 'row',
@@ -68,23 +64,10 @@ const createStyles = (colors) =>
       alignItems: 'center',
       marginBottom: pxToPercentY(40),
     },
-    heroIconWrap: {
+    heroLogo: {
       width: 88,
       height: 88,
-      borderRadius: 44,
-      backgroundColor: colors.brandOrange,
-      alignItems: 'center',
-      justifyContent: 'center',
       marginBottom: pxToPercentY(20),
-      shadowColor: colors.shadow,
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.12,
-      shadowRadius: 8,
-      elevation: 4,
-    },
-    heroLogo: {
-      width: 68,
-      height: 68,
     },
     heroTitle: {
       fontSize: 24,
@@ -160,11 +143,9 @@ const createStyles = (colors) =>
     metaRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      borderRadius: 12,
-      borderWidth: 1,
-      borderColor: colors.border,
-      backgroundColor: colors.elevatedSurface,
-      padding: 16,
+      paddingVertical: 8,
+      paddingHorizontal: 4,
+      backgroundColor: 'transparent',
     },
     metaText: {
       flex: 1,
@@ -225,9 +206,8 @@ const ContactUsScreen = ({ navigation }) => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={[styles.topStrip, { backgroundColor: colors.brandYellow }]} />
-      <StatusBar barStyle="dark-content" backgroundColor={colors.brandYellow} />
+    <SafeAreaView style={styles.container} edges={['bottom', 'left', 'right']}>
+      <BrandYellowStrip />
 
       <View style={styles.header}>
         <TouchableOpacity
@@ -251,9 +231,7 @@ const ContactUsScreen = ({ navigation }) => {
         contentContainerStyle={styles.scrollContent}
       >
         <View style={styles.hero}>
-          <View style={styles.heroIconWrap}>
-            <Image source={GLOBAL_LOADING_LOGO} style={styles.heroLogo} resizeMode="contain" />
-          </View>
+          <Image source={GLOBAL_LOADING_LOGO} style={styles.heroLogo} resizeMode="contain" />
           <Text style={styles.heroTitle}>Get in touch</Text>
           <Text style={styles.heroSubtitle}>
             Questions about orders, your account, or the app? We are happy to help.
@@ -284,10 +262,6 @@ const ContactUsScreen = ({ navigation }) => {
           </TouchableOpacity>
         </View>
 
-        <View style={styles.metaRow}>
-          <AppIcon name="time-outline" size={22} color={colors.textTertiary} />
-          <Text style={styles.metaText}>We typically respond within 24 hours on business days.</Text>
-        </View>
       </ScrollView>
     </SafeAreaView>
   );

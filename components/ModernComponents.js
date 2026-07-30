@@ -12,6 +12,7 @@ import {
   State,
   RefreshControl,
   Image,
+  Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import AppIcon from './AppIcon';
@@ -226,20 +227,21 @@ export const AnimatedFoodCard = ({
         style,
       ]}
     >
-      <TouchableOpacity
-        onPress={onPress}
-        onPressIn={handlePressIn}
-        onPressOut={handlePressOut}
-        activeOpacity={0.9}
+      <LinearGradient
+        colors={cardFill}
+        locations={[0.51, 1.0]}
         style={styles.newFoodCardTouchable}
       >
-        <LinearGradient
-          colors={cardFill}
-          locations={[0.51, 1.0]}
-          style={styles.newFoodCardTouchable}
+        {/* Image only opens item detail — rest of card stays non-navigating */}
+        <TouchableOpacity
+          onPress={onPress}
+          onPressIn={handlePressIn}
+          onPressOut={handlePressOut}
+          activeOpacity={0.9}
+          style={styles.newFoodImageContainer}
+          accessibilityRole="button"
+          accessibilityLabel={`View ${item?.name || 'item'} details`}
         >
-        {/* Food Image */}
-        <View style={styles.newFoodImageContainer}>
           <OptimizedImage
             source={newCardImageSource}
             style={[
@@ -252,7 +254,7 @@ export const AnimatedFoodCard = ({
             fallbackIcon="restaurant"
           />
 
-          <View style={[styles.dietaryBadge, { borderColor: colors.itemCardOutline }]}>
+          <View style={[styles.dietaryBadge, { borderColor: colors.itemCardOutline }]} pointerEvents="none">
             <View
               style={[
                 styles.dietarySquare,
@@ -269,11 +271,11 @@ export const AnimatedFoodCard = ({
           </View>
 
           {!item?.isAvailable && (
-            <View style={styles.outOfStockOverlay}>
+            <View style={styles.outOfStockOverlay} pointerEvents="none">
               <Text style={styles.outOfStockText}>OUT OF STOCK</Text>
             </View>
           )}
-        </View>
+        </TouchableOpacity>
 
         <View style={styles.newFoodMeta}>
           <View style={styles.newFoodNamePriceRow}>
@@ -313,28 +315,22 @@ export const AnimatedFoodCard = ({
               >
                 <TouchableOpacity
                   style={styles.newQuantityButton}
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    onDecrease && onDecrease();
-                  }}
+                  onPress={() => onDecrease && onDecrease()}
                   disabled={!onDecrease}
                 >
                   <AppIcon
                     name={quantity === 1 ? 'trash-outline' : 'remove'}
-                    size={20}
+                    size={18}
                     color={quantity === 1 ? '#EF4444' : colors.textSecondary}
                   />
                 </TouchableOpacity>
                 <Text style={[styles.newQuantityText, { color: colors.text }]}>{quantity}</Text>
                 <TouchableOpacity
                   style={styles.newQuantityButton}
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    onIncrease && onIncrease();
-                  }}
+                  onPress={() => onIncrease && onIncrease()}
                   disabled={!onIncrease}
                 >
-                  <AppIcon name="add" size={20} color={colors.textSecondary} />
+                  <AppIcon name="add" size={18} color={colors.textSecondary} />
                 </TouchableOpacity>
               </View>
             ) : (
@@ -343,10 +339,7 @@ export const AnimatedFoodCard = ({
                   styles.newAddButton,
                   { backgroundColor: vegMode ? '#00BD32' : colors.brandYellow },
                 ]}
-                onPress={(e) => {
-                  e.stopPropagation();
-                  onAddToCart && onAddToCart();
-                }}
+                onPress={() => onAddToCart && onAddToCart()}
                 disabled={!item?.isAvailable}
               >
                 <Text style={[styles.newAddButtonText, { color: '#000000' }]}>+ Add Items</Text>
@@ -354,8 +347,7 @@ export const AnimatedFoodCard = ({
             )}
           </View>
         </View>
-        </LinearGradient>
-      </TouchableOpacity>
+      </LinearGradient>
     </Animated.View>
   );
 };
@@ -1235,7 +1227,7 @@ const styles = StyleSheet.create({
   foodCard: {
     borderRadius: 20,
     marginHorizontal: 8,
-    marginVertical: 8,
+    marginVertical: 4,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.1,
@@ -1247,8 +1239,8 @@ const styles = StyleSheet.create({
   newFoodCard: {
     width: '95%',
     marginHorizontal: '2.5%',
-    marginTop: height * 0.008,
-    marginBottom: height * 0.02,
+    marginTop: 4,
+    marginBottom: 6,
     borderRadius: 15,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 10 },
@@ -1322,9 +1314,9 @@ const styles = StyleSheet.create({
   newFoodName: {
     flex: 1,
     minWidth: 0,
-    fontSize: width * 0.05,
+    fontSize: Platform.OS === 'ios' ? Math.max(18, width * 0.052) : width * 0.05,
     ...getFontStyle('bold'),
-    lineHeight: width * 0.055,
+    lineHeight: Platform.OS === 'ios' ? Math.max(22, width * 0.06) : width * 0.055,
     color: 'black',
     textAlign: 'left',
     flexShrink: 1,
@@ -1336,16 +1328,16 @@ const styles = StyleSheet.create({
     paddingTop: 2,
   },
   newCurrencySymbol: {
-    fontSize: width * 0.045,
+    fontSize: Platform.OS === 'ios' ? Math.max(16, width * 0.048) : width * 0.045,
     ...getFontStyle('bold'),
-    lineHeight: width * 0.055,
+    lineHeight: Platform.OS === 'ios' ? Math.max(22, width * 0.06) : width * 0.055,
     color: 'black',
     marginRight: width * 0.005,
   },
   newPrice: {
-    fontSize: width * 0.045,
+    fontSize: Platform.OS === 'ios' ? Math.max(18, width * 0.05) : width * 0.045,
     ...getFontStyle('bold'),
-    lineHeight: width * 0.055,
+    lineHeight: Platform.OS === 'ios' ? Math.max(22, width * 0.06) : width * 0.055,
     color: 'black',
   },
   newDescActionRow: {
@@ -1358,9 +1350,9 @@ const styles = StyleSheet.create({
   newFoodDescription: {
     flex: 1,
     minWidth: 0,
-    fontSize: width * 0.03,
+    fontSize: Platform.OS === 'ios' ? Math.max(14, width * 0.036) : width * 0.03,
     ...getFontStyle('medium'),
-    lineHeight: width * 0.04,
+    lineHeight: Platform.OS === 'ios' ? 20 : width * 0.04,
     color: '#8B8B8B',
     textAlign: 'left',
   },
@@ -1379,7 +1371,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   newAddButtonText: {
-    fontSize: 13,
+    fontSize: Platform.OS === 'ios' ? 14 : 13,
     fontFamily: appTypography.bold,
     lineHeight: 18,
     color: '#000000',
@@ -1389,9 +1381,9 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
+    paddingHorizontal: 10,
     height: 38,
     width: 110,
     shadowColor: 'transparent',
@@ -1400,22 +1392,23 @@ const styles = StyleSheet.create({
     elevation: 0,
   },
   newQuantityButton: {
-    width: 20, // Increased button size to fit in 35px height container
-    height: 20, // Increased button size to fit in 35px height container
+    width: 28,
+    height: 28,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 10, // Increased border radius
+    borderRadius: 10,
     backgroundColor: 'transparent',
   },
   newQuantityText: {
-    fontSize: 14, // Increased font size to match button text
+    fontSize: Platform.OS === 'ios' ? 15 : 14,
     fontFamily: appTypography.bold,
-    lineHeight: 18, // Increased line height to fit in container
+    lineHeight: 18,
     color: '#353535',
-    marginHorizontal: 6, // Increased margin
-    minWidth: 20, // Increased min width
+    marginHorizontal: 4,
+    minWidth: 20,
     textAlign: 'center',
-    flex: 1,
+    includeFontPadding: false,
+    textAlignVertical: 'center',
   },
   foodCardTouchable: {
     backgroundColor: 'transparent',

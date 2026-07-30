@@ -44,6 +44,12 @@ export default function AppIcon({ name, size = 24, color = 'black', style }) {
         <Path d="M244 400 100 256l144-144M120 256h292" fill="none" stroke={color} strokeWidth={48} strokeLinecap="round" strokeLinejoin="round" />
         </Svg>
       );
+    case 'arrow-forward':
+      return (
+        <Svg viewBox="0 0 512 512" width={size} height={size} style={style}>
+        <Path d="M268 112l144 144-144 144M392 256H100" fill="none" stroke={color} strokeWidth={48} strokeLinecap="round" strokeLinejoin="round" />
+        </Svg>
+      );
     case 'basket-outline':
       return (
         <Svg viewBox="0 0 512 512" width={size} height={size} style={style}>
