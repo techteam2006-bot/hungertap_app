@@ -16,7 +16,12 @@ import { LinearGradient } from 'expo-linear-gradient';
 import AppIcon from '../components/AppIcon';
 import BrandYellowStrip from '../components/BrandYellowStrip';
 import { useAuth } from '../lib/AuthContext';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  getNotificationsEnabled,
+  setNotificationsEnabled as persistNotificationsEnabled,
+  getVegMode,
+  setVegMode,
+} from '../lib/settingsCache';
 import { useTheme } from '../lib/ThemeContext';
 import { supabase } from '../lib/supabase';
 import { registerForPushNotificationsAsync } from '../lib/services/notifications';
@@ -119,9 +124,7 @@ const ProfileScreen = ({ navigation }) => {
   React.useEffect(() => {
     (async () => {
       try {
-        const saved = await AsyncStorage.getItem('notificationsEnabled');
-        // Unset → ON (same default as FCM auto-register on fresh installs)
-        setNotificationsEnabled(saved !== null ? JSON.parse(saved) === true : true);
+        setNotificationsEnabled(await getNotificationsEnabled());
       } catch (e) {
         console.error('Error loading settings:', e);
       }
@@ -135,14 +138,12 @@ const ProfileScreen = ({ navigation }) => {
           const fromBackend = await fetchUserVegModeEnabled(user.id);
           if (fromBackend !== null) {
             setVegModeEnabled(fromBackend);
-            await AsyncStorage.setItem('vegMode', JSON.stringify(fromBackend));
+            await setVegMode(fromBackend);
           } else {
-            const savedVegMode = await AsyncStorage.getItem('vegMode');
-            if (savedVegMode !== null) setVegModeEnabled(JSON.parse(savedVegMode));
+            setVegModeEnabled(await getVegMode());
           }
         } else {
-          const savedVegMode = await AsyncStorage.getItem('vegMode');
-          if (savedVegMode !== null) setVegModeEnabled(JSON.parse(savedVegMode));
+          setVegModeEnabled(await getVegMode());
         }
       } catch (e) {
         console.error('Error loading veg settings:', e);
@@ -157,12 +158,11 @@ const ProfileScreen = ({ navigation }) => {
           const fromBackend = await fetchUserVegModeEnabled(user.id);
           if (fromBackend !== null) {
             setVegModeEnabled(fromBackend);
-            await AsyncStorage.setItem('vegMode', JSON.stringify(fromBackend));
+            await setVegMode(fromBackend);
             return;
           }
         }
-        const savedVegMode = await AsyncStorage.getItem('vegMode');
-        if (savedVegMode !== null) setVegModeEnabled(JSON.parse(savedVegMode));
+        setVegModeEnabled(await getVegMode());
       } catch (e) {}
     });
     return unsubscribe;
@@ -188,7 +188,7 @@ const ProfileScreen = ({ navigation }) => {
 
         // Expo Go: remote push unavailable — still enable in-app local notifications.
         if (!token && reason === 'expo_go' && localOnly) {
-          await AsyncStorage.setItem('notificationsEnabled', JSON.stringify(true));
+          await persistNotificationsEnabled(true);
           await NotificationService.initialize();
           return;
         }
@@ -239,7 +239,7 @@ const ProfileScreen = ({ navigation }) => {
           return;
         }
 
-        await AsyncStorage.setItem('notificationsEnabled', JSON.stringify(true));
+        await persistNotificationsEnabled(true);
         // Allow NotificationService to finish channel/permission setup after preference is on.
         NotificationService.isInitialized = false;
         await NotificationService.initialize();
@@ -258,7 +258,7 @@ const ProfileScreen = ({ navigation }) => {
       } else {
         await NotificationService.clearAllNotifications();
       }
-      await AsyncStorage.setItem('notificationsEnabled', JSON.stringify(value));
+      await persistNotificationsEnabled(value);
       if (value === false) {
         NotificationService.isInitialized = false;
       }
@@ -274,7 +274,7 @@ const ProfileScreen = ({ navigation }) => {
   const onToggleVegMode = async (value) => {
     try {
       setVegModeEnabled(value);
-      await AsyncStorage.setItem('vegMode', JSON.stringify(value));
+      await setVegMode(value);
       if (user?.id) {
         const { ok, error } = await updateUserVegModeEnabled(user.id, value);
         if (!ok && error) console.warn('Veg mode backend:', error.message);

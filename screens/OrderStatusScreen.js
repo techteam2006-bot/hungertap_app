@@ -1162,12 +1162,15 @@ const OrderStatusScreen = ({ navigation, route }) => {
               <AppIcon name="receipt" size={26} color="#000000" />
               <Text style={[styles.billTitle, { color: colors.text }]}>Total Bill</Text>
             </View>
-            <Text style={[styles.billAmount, { color: colors.accentGreen }]}>₹{totalAmountDisplay}</Text>
-            <AppIcon
-              name={isOrderSummaryExpanded ? 'chevron-up' : 'chevron-down'}
-              size={24}
-              color={colors.textTertiary}
-            />
+            <View style={styles.billHeaderRight}>
+              <Text style={[styles.billAmount, { color: colors.accentGreen }]}>₹{totalAmountDisplay}</Text>
+              <AppIcon
+                name={isOrderSummaryExpanded ? 'chevron-up' : 'chevron-down'}
+                size={22}
+                color={colors.textTertiary || '#8E8E93'}
+                style={styles.billChevron}
+              />
+            </View>
           </View>
           </TouchableOpacity>
 
@@ -1593,16 +1596,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     flex: 1,
+    minWidth: 0,
+  },
+  billHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexShrink: 0,
   },
   billTitle: {
     fontSize: 20,
     fontWeight: '700',
     color: '#212121',
+    flexShrink: 1,
   },
   billAmount: {
     fontSize: 20,
     fontWeight: '700',
     color: '#00B330',
+  },
+  billChevron: {
+    marginLeft: 2,
   },
   timelineCard: {
     width: '92%',

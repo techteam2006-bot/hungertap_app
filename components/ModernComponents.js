@@ -232,7 +232,7 @@ export const AnimatedFoodCard = ({
         locations={[0.51, 1.0]}
         style={styles.newFoodCardTouchable}
       >
-        {/* Image only opens item detail — rest of card stays non-navigating */}
+        {/* Image only — name/description/add controls do not open item detail */}
         <TouchableOpacity
           onPress={onPress}
           onPressIn={handlePressIn}
@@ -277,8 +277,8 @@ export const AnimatedFoodCard = ({
           )}
         </TouchableOpacity>
 
-        <View style={styles.newFoodMeta}>
-          <View style={styles.newFoodNamePriceRow}>
+        <View style={styles.newFoodMeta} pointerEvents="box-none">
+          <View style={styles.newFoodNamePriceRow} pointerEvents="none">
             <Text
               style={[styles.newFoodName, { color: colors.text }]}
               textBreakStrategy="highQuality"
@@ -298,6 +298,7 @@ export const AnimatedFoodCard = ({
               numberOfLines={2}
               textBreakStrategy="highQuality"
               android_hyphenationFrequency="none"
+              pointerEvents="none"
             >
               {item?.description || 'Delicious food item'}
             </Text>

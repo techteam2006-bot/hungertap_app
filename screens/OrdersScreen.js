@@ -19,7 +19,8 @@ import { useTheme } from '../lib/ThemeContext';
 import { useAuth } from '../lib/AuthContext';
 import { useCart } from '../lib/CartContext';
 import { supabase, deriveItemIsAvailable } from '../lib/supabase';
-import { fetchUserOrdersWithLineJoins, pickLineRowsFromOrderRow } from '../lib/orderQueries';
+import { pickLineRowsFromOrderRow } from '../lib/orderQueries';
+import { getOrders } from '../lib/ordersCache';
 import { getLineItemIdFromRow, resolveOrderHeaderTotalFromRows } from '../lib/orderLineRowMoney';
 import { pxToPercentX, pxToPercentY } from '../utils/percent';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -81,14 +82,15 @@ const OrdersScreen = ({ navigation }) => {
       
       console.log('🔍 Fetching orders for user:', user?.id);
       
-      const { data: ordersData, error: ordersError } = await fetchUserOrdersWithLineJoins(
+      const { data: ordersData, error: ordersError } = await getOrders(
         supabase,
-        user.id
+        user.id,
+        { forceRefresh: Boolean(options.forceRefresh) }
       );
 
-      if (ordersError) {
+      if (ordersError && !(Array.isArray(ordersData) && ordersData.length > 0)) {
         console.error('❌ Error fetching orders:', ordersError);
-        Alert.alert('Error', 'Failed to load orders');
+        if (!options.silent) Alert.alert('Error', 'Failed to load orders');
       } else {
         console.log('✅ Orders fetched successfully:', ordersData?.length || 0);
         const lineName = (oi) => String(oi?.item_name || oi?.items?.name || 'Item').trim();
@@ -154,7 +156,7 @@ const OrdersScreen = ({ navigation }) => {
         filter: `placed_by=eq.${user.id}`,
       }, (payload) => {
         console.log('📦 New order received via real-time:', payload);
-        fetchOrders({ silent: true });
+        fetchOrders({ silent: true, forceRefresh: true });
       })
       .on('postgres_changes', {
         event: 'UPDATE',
@@ -163,7 +165,7 @@ const OrdersScreen = ({ navigation }) => {
         filter: `placed_by=eq.${user.id}`,
       }, (payload) => {
         console.log('📦 Order updated via real-time:', payload);
-        fetchOrders({ silent: true });
+        fetchOrders({ silent: true, forceRefresh: true });
       })
       .on('postgres_changes', {
         // Canteen close deletes live rows — refetch pulls archieved_* / failed_* history
@@ -173,7 +175,7 @@ const OrdersScreen = ({ navigation }) => {
         filter: `placed_by=eq.${user.id}`,
       }, (payload) => {
         console.log('📦 Order removed from live (likely canteen close):', payload);
-        fetchOrders({ silent: true });
+        fetchOrders({ silent: true, forceRefresh: true });
       })
       .subscribe();
 
@@ -210,7 +212,7 @@ const OrdersScreen = ({ navigation }) => {
     if (!user?.id) return;
     setRefreshing(true);
     try {
-      await fetchOrders({ silent: true });
+      await fetchOrders({ silent: true, forceRefresh: true });
     } finally {
       setRefreshing(false);
     }

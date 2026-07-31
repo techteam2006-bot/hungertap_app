@@ -51,13 +51,56 @@ import CanteenClosedMessage from '../components/CanteenClosedMessage';
 import { pxToPercentX, pxToPercentY } from '../utils/percent';
 import { invalidateHttpMenuCache, menuFromHttpEnabled } from '../lib/menuHttp';
 import { invalidateCanteenMenuEdgeCache } from '../lib/canteenMenuEdge';
+import {
+  getMenu,
+  invalidateMenu,
+  subscribeMenuUpdates,
+  rememberLastCanteen,
+  getLastRememberedCanteen,
+} from '../lib/menuCache';
+import {
+  getVegMode,
+  setVegMode as persistVegMode,
+  getVegModeCustomize,
+  getVegModeSelectedDays,
+} from '../lib/settingsCache';
 
 const { width, height } = Dimensions.get('window');
 
 const AnimatedFlatList = Animated.createAnimatedComponent(FlatList);
 
 const CATEGORIES_CACHE_KEY = 'cachedCategoriesV1';
-const MENU_PAGE_SIZE = 10;
+
+/**
+ * Category ids/names that have ≥1 visible menu row for the selected canteen.
+ * Out-of-stock items still count (they remain listed); inactive items do not.
+ */
+function computeCategoryOccupancy(rawItems) {
+  const ids = new Set();
+  const names = new Set();
+  if (!Array.isArray(rawItems)) {
+    return { ids: [], names: [] };
+  }
+  for (const item of rawItems) {
+    if (!item || !item.name) continue;
+    if (item.is_active === false) continue;
+    if (item.category_id != null && String(item.category_id).trim() !== '') {
+      ids.add(String(item.category_id));
+    }
+    const name = item.categories?.name || item.category;
+    if (name && String(name).trim()) {
+      names.add(String(name).trim().toLowerCase());
+    }
+  }
+  return { ids: [...ids], names: [...names] };
+}
+
+function categoryHasVisibleItems(category, occupancy) {
+  if (!occupancy || !category?.name) return false;
+  const id = category.id != null ? String(category.id) : '';
+  if (id && occupancy.idSet.has(id)) return true;
+  return occupancy.nameSet.has(String(category.name).trim().toLowerCase());
+}
 
 // Clerk-related veg preference bridge was removed; keep veg mode local-only for now.
 const fetchUserVegModeEnabled = async () => null;
@@ -237,20 +280,15 @@ const HomeScreen = ({ navigation, route }) => {
   // Veg mode: scheduled days (local) override; else signed-in users use public.users.veg_mode_enabled
   const loadVegModePreference = useCallback(async () => {
     try {
-      const saved = await AsyncStorage.getItem('vegMode');
-      const savedCustomize = await AsyncStorage.getItem('vegModeCustomize');
-      const savedSelectedDays = await AsyncStorage.getItem('vegModeSelectedDays');
-
-      const customizeOn = savedCustomize !== null && JSON.parse(savedCustomize);
-      const selectedDays =
-        savedSelectedDays !== null ? JSON.parse(savedSelectedDays) : null;
+      const customizeOn = await getVegModeCustomize();
+      const selectedDays = await getVegModeSelectedDays();
       const today = new Date()
         .toLocaleDateString('en-US', { weekday: 'long' })
         .toLowerCase();
 
       if (customizeOn && selectedDays && selectedDays[today]) {
         setVegMode(true);
-        await AsyncStorage.setItem('vegMode', JSON.stringify(true));
+        await persistVegMode(true);
         if (user?.id) {
           const { ok, error } = await updateUserVegModeEnabled(user.id, true);
           if (!ok && error) console.log('Veg mode backend sync:', error.message);
@@ -262,16 +300,12 @@ const HomeScreen = ({ navigation, route }) => {
         const fromBackend = await fetchUserVegModeEnabled(user.id);
         if (fromBackend !== null) {
           setVegMode(fromBackend);
-          await AsyncStorage.setItem('vegMode', JSON.stringify(fromBackend));
+          await persistVegMode(fromBackend);
           return;
         }
       }
 
-      if (saved !== null) {
-        setVegMode(JSON.parse(saved));
-      } else {
-        setVegMode(false);
-      }
+      setVegMode(await getVegMode());
     } catch (error) {
       console.log('Error loading veg mode:', error);
     }
@@ -362,7 +396,7 @@ const HomeScreen = ({ navigation, route }) => {
       const newValue = !vegMode;
       setVegMode(newValue);
       
-      await AsyncStorage.setItem('vegMode', JSON.stringify(newValue));
+      await persistVegMode(newValue);
       if (user?.id) {
         const { ok, error } = await updateUserVegModeEnabled(user.id, newValue);
         if (!ok && error) console.log('Error saving veg mode to backend:', error.message);
@@ -455,11 +489,21 @@ const HomeScreen = ({ navigation, route }) => {
   const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
   const [categoriesLoading, setCategoriesLoading] = useState(true);
   const fallbackCategoriesAppliedRef = useRef(false);
+  /** null = menu occupancy not known yet; otherwise ids/names with ≥1 visible item. */
+  const [categoryOccupancy, setCategoryOccupancy] = useState(null);
   
   const hasCategories = Array.isArray(categories) && categories.length > 0;
   const showCategorySkeleton = categoriesLoading && !hasCategories;
 
-  // Quick Actions - All Items + dynamic categories from database
+  const occupancyLookup = useMemo(() => {
+    if (!categoryOccupancy) return null;
+    return {
+      idSet: new Set(categoryOccupancy.ids || []),
+      nameSet: new Set(categoryOccupancy.names || []),
+    };
+  }, [categoryOccupancy]);
+
+  // Quick Actions - All Items + dynamic categories from database (hide empty ones)
   const quickActions = useMemo(() => {
     // Always show "All Items" even while loading, so categories section is visible
     const baseAction = {
@@ -522,8 +566,13 @@ const HomeScreen = ({ navigation, route }) => {
           return false;
         }
         seenCategories.add(categoryKey);
+
+        // Once menu occupancy is known, hide categories with zero visible items.
+        if (occupancyLookup && !categoryHasVisibleItems(category, occupancyLookup)) {
+          return false;
+        }
         
-        // Include all categories regardless of image (backend determines what should be shown)
+        // Include remaining categories in existing sort order
         return true;
       })
       .map(category => ({
@@ -536,7 +585,7 @@ const HomeScreen = ({ navigation, route }) => {
     
     const allActions = [...baseActions, ...dynamicCategories];
     return allActions;
-  }, [categories, hasCategories]);
+  }, [categories, hasCategories, occupancyLookup]);
 
   // Removed auto-scroll state/logic to avoid moving the list on selection
 
@@ -609,6 +658,9 @@ const HomeScreen = ({ navigation, route }) => {
     } else {
       invalidateCanteenMenuEdgeCache(currentCanteenId);
     }
+    // Soft-invalidate durable cache so forceRefresh fetches network first,
+    // while still allowing offline fallback if the request fails.
+    invalidateMenu(currentCanteenId).catch(() => {});
 
     pagingInFlightRef.current = true;
     menuAutoPrefetchSafetyRef.current = 0;
@@ -617,21 +669,16 @@ const HomeScreen = ({ navigation, route }) => {
     setLoading(true);
     setMenuItems([]);
     nextOffsetRef.current = 0;
-    setHasMore(true);
+    setHasMore(false);
 
     try {
       const canteenFilter = user?.id ? currentCanteenId : null;
-      const { data: rawRows, error, hasMore: more } = await foodService.getFoodItemsPage(
-        serverCategoryIdForPaging,
-        canteenFilter,
-        0,
-        MENU_PAGE_SIZE,
-        { forceRefresh: true }
-      );
+      // Load the full canteen menu in one shot (client filters by category/search).
+      const { data: rawRows, error } = await getMenu(canteenFilter, { forceRefresh: true });
 
       const rows = transformRawToMenuRows(rawRows || []);
 
-      if (error) {
+      if (error && rows.length === 0) {
         setMenuLoadError('Could not load menu. Pull down to refresh or try again.');
         setMenuItems([]);
         setHasMore(false);
@@ -640,7 +687,8 @@ const HomeScreen = ({ navigation, route }) => {
 
       setMenuItems(rows);
       nextOffsetRef.current = rows.length;
-      setHasMore(!!more);
+      setHasMore(false);
+      setCategoryOccupancy(computeCategoryOccupancy(rawRows || []));
     } catch (e) {
       setMenuLoadError('Could not load menu. Pull down to refresh or try again.');
       setMenuItems([]);
@@ -649,67 +697,11 @@ const HomeScreen = ({ navigation, route }) => {
       setLoading(false);
       pagingInFlightRef.current = false;
     }
-  }, [user?.id, menuCanteenReady, currentCanteenId, serverCategoryIdForPaging, transformRawToMenuRows]);
+  }, [user?.id, menuCanteenReady, currentCanteenId, transformRawToMenuRows]);
 
   const fetchMenuNextPage = useCallback(async () => {
-    if (!hasMore || loading || loadingMore || pagingInFlightRef.current) return;
-    if (user?.id && !menuCanteenReady) return;
-
-    pagingInFlightRef.current = true;
-    setLoadingMore(true);
-
-    try {
-      const canteenFilter = user?.id ? currentCanteenId : null;
-      const offset = nextOffsetRef.current;
-      const { data: rawRows, error, hasMore: more } = await foodService.getFoodItemsPage(
-        serverCategoryIdForPaging,
-        canteenFilter,
-        offset,
-        MENU_PAGE_SIZE
-      );
-
-      if (error) {
-        setMenuLoadError('Could not load more items. Please try again.');
-        setHasMore(false);
-        return;
-      }
-
-      const batch = transformRawToMenuRows(rawRows || []);
-      const sliceLen = batch.length;
-
-      if (sliceLen === 0) {
-        setHasMore(false);
-        return;
-      }
-
-      setMenuItems((prev) => {
-        const seen = new Set(prev.map((r) => r.id));
-        const merged = [...prev];
-        for (const row of batch) {
-          if (row?.id != null && !seen.has(row.id)) {
-            seen.add(row.id);
-            merged.push(row);
-          }
-        }
-        return merged;
-      });
-
-      nextOffsetRef.current = offset + sliceLen;
-      setHasMore(!!more);
-    } finally {
-      setLoadingMore(false);
-      pagingInFlightRef.current = false;
-    }
-  }, [
-    hasMore,
-    loading,
-    loadingMore,
-    user?.id,
-    menuCanteenReady,
-    currentCanteenId,
-    serverCategoryIdForPaging,
-    transformRawToMenuRows,
-  ]);
+    // Full menu is loaded up front — no scroll paging.
+  }, []);
 
   const fetchCategories = useCallback(async () => {
     try {
@@ -909,6 +901,92 @@ const HomeScreen = ({ navigation, route }) => {
   //   }, []) // Removed vegMode dependency to prevent infinite loop
   // );
 
+  // Restore last canteen immediately so offline menu can load before network switcher finishes.
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const last = await getLastRememberedCanteen();
+        if (!mounted || !last?.id) return;
+        setCurrentCanteenId((prev) => prev ?? last.id);
+        setCurrentCanteenName((prev) => prev || last.name || '');
+        // Unblock paging while college/canteen network fetch may still be offline.
+        setMenuCanteenReady(true);
+      } catch (_) {}
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // Persist canteen for offline startup + warm menu cache index.
+  useEffect(() => {
+    if (!currentCanteenId) return;
+    rememberLastCanteen(currentCanteenId, currentCanteenName || '').catch(() => {});
+  }, [currentCanteenId, currentCanteenName]);
+
+  // Full-canteen menu occupancy for hiding empty category chips (independent of paging).
+  useEffect(() => {
+    let mounted = true;
+    const canteenFilter = user?.id ? currentCanteenId : null;
+    if (user?.id && !currentCanteenId) {
+      setCategoryOccupancy(null);
+      return undefined;
+    }
+
+    setCategoryOccupancy(null);
+    (async () => {
+      try {
+        const { data, error } = await getMenu(canteenFilter);
+        if (!mounted) return;
+        if (!Array.isArray(data)) {
+          // Keep occupancy unknown so we don't hide categories incorrectly.
+          if (error) setCategoryOccupancy(null);
+          return;
+        }
+        setCategoryOccupancy(computeCategoryOccupancy(data));
+      } catch (_) {
+        if (mounted) setCategoryOccupancy(null);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [user?.id, currentCanteenId]);
+
+  // Background refresh → update full menu without a manual pull.
+  useEffect(() => {
+    if (!currentCanteenId && user?.id) return undefined;
+    const canteenFilter = user?.id ? currentCanteenId : null;
+    return subscribeMenuUpdates(canteenFilter, (rawData) => {
+      try {
+        setCategoryOccupancy(computeCategoryOccupancy(rawData));
+        const rows = Array.isArray(rawData) ? [...rawData] : [];
+        rows.sort((a, b) => String(a?.name ?? '').localeCompare(String(b?.name ?? '')));
+        const transformed = transformRawToMenuRows(rows);
+        setMenuItems(transformed);
+        nextOffsetRef.current = transformed.length;
+        setHasMore(false);
+        setMenuLoadError(null);
+      } catch (_) {}
+    });
+  }, [user?.id, currentCanteenId, transformRawToMenuRows]);
+
+  // If the selected category becomes empty after menu/canteen change, fall back to All Items.
+  useEffect(() => {
+    if (!occupancyLookup) return;
+    if (!activeFilter || activeFilter === 'all') return;
+    if (typeof activeFilter !== 'string' || !activeFilter.startsWith('category-')) return;
+    const nameNorm = activeFilter.slice('category-'.length).toLowerCase();
+    const selected = Array.isArray(categories)
+      ? categories.find((c) => c?.name && String(c.name).toLowerCase() === nameNorm)
+      : null;
+    if (selected && categoryHasVisibleItems(selected, occupancyLookup)) return;
+    if (!selected && occupancyLookup.nameSet.has(nameNorm)) return;
+    setActiveFilter('all');
+  }, [occupancyLookup, activeFilter, categories]);
+
   // Fetch user's college canteens and current canteen name (for switcher)
   useEffect(() => {
     if (!user?.id) return;
@@ -922,7 +1000,7 @@ const HomeScreen = ({ navigation, route }) => {
           .maybeSingle();
         if (!mounted) return;
         if (userErr) {
-          // ✅ error handled
+          // ✅ error handled — offline: keep restored canteen; still unblock menu load
           console.error('Canteen switcher users:', userErr.message || userErr);
           return;
         }
@@ -968,6 +1046,7 @@ const HomeScreen = ({ navigation, route }) => {
             if (current) {
               setCurrentCanteenName(current.name);
               setCurrentCanteenId(userCanteenId);
+              rememberLastCanteen(userCanteenId, current.name).catch(() => {});
             } else {
               const { data: canteenRow } = await supabase
                 .from('canteens')
@@ -977,11 +1056,13 @@ const HomeScreen = ({ navigation, route }) => {
               if (canteenRow) {
                 setCurrentCanteenName(canteenRow.name);
                 setCurrentCanteenId(userCanteenId);
+                rememberLastCanteen(userCanteenId, canteenRow.name).catch(() => {});
               }
             }
           } else if (openForSwitcher.length > 0) {
             setCurrentCanteenName(openForSwitcher[0].name);
             setCurrentCanteenId(openForSwitcher[0].id);
+            rememberLastCanteen(openForSwitcher[0].id, openForSwitcher[0].name).catch(() => {});
           }
         }
       } catch (e) {
@@ -1212,11 +1293,11 @@ const HomeScreen = ({ navigation, route }) => {
       }
       
       const normalizedQuery = debouncedSearchQuery.trim().toLowerCase();
-      const matchesSearch = normalizedQuery === '' ||
-        item.name?.toLowerCase().includes(normalizedQuery) ||
-        item.description?.toLowerCase().includes(normalizedQuery) ||
-        item.category?.toLowerCase().includes(normalizedQuery) ||
-        (Array.isArray(item.ingredients) && item.ingredients.join(' ').toLowerCase().includes(normalizedQuery));
+      const matchesSearch =
+        normalizedQuery === '' ||
+        String(item.name || '')
+          .toLowerCase()
+          .includes(normalizedQuery);
       
       return matchesFilter && matchesDietary && matchesVegMode && matchesSearch;
     });
@@ -1249,19 +1330,14 @@ const HomeScreen = ({ navigation, route }) => {
           if (a.price !== b.price) return b.price - a.price;
         }
 
-        // Then prioritize name matches first (prefix > contains), then other fields, then availability
+        // Prioritize name matches (prefix > contains), then availability
         const q = debouncedSearchQuery.trim().toLowerCase();
         const scoreFor = (item) => {
           if (!q) return 0;
           const name = String(item.name || '').toLowerCase();
-          if (name.startsWith(q)) return 3;
-          if (name.includes(q)) return 2;
-          const otherBucket = [
-            String(item.description || '').toLowerCase(),
-            String(item.category || '').toLowerCase(),
-            Array.isArray(item.ingredients) ? item.ingredients.join(' ').toLowerCase() : ''
-          ].join(' ');
-          return otherBucket.includes(q) ? 1 : 0;
+          if (name.startsWith(q)) return 2;
+          if (name.includes(q)) return 1;
+          return 0;
         };
 
         const scoreA = scoreFor(a);
@@ -1306,27 +1382,6 @@ const HomeScreen = ({ navigation, route }) => {
     return sortedItems;
   }, [menuItems, activeFilter, dietaryFilter, debouncedSearchQuery, priceSort, vegMode]);
 
-  // Veg / search / category filters are client-side — keep fetching pages until something matches or catalog ends.
-  useEffect(() => {
-    if (loading || loadingMore || !hasMore || pagingInFlightRef.current) return;
-    if (filteredItems.length > 0) return;
-    if (menuItems.length === 0) return;
-    if (menuAutoPrefetchSafetyRef.current >= 50) return;
-    menuAutoPrefetchSafetyRef.current += 1;
-    fetchMenuNextPage();
-  }, [
-    loading,
-    loadingMore,
-    hasMore,
-    filteredItems.length,
-    menuItems.length,
-    fetchMenuNextPage,
-  ]);
-
-  const handleMenuEndReached = useCallback(() => {
-    fetchMenuNextPage();
-  }, [fetchMenuNextPage]);
-
   const handleAddToCart = useCallback((item) => {
     // Block only when the server has confirmed kitchen is closed
     if (kitchenConfirmedClosed) {
@@ -1344,19 +1399,17 @@ const HomeScreen = ({ navigation, route }) => {
     }
     
     // Avoid re-render storm by deferring cart update slightly
-    requestAnimationFrame(() => addToCart(item));
-
-    // Show snackbar after 200ms
-    setTimeout(() => {
+    requestAnimationFrame(async () => {
+      const added = await addToCart(item);
+      if (!added) return;
       setSnackbarVisible(true);
-      // Auto hide after 5s
       if (snackbarHideTimer.current) {
         clearTimeout(snackbarHideTimer.current);
       }
       snackbarHideTimer.current = setTimeout(() => {
         setSnackbarVisible(false);
       }, 5000);
-    }, 200);
+    });
   }, [addToCart, kitchenConfirmedClosed]);
 
   const handleQuickActionPress = useCallback((filter) => {
@@ -1701,8 +1754,8 @@ const HomeScreen = ({ navigation, route }) => {
   );
 
   const renderLoadingItem = () => (
-    <View style={styles.loadingContainer}>
-      <EnhancedLoadingShimmer type="list" />
+    <View style={styles.menuLoadingSpinner}>
+      <ActivityIndicator size="large" color={vegMode ? '#00BD32' : colors.brandYellow || '#F5B041'} />
     </View>
   );
 
@@ -1833,12 +1886,27 @@ const HomeScreen = ({ navigation, route }) => {
                   {(collegeName || 'College').toUpperCase()}
                 </Text>
                 {currentCanteenName ? (
-                  <View style={[styles.canteenSmallSelector, { backgroundColor: '#F5B041' }]}>
+                  <TouchableOpacity
+                    onPress={() => (collegeCanteens.length > 1 ? setShowCanteenPicker(true) : undefined)}
+                    style={[styles.canteenSmallSelector, { backgroundColor: '#F5B041', borderWidth: 0 }]}
+                    activeOpacity={collegeCanteens.length > 1 ? 0.72 : 1}
+                    disabled={collegeCanteens.length <= 1}
+                    accessibilityRole="button"
+                    accessibilityLabel="Switch canteen"
+                    accessibilityHint={
+                      collegeCanteens.length > 1
+                        ? 'Opens a list of canteens at your college'
+                        : 'Only one canteen is available'
+                    }
+                  >
                     <AppIcon name="storefront-outline" size={11} color="#FFFFFF" />
                     <Text style={styles.canteenSmallText} numberOfLines={1}>
                       {currentCanteenName}
                     </Text>
-                  </View>
+                    {collegeCanteens.length > 1 ? (
+                      <AppIcon name="chevron-down" size={11} color="#FFFFFF" />
+                    ) : null}
+                  </TouchableOpacity>
                 ) : null}
               </View>
             <TouchableOpacity
@@ -1944,19 +2012,13 @@ const HomeScreen = ({ navigation, route }) => {
           alwaysBounceVertical={filteredItems.length > 0}
           bounces={filteredItems.length > 0}
           overScrollMode={filteredItems.length > 0 ? 'auto' : 'never'}
-          onEndReached={handleMenuEndReached}
-          onEndReachedThreshold={0.4}
-          initialNumToRender={10}
-          maxToRenderPerBatch={6}
-          windowSize={7}
+          onEndReached={undefined}
+          onEndReachedThreshold={undefined}
+          initialNumToRender={16}
+          maxToRenderPerBatch={12}
+          windowSize={9}
           removeClippedSubviews={Platform.OS === 'android'}
-          ListFooterComponent={
-            loadingMore && filteredItems.length > 0 ? (
-              <View style={{ paddingVertical: 16, alignItems: 'center' }}>
-                <ActivityIndicator size="small" color={colors.primary} />
-              </View>
-            ) : null
-          }
+          ListFooterComponent={null}
           scrollEventThrottle={1}
           onScroll={Animated.event(
             [{ nativeEvent: { contentOffset: { y: scrollY } } }],
@@ -1979,13 +2041,6 @@ const HomeScreen = ({ navigation, route }) => {
           ListEmptyComponent={
             loading ? (
               renderLoadingItem()
-            ) : loadingMore && menuItems.length > 0 ? (
-              <View style={{ paddingVertical: 48, alignItems: 'center', paddingHorizontal: 24 }}>
-                <ActivityIndicator size="small" color={colors.primary} />
-                <Text style={{ ...getFontStyle('regular'), marginTop: 14, color: colors.textSecondary }}>
-                  Loading more items…
-                </Text>
-              </View>
             ) : menuLoadError ? (
               <View style={[styles.emptyState, { paddingHorizontal: 24 }]}>
                 <AppIcon
@@ -2213,8 +2268,7 @@ const HomeScreen = ({ navigation, route }) => {
         )}
       </KeyboardAvoidingView>
 
-      {/* Canteen switching disabled for now */}
-      {false && (
+      {/* Canteen picker modal — slide bar of canteens in user's college */}
       <Modal
         visible={showCanteenPicker}
         transparent
@@ -2282,7 +2336,6 @@ const HomeScreen = ({ navigation, route }) => {
           </View>
         </GestureHandlerRootView>
       </Modal>
-      )}
       
       <BottomSnackbar
         visible={snackbarVisible}
@@ -2968,6 +3021,11 @@ const styles = StyleSheet.create({
   // Loading States
   loadingContainer: {
     paddingHorizontal: 16,
+  },
+  menuLoadingSpinner: {
+    paddingVertical: 56,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   loadingShimmer: {
     height: 280,

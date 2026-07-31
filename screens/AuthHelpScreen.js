@@ -16,7 +16,7 @@ import AppIcon from '../components/AppIcon';
 import BrandYellowStrip from '../components/BrandYellowStrip';
 import { useTheme } from '../lib/ThemeContext';
 import { appTypography } from '../lib/darkThemeConfig';
-import splashCatLogo from '../assets/logo.png';
+import splashCatLogo from '../assets/logo1.png';
 
 const { width, height } = Dimensions.get('window');
 
@@ -29,11 +29,11 @@ const TIPS = [
   },
   {
     icon: 'key-outline',
-    text: 'We’ll email a 6-digit verification code. Enter it on the Verify Email screen—no password needed.',
+    text: 'We’ll email a 6-digit verification code. Enter it in the Verify Email screen.',
   },
   {
     icon: 'shield-checkmark-outline',
-    text: 'If the code doesn’t arrive, check spam/junk, then tap Resend Code after the timer.',
+    text: 'If you don’t find the mail, check spam/junk. If you still haven’t recieved the code, tap Resend Code after the after 2 minutes.',
   },
   {
     icon: 'wifi-outline',

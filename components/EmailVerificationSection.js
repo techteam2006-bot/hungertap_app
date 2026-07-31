@@ -35,6 +35,9 @@ export default function EmailVerificationSection({
   resendSeconds = DEFAULT_RESEND_SECONDS,
   disabled = false,
   style,
+  emailInputRef = null,
+  onEmailFocus,
+  onEmailSubmitEditing,
 }) {
   const [emailError, setEmailError] = useState('');
   const [otpError, setOtpError] = useState('');
@@ -226,6 +229,7 @@ export default function EmailVerificationSection({
           style={styles.emailIcon}
         />
         <TextInput
+          ref={emailInputRef}
           style={[styles.emailInput, { color: colors.text }, emailLocked && styles.emailInputLocked]}
           placeholder="Email"
           placeholderTextColor={tertiary}
@@ -240,6 +244,16 @@ export default function EmailVerificationSection({
           autoComplete="email"
           textContentType="emailAddress"
           editable={!emailLocked && !disabled && !sending}
+          returnKeyType="next"
+          blurOnSubmit={false}
+          onFocus={onEmailFocus}
+          onSubmitEditing={() => {
+            if (typeof onEmailSubmitEditing === 'function') {
+              onEmailSubmitEditing();
+            } else if (!otpSent && !verified && sendEnabled && !sending && !disabled) {
+              handleSend();
+            }
+          }}
           accessibilityLabel="Email address"
         />
         {!otpSent && !verified ? (

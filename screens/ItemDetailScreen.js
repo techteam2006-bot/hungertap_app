@@ -79,13 +79,14 @@ const ItemDetailScreen = ({ route, navigation }) => {
 
   const itemForCart = { ...item, price: unitPrice };
 
-  const handleAddToCart = () => {
+  const handleAddToCart = async () => {
     if (!item.isAvailable) {
       return; // Don't add to cart if item is out of stock
     }
     // If not in cart, add once; item already in cart, navigate back
     if (cartQuantity === 0) {
-      addToCart(itemForCart);
+      const added = await addToCart(itemForCart);
+      if (!added) return;
     }
     // Show snackbar after 200ms
     setTimeout(() => {
@@ -96,12 +97,12 @@ const ItemDetailScreen = ({ route, navigation }) => {
     navigation.goBack();
   };
 
-  const handleIncreaseQuantity = () => {
+  const handleIncreaseQuantity = async () => {
     if (!item.isAvailable) return;
     
     if (cartQuantity === 0) {
       // Not in cart yet, add it
-      addToCart(itemForCart);
+      await addToCart(itemForCart);
     } else {
       // Already in cart, increase quantity
       increaseQuantity(item.id);

@@ -38,6 +38,7 @@ if (typeof global !== 'undefined' && !global.Animated) {
 import * as Notifications from 'expo-notifications';
 import AppIcon from './components/AppIcon';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getSplashShown, getNotificationsEnabled, setNotificationsEnabled, preloadSettingsCache } from './lib/settingsCache';
 
 // Screens
 import HomeScreen from './screens/HomeScreen';
@@ -47,6 +48,7 @@ import ProfileScreen from './screens/ProfileScreen';
 import DualScreenTabNavigator from './components/DualScreenTabNavigator';
 import LoginScreen from './screens/LoginScreen';
 import SplashScreen from './screens/SplashScreen';
+import AuthLoadingScreen from './screens/AuthLoadingScreen';
 import ForgotPasswordScreen from './screens/ForgotPasswordScreen';
 import ItemDetailScreen from './screens/ItemDetailScreen';
 import OrderConfirmationScreen from './screens/OrderConfirmationScreen';
@@ -77,7 +79,6 @@ import LegalWebViewScreen from './screens/LegalWebViewScreen';
 import { supabase } from './lib/supabase';
 import { configureImageCache } from './lib/ImageCache';
 import AppErrorBoundary from './components/AppErrorBoundary';
-import PageLoader from './components/PageLoader';
 import { getOrderStatusNotificationBody, isNotifiableOrderStatus } from './lib/orderStatus';
 
 installGlobalErrorSafety();
@@ -106,11 +107,13 @@ const OrdersTabWrapper = ({ navigation }) => <DualScreenTabNavigator currentTabN
 const ProfileTabWrapper = ({ navigation }) => <DualScreenTabNavigator currentTabName="ProfileTab" navigation={navigation} />;
 
 function GlobalLoading() {
-  return <PageLoader logoStyle={{ width: 280, height: 280 }} />;
+  // Shown after signup/login while session + profile resolve before MainTabs.
+  return <AuthLoadingScreen />;
 }
 
 function ThemedFontLoading() {
-  return <PageLoader logoStyle={{ width: 220, height: 220 }} />;
+  // Keep font bootstrap minimal; post-auth uses AuthLoadingScreen.
+  return <AuthLoadingScreen />;
 }
 
 function MainTabs() {
@@ -229,8 +232,9 @@ function Navigation() {
   React.useEffect(() => {
     const checkSplashStatus = async () => {
       try {
-        const splashShown = await AsyncStorage.getItem('splashShown');
-        setHasShownSplash(splashShown === 'true');
+        await preloadSettingsCache();
+        const splashShown = await getSplashShown();
+        setHasShownSplash(splashShown);
       } catch (error) {
         console.log('Error checking splash status:', error);
         setHasShownSplash(false);
@@ -335,12 +339,12 @@ function AppNavigator() {
     const maybeRegisterPushToken = async () => {
       if (!user?.id) return;
       try {
-        const raw = await AsyncStorage.getItem('notificationsEnabled');
         // Fresh installs: default ON so native FCM token is registered to user_tokens.fcm_token
-        const enabled = raw !== null ? JSON.parse(raw) === true : true;
+        const enabled = await getNotificationsEnabled();
         if (!enabled) return;
-        if (raw === null) {
-          await AsyncStorage.setItem('notificationsEnabled', JSON.stringify(true));
+        const rawProbe = await AsyncStorage.getItem('notificationsEnabled');
+        if (rawProbe === null) {
+          await setNotificationsEnabled(true);
         }
         const { token } = await registerForPushNotificationsAsync(user.id);
         if (!token) {

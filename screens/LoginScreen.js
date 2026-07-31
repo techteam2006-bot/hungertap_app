@@ -25,6 +25,11 @@ import LoadingButton from '../components/LoadingButton';
 import SignupForm from '../components/SignupForm';
 import { LOGIN_SCREEN_LOGO } from '../lib/appLogo';
 import { appTypography } from '../lib/darkThemeConfig';
+import {
+  AUTH_NETWORK_ERROR_CODE,
+  AUTH_NETWORK_ERROR_MESSAGE,
+} from '../lib/authErrorMessages';
+import { isNetworkConnectivityFailure } from '../lib/orderFlowErrors';
 
 const { width, height } = Dimensions.get('window');
 const BRAND_GOLD = '#D4A017';
@@ -46,7 +51,7 @@ const createLoginStyles = (colors) =>
       flexGrow: 1,
       paddingHorizontal: width * 0.06,
       paddingTop: height * 0.025,
-      paddingBottom: height * 0.05,
+      paddingBottom: height * 0.28,
       backgroundColor: 'transparent',
     },
     logoSection: {
@@ -58,8 +63,8 @@ const createLoginStyles = (colors) =>
       marginBottom: height * 0.000625,
     },
     logo: {
-      width: width * 0.5,
-      height: width * 0.5,
+      width: width * 0.3,
+      height: width * 0.3,
       borderRadius: width * 0.06,
     },
     toggleContainer: {
@@ -344,7 +349,8 @@ export default function LoginScreen({ navigation }) {
       const { error } = await signIn(email.trim().toLowerCase(), loginPassword);
 
       if (error) {
-        if (__DEV__) console.warn('Login failed:', error?.message || error);
+        // Message only — never console.error(Error) (opens RN LogBox toast).
+        if (__DEV__) console.warn('Login failed:', error?.message || String(error));
         const msg = (error.message || '').toLowerCase();
 
         if (msg.includes('access denied') || msg.includes('only for students')) {
@@ -357,7 +363,15 @@ export default function LoginScreen({ navigation }) {
         }
 
         let errorMessage = 'Something went wrong. Please try again.';
-        if (error.accountExists || error.code === 'incomplete_signup_or_wrong_password') {
+        if (
+          error.code === AUTH_NETWORK_ERROR_CODE ||
+          isNetworkConnectivityFailure(error) ||
+          msg.includes('network') ||
+          msg.includes('fetch') ||
+          msg.includes('connection error')
+        ) {
+          errorMessage = AUTH_NETWORK_ERROR_MESSAGE;
+        } else if (error.accountExists || error.code === 'incomplete_signup_or_wrong_password') {
           errorMessage =
             'This email is registered, but that password does not work. If you verified your email during Sign Up but did not finish, use Forgot password to set your password — then try again.';
         } else if (
@@ -374,8 +388,6 @@ export default function LoginScreen({ navigation }) {
         } else if (msg.includes('email') && msg.includes('confirm')) {
           errorMessage =
             'Please verify your email address before signing in. Check your inbox for a confirmation code.';
-        } else if (msg.includes('network') || msg.includes('fetch')) {
-          errorMessage = 'Connection error. Please check your internet and try again.';
         }
 
         Alert.alert('Login Failed', errorMessage);
@@ -388,8 +400,16 @@ export default function LoginScreen({ navigation }) {
         if (__DEV__) console.log('Login successful');
       }
     } catch (error) {
-      if (__DEV__) console.error('Login exception:', error?.message || error);
-      Alert.alert('Error', 'An unexpected error occurred. Please try again.');
+      if (__DEV__) console.warn('Login exception:', error?.message || String(error));
+      const offline =
+        isNetworkConnectivityFailure(error) ||
+        String(error?.message || error || '')
+          .toLowerCase()
+          .includes('network');
+      Alert.alert(
+        offline ? 'Login Failed' : 'Error',
+        offline ? AUTH_NETWORK_ERROR_MESSAGE : 'An unexpected error occurred. Please try again.'
+      );
     } finally {
       setLoading(false);
     }
@@ -406,15 +426,17 @@ export default function LoginScreen({ navigation }) {
       <SafeAreaView style={styles.safeArea}>
         <KeyboardAvoidingView
           style={styles.keyboardAvoidingView}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={0}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
         >
           <ScrollView
             ref={scrollRef}
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
             bounces={false}
+            automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
           >
             <View style={styles.logoSection}>
               <View style={styles.logoContainer}>
@@ -596,6 +618,7 @@ export default function LoginScreen({ navigation }) {
                 <SignupForm
                   navigation={navigation}
                   onSwitchToLogin={switchToLogin}
+                  scrollRef={scrollRef}
                 />
               )}
             </View>

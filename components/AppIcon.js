@@ -138,6 +138,12 @@ export default function AppIcon({ name, size = 24, color = 'black', style }) {
         <Path d="m112 184 144 144 144-144" fill="none" stroke={color} strokeWidth={48} strokeLinecap="round" strokeLinejoin="round" />
         </Svg>
       );
+    case 'chevron-up':
+      return (
+        <Svg viewBox="0 0 512 512" width={size} height={size} style={style}>
+        <Path d="m112 328 144-144 144 144" fill="none" stroke={color} strokeWidth={48} strokeLinecap="round" strokeLinejoin="round" />
+        </Svg>
+      );
     case 'chevron-forward':
       return (
         <Svg viewBox="0 0 512 512" width={size} height={size} style={style}>

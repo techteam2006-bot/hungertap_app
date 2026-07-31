@@ -3,9 +3,22 @@
  * Uses require() after init so Metro does not hoist App module evaluation before Sentry.init().
  */
 import 'react-native-gesture-handler';
+import { LogBox } from 'react-native';
 import { initSentry, Sentry } from './lib/sentry';
 
 initSentry();
+
+// Expected offline / Expo Go noise — do not cover login with red LogBox toasts.
+if (typeof __DEV__ !== 'undefined' && __DEV__) {
+  LogBox.ignoreLogs([
+    'Network request failed',
+    'TypeError: Network request failed',
+    'expo-notifications',
+    'Android Push notifications',
+    'EXPO_PUBLIC_SUPABASE_URL',
+    'EXPO_PUBLIC_SUPABASE_ANON_KEY',
+  ]);
+}
 
 // Temporary crash probes — only when EXPO_PUBLIC_SENTRY_CRASH_TEST is set.
 // Values: after-init | before-render | native | js-fatal

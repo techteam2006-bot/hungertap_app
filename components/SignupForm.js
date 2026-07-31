@@ -8,24 +8,29 @@ import {
   Animated,
   Easing,
   Alert,
+  findNodeHandle,
+  UIManager,
 } from 'react-native';
 import AppIcon from './AppIcon';
 import LoadingButton from './LoadingButton';
 import EmailVerificationSection from './EmailVerificationSection';
-import PasswordRuleList, {
-  passwordMeetsAllRules,
-} from './PasswordRuleList';
+import PasswordRuleList, { passwordMeetsAllRules } from './PasswordRuleList';
 import { useAuth } from '../lib/AuthContext';
 import { useTheme } from '../lib/ThemeContext';
 import { appTypography } from '../lib/darkThemeConfig';
-import { describeOtpFailure, describeSignUpFailure, isEmailAlreadyInUseError } from '../lib/authErrorMessages';
+import {
+  describeOtpFailure,
+  describeSignUpFailure,
+  isEmailAlreadyInUseError,
+  EMAIL_ALREADY_EXISTS_MESSAGE,
+} from '../lib/authErrorMessages';
 import { lookupCanteenForSignup } from '../lib/canteenLookup';
 import { openLegalPage } from '../lib/legalLinks';
 
 const BRAND_GOLD = '#D4A017';
 const EMAIL_RE = /^\S+@\S+\.\S+$/;
 
-export default function SignupForm({ navigation, onSwitchToLogin, style }) {
+export default function SignupForm({ navigation, onSwitchToLogin, style, scrollRef }) {
   const { colors } = useTheme();
   const {
     sendSignupEmailOtp,
@@ -49,14 +54,50 @@ export default function SignupForm({ navigation, onSwitchToLogin, style }) {
   const [emailVerified, setEmailVerified] = useState(false);
   const [passwordError, setPasswordError] = useState('');
   const [confirmError, setConfirmError] = useState('');
+  const [passwordTouched, setPasswordTouched] = useState(false);
   const [generalError, setGeneralError] = useState('');
   const [generalSuccess, setGeneralSuccess] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [nameError, setNameError] = useState('');
 
+  const nameRef = useRef(null);
+  const canteenRef = useRef(null);
+  const emailRef = useRef(null);
   const passwordRef = useRef(null);
   const confirmRef = useRef(null);
   const passwordEnableAnim = useRef(new Animated.Value(0)).current;
+
+  const scrollFocusedIntoView = useCallback(
+    (inputRef) => {
+      const scroll = scrollRef?.current;
+      const input = inputRef?.current;
+      if (!scroll || !input) return;
+
+      const scrollNode = findNodeHandle(scroll);
+      const inputNode = findNodeHandle(input);
+      if (!scrollNode || !inputNode) return;
+
+      // Delay so keyboard height / layout settle before measuring.
+      setTimeout(() => {
+        try {
+          UIManager.measureLayout(
+            inputNode,
+            scrollNode,
+            () => {},
+            (_x, y) => {
+              scroll.scrollTo({
+                y: Math.max(0, y - 100),
+                animated: true,
+              });
+            }
+          );
+        } catch (_) {
+          // Fallback: keep current scroll position
+        }
+      }, 150);
+    },
+    [scrollRef]
+  );
 
   // Resume mid-OTP session only — never copy name/email from cached metadata into inputs.
   useEffect(() => {
@@ -73,10 +114,13 @@ export default function SignupForm({ navigation, onSwitchToLogin, style }) {
       useNativeDriver: true,
     }).start(() => {
       if (emailVerified) {
-        setTimeout(() => passwordRef.current?.focus(), 120);
+        setTimeout(() => {
+          passwordRef.current?.focus();
+          scrollFocusedIntoView(passwordRef);
+        }, 120);
       }
     });
-  }, [emailVerified, passwordEnableAnim]);
+  }, [emailVerified, passwordEnableAnim, scrollFocusedIntoView]);
 
   // If OTP is revoked, unlock and clear post-OTP fields.
   useEffect(() => {
@@ -86,10 +130,12 @@ export default function SignupForm({ navigation, onSwitchToLogin, style }) {
       setConfirmPassword('');
       setPasswordError('');
       setConfirmError('');
+      setPasswordTouched(false);
     }
   }, [emailVerified]);
 
   const describeError = useCallback((error, context) => {
+    if (isEmailAlreadyInUseError(error)) return EMAIL_ALREADY_EXISTS_MESSAGE;
     return describeOtpFailure(error, { context }).message;
   }, []);
 
@@ -102,6 +148,8 @@ export default function SignupForm({ navigation, onSwitchToLogin, style }) {
   );
 
   const postOtpUnlocked = emailVerified && !submitting;
+  const showPasswordMissing =
+    passwordTouched && !password && emailVerified;
 
   const canSubmit = useMemo(
     () =>
@@ -164,7 +212,13 @@ export default function SignupForm({ navigation, onSwitchToLogin, style }) {
       if (canteenLookup.row?.is_open === false) {
         return { error: { message: 'This canteen is closed. Please contact admin.' } };
       }
-      return sendSignupEmailOtp(addr, { full_name: fullName.trim() });
+      // Store canteen on auth metadata at OTP send so public.users can be created right after verify.
+      return sendSignupEmailOtp(addr, {
+        full_name: fullName.trim(),
+        canteen_id: String(canteenLookup.row.id),
+        college_id:
+          canteenLookup.row.college_id != null ? String(canteenLookup.row.college_id) : undefined,
+      });
     },
     [sendSignupEmailOtp, fullName, canteenName]
   );
@@ -180,8 +234,9 @@ export default function SignupForm({ navigation, onSwitchToLogin, style }) {
 
   const validatePasswordsInline = () => {
     let ok = true;
+    setPasswordTouched(true);
     if (!password) {
-      setPasswordError('Please enter a password.');
+      setPasswordError('Password is missing');
       ok = false;
     } else if (!passwordRulesOk) {
       setPasswordError('Password is too weak. Meet all requirements below.');
@@ -245,11 +300,12 @@ export default function SignupForm({ navigation, onSwitchToLogin, style }) {
       });
 
       if (error) {
+        if (isEmailAlreadyInUseError(error)) {
+          setGeneralError(EMAIL_ALREADY_EXISTS_MESSAGE);
+          return;
+        }
         const { message } = describeSignUpFailure(error);
         setGeneralError(message);
-        if (isEmailAlreadyInUseError(error)) {
-          onSwitchToLogin?.();
-        }
         return;
       }
 
@@ -317,8 +373,9 @@ export default function SignupForm({ navigation, onSwitchToLogin, style }) {
       >
         <AppIcon name="person-outline" size={18} color={tertiary} style={styles.icon} />
         <TextInput
+          ref={nameRef}
           style={[styles.input, { color: colors.text }]}
-          placeholder="Full Name"
+          placeholder="User Name"
           placeholderTextColor={tertiary}
           value={fullName}
           onChangeText={onNameChange}
@@ -329,7 +386,10 @@ export default function SignupForm({ navigation, onSwitchToLogin, style }) {
           importantForAutofill="no"
           editable={preOtpEditable}
           returnKeyType="next"
-          accessibilityLabel="Full name"
+          blurOnSubmit={false}
+          onFocus={() => scrollFocusedIntoView(nameRef)}
+          onSubmitEditing={() => canteenRef.current?.focus()}
+          accessibilityLabel="User name"
         />
       </View>
       {nameError ? <Text style={[styles.fieldError, { color: colors.error }]}>{nameError}</Text> : null}
@@ -342,6 +402,7 @@ export default function SignupForm({ navigation, onSwitchToLogin, style }) {
       >
         <AppIcon name="business-outline" size={18} color={tertiary} style={styles.icon} />
         <TextInput
+          ref={canteenRef}
           style={[styles.input, { color: colors.text }]}
           placeholder="Canteen name"
           placeholderTextColor={tertiary}
@@ -353,6 +414,9 @@ export default function SignupForm({ navigation, onSwitchToLogin, style }) {
           textContentType="none"
           editable={preOtpEditable}
           returnKeyType="next"
+          blurOnSubmit={false}
+          onFocus={() => scrollFocusedIntoView(canteenRef)}
+          onSubmitEditing={() => emailRef.current?.focus()}
           accessibilityLabel="Canteen name"
         />
       </View>
@@ -364,6 +428,11 @@ export default function SignupForm({ navigation, onSwitchToLogin, style }) {
         onSendOtp={handleSendOtp}
         onVerifyOtp={handleVerifyOtp}
         describeError={describeError}
+        emailInputRef={emailRef}
+        onEmailFocus={() => scrollFocusedIntoView(emailRef)}
+        onEmailSubmitEditing={() => {
+          // Stay on email / send OTP — password unlocks only after verify.
+        }}
         sendEnabled={!!fullName.trim() && !!canteenName.trim() && emailLooksValid && !submitting}
         onVerifiedChange={(v) => {
           setEmailVerified(v);
@@ -384,7 +453,7 @@ export default function SignupForm({ navigation, onSwitchToLogin, style }) {
         style={{ marginBottom: 8 }}
       />
 
-      {/* Post-OTP: password, confirm, terms — locked until verified */}
+      {/* Post-OTP: password + confirm — locked until verified */}
       <Animated.View
         style={{
           opacity: passwordEnableAnim.interpolate({
@@ -407,7 +476,7 @@ export default function SignupForm({ navigation, onSwitchToLogin, style }) {
           style={[
             styles.inputRow,
             { backgroundColor: colors.inputBackground, borderColor: colors.border },
-            passwordError ? { borderColor: colors.error } : null,
+            showPasswordMissing || passwordError ? { borderColor: colors.error } : null,
           ]}
         >
           <AppIcon name="lock-closed-outline" size={18} color={tertiary} style={styles.icon} />
@@ -427,8 +496,11 @@ export default function SignupForm({ navigation, onSwitchToLogin, style }) {
             textContentType="newPassword"
             editable={postOtpUnlocked}
             returnKeyType="next"
+            blurOnSubmit={false}
             accessibilityLabel="Password"
             accessibilityState={{ disabled: passwordLocked }}
+            onFocus={() => scrollFocusedIntoView(passwordRef)}
+            onBlur={() => setPasswordTouched(true)}
             onSubmitEditing={() => confirmRef.current?.focus()}
           />
           <TouchableOpacity
@@ -445,8 +517,13 @@ export default function SignupForm({ navigation, onSwitchToLogin, style }) {
             />
           </TouchableOpacity>
         </View>
-        {passwordError ? (
-          <Text style={[styles.fieldError, { color: colors.error }]}>{passwordError}</Text>
+        {showPasswordMissing || passwordError ? (
+          <View style={styles.passwordMissingRow} accessibilityLiveRegion="polite">
+            <AppIcon name="close-circle" size={16} color={colors.error} style={undefined} />
+            <Text style={[styles.fieldErrorInline, { color: colors.error }]}>
+              {passwordError || 'Password is missing'}
+            </Text>
+          </View>
         ) : null}
 
         <PasswordRuleList
@@ -483,6 +560,7 @@ export default function SignupForm({ navigation, onSwitchToLogin, style }) {
             returnKeyType="done"
             accessibilityLabel="Confirm password"
             accessibilityState={{ disabled: passwordLocked }}
+            onFocus={() => scrollFocusedIntoView(confirmRef)}
             onSubmitEditing={() => {
               if (canSubmit) handleSignUp();
             }}
@@ -508,43 +586,45 @@ export default function SignupForm({ navigation, onSwitchToLogin, style }) {
             {confirmHint.text}
           </Text>
         ) : null}
-
-        <View style={[styles.termsRow, passwordLocked && styles.dimmed]}>
-          <TouchableOpacity
-            onPress={() => {
-              if (!postOtpUnlocked) return;
-              setAcceptTerms((v) => !v);
-            }}
-            disabled={!postOtpUnlocked}
-            hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-            accessibilityRole="checkbox"
-            accessibilityState={{ checked: acceptTerms, disabled: passwordLocked }}
-            accessibilityLabel="Accept terms of service"
-          >
-            <View
-              style={[
-                styles.checkbox,
-                { borderColor: colors.textSecondary },
-                acceptTerms && styles.checkboxOn,
-              ]}
-            >
-              {acceptTerms ? (
-                <AppIcon name="checkmark" size={14} color="#fff" style={undefined} />
-              ) : null}
-            </View>
-          </TouchableOpacity>
-          <Text style={[styles.termsText, { color: colors.text }]}>
-            I read & accepted{' '}
-            <Text
-              style={styles.termsLink}
-              onPress={() => openLegalPage(navigation, 'termsOfService')}
-              accessibilityRole="link"
-            >
-              Terms of Service
-            </Text>
-          </Text>
-        </View>
       </Animated.View>
+
+      {/* Terms: checkbox gated by OTP; "Terms of Service" always tappable */}
+      <View style={styles.termsRow}>
+        <TouchableOpacity
+          onPress={() => {
+            if (!postOtpUnlocked) return;
+            setAcceptTerms((v) => !v);
+          }}
+          disabled={!postOtpUnlocked}
+          hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: acceptTerms, disabled: passwordLocked }}
+          accessibilityLabel="Accept terms of service"
+        >
+          <View
+            style={[
+              styles.checkbox,
+              { borderColor: colors.textSecondary },
+              acceptTerms && styles.checkboxOn,
+              passwordLocked && { opacity: 0.45 },
+            ]}
+          >
+            {acceptTerms ? (
+              <AppIcon name="checkmark" size={14} color="#fff" style={undefined} />
+            ) : null}
+          </View>
+        </TouchableOpacity>
+        <Text style={[styles.termsText, { color: colors.text }]}>
+          I read & accepted{' '}
+          <Text
+            style={styles.termsLink}
+            onPress={() => openLegalPage(navigation, 'termsOfService')}
+            accessibilityRole="link"
+          >
+            Terms of Service
+          </Text>
+        </Text>
+      </View>
 
       <LoadingButton
         style={[styles.submit, !canSubmit && styles.submitDisabled]}
@@ -611,6 +691,19 @@ const styles = StyleSheet.create({
     marginTop: -6,
     marginBottom: 10,
     marginLeft: 4,
+  },
+  passwordMissingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: -6,
+    marginBottom: 10,
+    marginLeft: 4,
+  },
+  fieldErrorInline: {
+    fontSize: 12,
+    fontFamily: appTypography.regular,
+    flexShrink: 1,
   },
   fieldHint: {
     fontSize: 12,

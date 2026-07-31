@@ -60,15 +60,19 @@ const BottomSnackbar = ({ visible, onPressViewCart, onHidden }) => {
         },
       ]}
     >
-      <View style={styles.content}>
+      <TouchableOpacity
+        style={styles.content}
+        onPress={onPressViewCart}
+        activeOpacity={0.85}
+        accessibilityRole="button"
+        accessibilityLabel="View cart"
+      >
         <View style={styles.leftRow}>
           <AppIcon name="cart" size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
           <Text style={styles.titleText}>1 Item added</Text>
         </View>
-        <TouchableOpacity onPress={onPressViewCart} activeOpacity={0.8}>
-          <Text style={styles.ctaText}>View Cart →</Text>
-        </TouchableOpacity>
-      </View>
+        <Text style={styles.ctaText}>View Cart →</Text>
+      </TouchableOpacity>
     </Animated.View>
   );
 };

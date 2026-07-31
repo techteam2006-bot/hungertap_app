@@ -32,7 +32,7 @@ import {
   navigateToPaymentProcessingAfterV2,
 } from '../lib/createOrderV2';
 import { toAlertMessage } from '../lib/toAlertMessage';
-import { getMenu } from '../lib/menuCache';
+import { getMenu, getLastRememberedCanteen } from '../lib/menuCache';
 import { useAuth } from '../lib/AuthContext';
 import { pxToPercentX, pxToPercentY } from '../utils/percent';
 import { appTypography } from '../lib/darkThemeConfig';
@@ -52,6 +52,7 @@ import {
   CART_MAX_ORDER_TOTAL,
   CART_MAX_ORDER_TOTAL_MESSAGE,
   exceedsMaxOrderTotal,
+  takeawayChargeForLines,
 } from '../lib/cartRules';
 
 const { width, height } = Dimensions.get('window');
@@ -682,6 +683,12 @@ const createCartStyles = (colors, height) =>
     fontFamily: appTypography.bold,
     color: colors.text,
   },
+  globalTakeawayPriceHint: {
+    fontSize: 13,
+    fontFamily: appTypography.semiBold,
+    color: colors.textSecondary,
+    marginLeft: 6,
+  },
   globalTakeawayDescription: {
     fontSize: 12,
     fontFamily: appTypography.regular,
@@ -703,31 +710,11 @@ const CartScreen = ({ navigation }) => {
     clearCart,
     addToCart,
     replaceCartItems,
+    isTakeaway,
+    setIsTakeaway,
   } = useCart();
   
-  const getTakeawayChargeForLines = (lines) => {
-    if (!isTakeaway || !Array.isArray(lines)) return 0;
-    const applicableItemsCount = lines.reduce((total, item) => {
-      const category = String(item?.category || '').toLowerCase();
-      const name = String(item?.name || '').toLowerCase();
-      const isBeverage = 
-        category.includes('beverage') || 
-        category.includes('drink') || 
-        name.includes('tea') || 
-        name.includes('coffee') || 
-        name.includes('juice') || 
-        name.includes('shake') || 
-        name.includes('water') || 
-        name.includes('cola') || 
-        name.includes('sprite') || 
-        name.includes('pepsi') || 
-        name.includes('fanta');
-        
-      if (isBeverage) return total;
-      return total + (item.quantity || 1);
-    }, 0);
-    return applicableItemsCount * 10;
-  };
+  const getTakeawayChargeForLines = (lines) => takeawayChargeForLines(lines, isTakeaway);
 
   const getTakeawayCharge = () => getTakeawayChargeForLines(cartItems);
 
@@ -759,7 +746,6 @@ const CartScreen = ({ navigation }) => {
   const placeOrderInFlightRef = useRef(false);
   const [checkoutErrorToast, setCheckoutErrorToast] = useState('');
   const [isOrderSummaryExpanded, setIsOrderSummaryExpanded] = useState(false); // State for Order Summary dropdown
-  const [isTakeaway, setIsTakeaway] = useState(false); // Global takeaway checkbox (default OFF)
 
   const finalPayableTotal = getFinalTotal();
   const orderOverLimit = exceedsMaxOrderTotal(finalPayableTotal);
@@ -767,30 +753,6 @@ const CartScreen = ({ navigation }) => {
   const handleTakeawayToggle = () => {
     if (isTakeaway) {
       setIsTakeaway(false);
-      return;
-    }
-    // Preview total with takeaway on (charge helper currently gates on isTakeaway)
-    const applicableItemsCount = cartItems.reduce((total, item) => {
-      const category = String(item?.category || '').toLowerCase();
-      const name = String(item?.name || '').toLowerCase();
-      const isBeverage =
-        category.includes('beverage') ||
-        category.includes('drink') ||
-        name.includes('tea') ||
-        name.includes('coffee') ||
-        name.includes('juice') ||
-        name.includes('shake') ||
-        name.includes('water') ||
-        name.includes('cola') ||
-        name.includes('sprite') ||
-        name.includes('pepsi') ||
-        name.includes('fanta');
-      if (isBeverage) return total;
-      return total + (item.quantity || 1);
-    }, 0);
-    const projected = getTotalPrice() + applicableItemsCount * 10;
-    if (exceedsMaxOrderTotal(projected)) {
-      Alert.alert('Order limit', CART_MAX_ORDER_TOTAL_MESSAGE);
       return;
     }
     setIsTakeaway(true);
@@ -804,23 +766,59 @@ const CartScreen = ({ navigation }) => {
 
   // Fetch food items for recommendations (same canteen as orders / menu)
   useEffect(() => {
+    let cancelled = false;
     const fetchFoodItems = async () => {
       try {
         setRecommendationsLoading(true);
         const canteenId = user?.id ? await getUserCanteenId(user.id) : null;
-        const { data, error } = await getMenu(canteenId);
+        if (cancelled) return;
+        // Offline: getUserCanteenId may be null — fall back to last remembered canteen.
+        let resolvedCanteenId = canteenId;
+        if (!resolvedCanteenId && user?.id) {
+          try {
+            const last = await getLastRememberedCanteen();
+            if (last?.id) resolvedCanteenId = last.id;
+          } catch (_) {}
+        }
+        const { data, error } = await getMenu(resolvedCanteenId, {
+          onUpdate: (fresh) => {
+            if (cancelled || !Array.isArray(fresh)) return;
+            const transformedItems = fresh.map((item) => ({
+              ...item,
+              id: item.id,
+              name: item.name,
+              description: item.description,
+              price: item.price || 0.0,
+              unit_price: item.price || 0.0,
+              total_price: (item.price || 0.0) * (item.quantity || 1),
+              special_instructions: item.special_instructions || '',
+              category: item.categories?.name || 'Other',
+              image: item.image_url,
+              isAvailable: deriveItemIsAvailable(item),
+              isVegetarian: item.is_vegetarian,
+              reviews: item.reviews_count,
+              ingredients: item.ingredients || [],
+              preparation: item.preparation || [],
+              cookingTime: item.cooking_time,
+              spiceLevel: item.spice_level,
+              calories: item.calories,
+            }));
+            setAllFoodItems(transformedItems);
+          },
+        });
+        if (cancelled) return;
         if (error) {
           console.error('Error fetching food items for recommendations:', error);
         } else if (Array.isArray(data)) {
-          const transformedItems = data.map(item => ({
+          const transformedItems = data.map((item) => ({
             ...item,
             id: item.id,
             name: item.name,
             description: item.description,
-            price: item.price || 0.00,
-      unit_price: item.price || 0.00,
-      total_price: (item.price || 0.00) * (item.quantity || 1),
-      special_instructions: item.special_instructions || '',
+            price: item.price || 0.0,
+            unit_price: item.price || 0.0,
+            total_price: (item.price || 0.0) * (item.quantity || 1),
+            special_instructions: item.special_instructions || '',
             category: item.categories?.name || 'Other',
             image: item.image_url,
             isAvailable: deriveItemIsAvailable(item),
@@ -830,18 +828,21 @@ const CartScreen = ({ navigation }) => {
             preparation: item.preparation || [],
             cookingTime: item.cooking_time,
             spiceLevel: item.spice_level,
-            calories: item.calories
+            calories: item.calories,
           }));
           setAllFoodItems(transformedItems);
         }
       } catch (error) {
         console.error('Error fetching food items:', error);
       } finally {
-        setRecommendationsLoading(false);
+        if (!cancelled) setRecommendationsLoading(false);
       }
     };
 
     fetchFoodItems();
+    return () => {
+      cancelled = true;
+    };
   }, [user?.id]);
 
   useEffect(() => {
@@ -1245,7 +1246,7 @@ const CartScreen = ({ navigation }) => {
           >
             <AppIcon name="alert-circle-outline" size={20} color={colors.error || '#EF4444'} />
             <Text style={[styles.orderLimitBannerText, { color: colors.error || '#B91C1C' }]}>
-              Maximum order is ₹{CART_MAX_ORDER_TOTAL} (including takeaway). Reduce items or turn off takeaway to place this order.
+              {CART_MAX_ORDER_TOTAL_MESSAGE}
             </Text>
           </View>
         ) : null}
@@ -1289,6 +1290,7 @@ const CartScreen = ({ navigation }) => {
                   {isTakeaway && <AppIcon name="checkmark" size={14} color="white" />}
                 </View>
                 <Text style={styles.globalTakeawayText}>Takeaway</Text>
+                <Text style={styles.globalTakeawayPriceHint}>(+₹10)</Text>
                 <AppIcon name="basket-outline" size={18} color="#D99367" style={{ marginLeft: 6 }} />
               </TouchableOpacity>
               <Text style={styles.globalTakeawayDescription}>Pick up your order at Canteen Counter</Text>

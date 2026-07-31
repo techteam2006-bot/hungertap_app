@@ -8,10 +8,10 @@ import {
   StatusBar,
   Image,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../lib/ThemeContext';
 import { appTypography } from '../lib/darkThemeConfig';
 import { SPLASH_SCREEN_LOGO } from '../lib/appLogo';
+import { setSplashShown } from '../lib/settingsCache';
 const { width, height } = Dimensions.get('window');
 
 const SplashScreen = ({ navigation }) => {
@@ -23,8 +23,8 @@ const SplashScreen = ({ navigation }) => {
   const textFade = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    // Mark splash as shown
-    AsyncStorage.setItem('splashShown', 'true').catch(() => {});
+    // Mark splash as shown (settings cache / AsyncStorage)
+    setSplashShown(true).catch(() => {});
 
     // Opening animation sequence
     Animated.sequence([
