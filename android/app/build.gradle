@@ -177,3 +177,12 @@ dependencies {
 }
 
 apply plugin: 'com.google.gms.google-services'
+
+// Sentry Android Gradle Plugin — source maps / Debug IDs / ProGuard(R8) mapping upload
+// https://docs.sentry.io/platforms/react-native/manual-setup/manual-setup/
+// Resolve from repo root (parent of android/), not android/app — node_modules lives at project root.
+def sentryPackageJson = ["node", "--print", "require.resolve('@sentry/react-native/package.json')"]
+    .execute(null, rootProject.projectDir.parentFile)
+    .text
+    .trim()
+apply from: new File(new File(sentryPackageJson).parentFile, "sentry.gradle")

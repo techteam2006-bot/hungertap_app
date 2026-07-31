@@ -492,9 +492,19 @@ const ProfileScreen = ({ navigation }) => {
             title="Share with friends"
             subtitle="Invite others to HungerTap"
             colors={colors}
-            isLast
+            isLast={!__DEV__}
             onPress={handleShareApp}
           />
+          {__DEV__ ? (
+            <ProfileRow
+              icon="bug-outline"
+              title="Sentry Debug"
+              subtitle="Manual crash / ANR probes (__DEV__)"
+              colors={colors}
+              isLast
+              onPress={() => navigation.navigate('SentryDebug')}
+            />
+          ) : null}
         </GlassCard>
 
         <View style={styles.signOutInSection}>

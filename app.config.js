@@ -4,7 +4,11 @@
  */
 const appJson = require('./app.json');
 
-const sentryDsn = process.env.EXPO_PUBLIC_SENTRY_DSN || '';
+// Must stay aligned with project-root sentry.options.json — empty plugin DSN would
+// overwrite native options on prebuild and break pre-JS crash capture.
+const SENTRY_DSN_FALLBACK =
+  'https://bb60d6a835d37cb605b3912fc132c486@o4511688461975552.ingest.us.sentry.io/4511688470560768';
+const sentryDsn = process.env.EXPO_PUBLIC_SENTRY_DSN || SENTRY_DSN_FALLBACK;
 const version = appJson.expo.version || '1.0.0';
 const versionCode = appJson.expo.android?.versionCode ?? 1;
 const release = `com.hungertap.app@${version}+${versionCode}`;

@@ -81,6 +81,11 @@ import { configureImageCache } from './lib/ImageCache';
 import AppErrorBoundary from './components/AppErrorBoundary';
 import { getOrderStatusNotificationBody, isNotifiableOrderStatus } from './lib/orderStatus';
 
+// DEV-only Sentry validation UI — omit from production bundle entry via __DEV__ gate
+const SentryDebugScreen = __DEV__
+  ? require('./screens/SentryDebugScreen').default
+  : null;
+
 installGlobalErrorSafety();
 
 const Stack = createNativeStackNavigator();
@@ -312,6 +317,13 @@ function Navigation() {
           <Stack.Screen name="TermsOfService" component={TermsOfServiceScreen} />
           <Stack.Screen name="Legalities" component={LegalitiesScreen} />
           <Stack.Screen name="LegalWebView" component={LegalWebViewScreen} />
+          {__DEV__ && SentryDebugScreen ? (
+            <Stack.Screen
+              name="SentryDebug"
+              component={SentryDebugScreen}
+              options={{ headerShown: false }}
+            />
+          ) : null}
         </>
       )}
     </Stack.Navigator>

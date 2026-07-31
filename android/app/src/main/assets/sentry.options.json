@@ -6,5 +6,5 @@
   "enableAutoSessionTracking": true,
   "tracesSampleRate": 0.2,
   "debug": false,
-  "_comment": "Set dsn to the same value as EXPO_PUBLIC_SENTRY_DSN. Native startup crashes read THIS file before JS loads. Keep release/dist in sync with app.json version + android.versionCode (or set SENTRY_RELEASE / SENTRY_DIST at build time)."
+  "_comment": "Bundled into the APK for RNSentrySDK.init before JS. Keep in sync with project-root sentry.options.json."
 }
