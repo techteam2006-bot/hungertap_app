@@ -12,9 +12,6 @@ import { useTheme } from '../lib/ThemeContext';
 import { AUTH_LOADING_LOGO } from '../lib/appLogo';
 import { appTypography } from '../lib/darkThemeConfig';
 
-/** HC mark on dark ground — pairs with dark loading background. */
-const AUTH_LOADING_LOGO_DARK = require('../assets/logo1.png');
-
 /**
  * Full-screen branded loader shown after signup/login while the session/profile
  * finishes loading before MainTabs. Adapts to light/dark theme.
@@ -27,7 +24,6 @@ export default function AuthLoadingScreen({ message = 'Loading...' }) {
   const hungerColor = colors.text;
   const tapColor = colors.brandYellow;
   const mutedColor = colors.textSecondary || colors.textTertiary;
-  const logoSource = isDarkMode ? AUTH_LOADING_LOGO_DARK : AUTH_LOADING_LOGO;
 
   return (
     <View
@@ -48,12 +44,14 @@ export default function AuthLoadingScreen({ message = 'Loading...' }) {
       />
 
       <View style={styles.brandBlock}>
-        <Image
-          source={logoSource}
-          style={styles.logo}
-          resizeMode="contain"
-          accessibilityIgnoresInvertColors
-        />
+        <View style={styles.logoFrame}>
+          <Image
+            source={AUTH_LOADING_LOGO}
+            style={styles.logo}
+            resizeMode="cover"
+            accessibilityIgnoresInvertColors
+          />
+        </View>
         <Text style={styles.wordmark} accessibilityRole="header">
           <Text style={[styles.hunger, { color: hungerColor }]}>Hunger</Text>
           <Text style={[styles.tap, { color: tapColor }]}>Tap</Text>
@@ -79,10 +77,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 24,
   },
-  logo: {
-    width: 200,
-    height: 200,
+  logoFrame: {
+    width: 168,
+    height: 168,
+    borderRadius: 36,
+    overflow: 'hidden',
+    backgroundColor: '#000000',
     marginBottom: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  logo: {
+    width: 168,
+    height: 168,
   },
   wordmark: {
     fontSize: 40,

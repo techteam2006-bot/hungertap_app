@@ -5,7 +5,6 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  SafeAreaView,
   Alert,
   Image,
   TextInput,
@@ -15,6 +14,7 @@ import {
 import Constants from 'expo-constants';
 import AppIcon from '../components/AppIcon';
 import BrandYellowStrip from '../components/BrandYellowStrip';
+import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../lib/ThemeContext';
 import { useAuth } from '../lib/AuthContext';
 import { useCart } from '../lib/CartContext';
@@ -54,7 +54,7 @@ const OrdersScreen = ({ navigation }) => {
   const [activeStatus, setActiveStatus] = useState('all');
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [reorderingOrderId, setReorderingOrderId] = useState(null);
-  const [visibleOrderCount, setVisibleOrderCount] = useState(5);
+  const [visibleOrderCount, setVisibleOrderCount] = useState(10);
   const searchInputRef = useRef(null);
   const isFetchingRef = useRef(false);
   const pollingIntervalRef = useRef(null);
@@ -141,64 +141,9 @@ const OrdersScreen = ({ navigation }) => {
   };
 
 
-  // Real-time subscription for orders
-  useEffect(() => {
-    if (!user?.id) return;
-
-    console.log('🔔 Setting up real-time subscription for orders, user:', user.id);
-
-    const channel = supabase
-      .channel('orders_realtime')
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'orders',
-        filter: `placed_by=eq.${user.id}`,
-      }, (payload) => {
-        console.log('📦 New order received via real-time:', payload);
-        fetchOrders({ silent: true, forceRefresh: true });
-      })
-      .on('postgres_changes', {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'orders',
-        filter: `placed_by=eq.${user.id}`,
-      }, (payload) => {
-        console.log('📦 Order updated via real-time:', payload);
-        fetchOrders({ silent: true, forceRefresh: true });
-      })
-      .on('postgres_changes', {
-        // Canteen close deletes live rows — refetch pulls archieved_* / failed_* history
-        event: 'DELETE',
-        schema: 'public',
-        table: 'orders',
-        filter: `placed_by=eq.${user.id}`,
-      }, (payload) => {
-        console.log('📦 Order removed from live (likely canteen close):', payload);
-        fetchOrders({ silent: true, forceRefresh: true });
-      })
-      .subscribe();
-
-    return () => {
-      console.log('🔔 Unsubscribing from orders real-time');
-      channel.unsubscribe();
-    };
-  }, [user?.id]);
-
   useEffect(() => {
     if (user?.id) {
       fetchOrders();
-
-      // DISABLED: Fast fallback polling every 2s - was causing infinite loop
-      // if (pollingIntervalRef.current) {
-      //   clearInterval(pollingIntervalRef.current);
-      //   pollingIntervalRef.current = null;
-      // }
-      // pollingIntervalRef.current = setInterval(() => {
-      //   if (!isFetchingRef.current) {
-      //     fetchOrders({ silent: true });
-      //   }
-      // }, 2000);
     }
     return () => {
       if (pollingIntervalRef.current) {
@@ -207,6 +152,52 @@ const OrdersScreen = ({ navigation }) => {
       }
     };
   }, [user?.id]);
+
+  // Live list while Orders tab/screen is focused. Unique channel + removeChannel
+  // avoids "cannot add postgres_changes callbacks after subscribe()" from reuse.
+  useFocusEffect(
+    useCallback(() => {
+      if (!user?.id) return undefined;
+
+      fetchOrders({ silent: true, forceRefresh: true });
+
+      const topic = `orders_list_${user.id}`;
+      let debounceTimer = null;
+      const scheduleRefresh = () => {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          if (!isFetchingRef.current) {
+            fetchOrders({ silent: true, forceRefresh: true });
+          }
+        }, 250);
+      };
+
+      const channel = supabase
+        .channel(topic)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'orders',
+            filter: `placed_by=eq.${user.id}`,
+          },
+          scheduleRefresh
+        )
+        .subscribe();
+
+      return () => {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        try {
+          supabase.removeChannel(channel);
+        } catch (_) {
+          try {
+            channel.unsubscribe();
+          } catch (__) {}
+        }
+      };
+    }, [user?.id])
+  );
 
   const onRefresh = useCallback(async () => {
     if (!user?.id) return;
@@ -525,7 +516,7 @@ const OrdersScreen = ({ navigation }) => {
 
   // Reset pagination when search/filter changes
   useEffect(() => {
-    setVisibleOrderCount(5);
+    setVisibleOrderCount(10);
   }, [debouncedQuery, activeStatus]);
 
   const visibleOrders = useMemo(

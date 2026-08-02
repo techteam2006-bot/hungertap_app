@@ -57,8 +57,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   logo: {
-    width: 240,
-    height: 240,
+    width: 168,
+    height: 168,
+    backgroundColor: '#000000',
+    borderRadius: 36,
+    overflow: 'hidden',
   },
   message: {
     marginTop: 16,

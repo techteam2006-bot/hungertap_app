@@ -7,23 +7,22 @@
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "owner": "24951a66p9",
-    "icon": "./assets/icon1.png",
+    "icon": "./assets/icon.png",
     "splash": {
-      "image": "./assets/logo1.png",
+      "image": "./assets/icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#FFFFFF"
+      "backgroundColor": "#000000"
     },
     "assetBundlePatterns": [
-      "assets/logo1.png",
-      "assets/icon1.png",
-      "assets/logo1.png",
+      "assets/logo.png",
+      "assets/icon.png",
       "assets/home-banner.webp",
       "assets/fonts/*.ttf"
     ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.hungertap.app",
-      "icon": "./assets/icon1.png",
+      "icon": "./assets/icon.png",
       "infoPlist": {
         "UIBackgroundModes": [
           "fetch"
@@ -33,7 +32,7 @@
     "android": {
       "package": "com.hungertap.app",
       "googleServicesFile": "./google-services.json",
-      "icon": "./assets/icon1.png",
+      "icon": "./assets/icon.png",
       "versionCode": 1,
       "softwareKeyboardLayoutMode": "pan",
       "permissions": [
@@ -58,7 +57,7 @@
         }
       ],
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
+        "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#FFFFFF"
       }
     },
@@ -91,7 +90,6 @@
       "eas": {
         "projectId": "f0221b0e-e5d9-4440-b318-04caa10549cd"
       }
-    },
-    "newArchEnabled": false
+    }
   }
 }

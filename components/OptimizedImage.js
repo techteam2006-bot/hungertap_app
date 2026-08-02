@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { View, Image, ActivityIndicator, StyleSheet, Platform } from 'react-native';
 import { useTheme } from '../lib/ThemeContext';
 import { ITEM_IMAGE_FALLBACK } from '../lib/appLogo';
+import { rememberImageUris, getCachedImageUri, cacheImageToDisk } from '../lib/ImageCache';
 
 // Global image cache for faster loading
 const imageCache = new Map();
@@ -24,52 +25,71 @@ const OptimizedImage = ({
   ...props
 }) => {
   const { colors } = useTheme();
-  const key = useMemo(() => sourceKey(source), [source]);
-  const uri = typeof source === 'object' && source?.uri ? source.uri : null;
-  const alreadyCached = !!(uri && imageCache.has(uri));
+  const remoteUri = typeof source === 'object' && source?.uri ? source.uri : null;
+  const diskUri = remoteUri ? getCachedImageUri(remoteUri) : null;
+  const uri = diskUri || remoteUri;
+  const key = useMemo(() => sourceKey(source) + (uri || ''), [source, uri]);
+  const alreadyCached = !!(uri && (imageCache.has(uri) || (remoteUri && typeof getCachedImageUri(remoteUri) === 'string' && getCachedImageUri(remoteUri) !== remoteUri)));
 
   const [loading, setLoading] = useState(!alreadyCached && !!uri);
   const [error, setError] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(alreadyCached);
+  const [resolvedUri, setResolvedUri] = useState(uri);
 
   // Remote URI may change — reset load state when switching items.
   useEffect(() => {
+    let cancelled = false;
     const cached = !!(uri && imageCache.has(uri));
     setError(false);
     setLoading(!cached && !!uri);
     setImageLoaded(cached);
-  }, [key, uri]);
+    setResolvedUri(uri);
+    if (remoteUri && remoteUri.startsWith('http')) {
+      cacheImageToDisk(remoteUri).then((local) => {
+        if (!cancelled && local) setResolvedUri(local);
+      });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [key, uri, remoteUri]);
 
   const memoizedSource = useMemo(() => {
     if (source == null) return null;
     if (typeof source === 'number') return source;
+    if (resolvedUri) {
+      return { uri: resolvedUri };
+    }
     if (typeof source === 'object' && source.uri) {
-      // Do not force iOS disk cache — it can blank images on first paint.
       return { uri: source.uri };
     }
     return source;
-  }, [key, source]);
+  }, [key, source, resolvedUri]);
 
-  // Prefetch in background (does not gate display)
+  // Prefetch / download in background
   useEffect(() => {
-    const prefetchUri = memoizedSource?.uri;
+    const prefetchUri = remoteUri;
     if (!prefetchUri || prefetchQueue.has(prefetchUri) || imageCache.has(prefetchUri)) {
       return undefined;
     }
     prefetchQueue.add(prefetchUri);
     let cancelled = false;
-    Image.prefetch(prefetchUri)
-      .then(() => {
-        if (!cancelled) imageCache.set(prefetchUri, true);
+    cacheImageToDisk(prefetchUri)
+      .then((local) => {
+        if (!cancelled) {
+          imageCache.set(prefetchUri, true);
+          if (local) setResolvedUri(local);
+        }
       })
       .catch(() => {})
       .finally(() => {
         prefetchQueue.delete(prefetchUri);
       });
+    rememberImageUris([prefetchUri]).catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [memoizedSource?.uri]);
+  }, [remoteUri]);
 
   const handleLoadStart = useCallback(() => {
     setLoading(true);

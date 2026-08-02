@@ -7,6 +7,7 @@ import {
   Platform,
   Linking,
   ActivityIndicator,
+  BackHandler,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
@@ -24,6 +25,10 @@ import {
 import { isValidOrderUuid } from '../lib/checkoutSecurity';
 import { resetNavigationToCart } from '../lib/navigateHome';
 import { isOrderPlacedSuccessStatus, isCancelledLike } from '../lib/orderStatus';
+import {
+  cancelCheckoutPayment,
+  GATEWAY_CANCEL_INJECT_JS,
+} from '../lib/cancelCheckoutPayment';
 
 const POLL_MS = 2500;
 const STUCK_MS = 180000;
@@ -32,7 +37,7 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const { clearCart } = useCart();
-  const { userId } = useAuth();
+  const { userId, getSupabaseToken } = useAuth();
   const {
     paymentUrl: initialPaymentUrl,
     orderId,
@@ -44,11 +49,12 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
   const finalizedRef = useRef(false);
   const stuckTimerRef = useRef(null);
   const pollOnceRef = useRef(null);
+  const webRef = useRef(null);
+  const cancelInFlightRef = useRef(false);
+  const allowLeaveRef = useRef(false);
 
-  const [activePaymentUrl, setActivePaymentUrl] = useState(() =>
-    String(initialPaymentUrl || '').trim()
-  );
-  const [activePaymentId, setActivePaymentId] = useState(
+  const [activePaymentUrl] = useState(() => String(initialPaymentUrl || '').trim());
+  const [activePaymentId] = useState(
     initialPaymentId != null ? String(initialPaymentId) : ''
   );
   const [webviewKey] = useState(0);
@@ -62,6 +68,7 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
   const finalizeSuccess = useCallback(async () => {
     if (finalizedRef.current) return;
     finalizedRef.current = true;
+    allowLeaveRef.current = true;
     if (stuckTimerRef.current) {
       clearTimeout(stuckTimerRef.current);
       stuckTimerRef.current = null;
@@ -98,6 +105,7 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
   const leaveCheckout = useCallback(() => {
     if (finalizedRef.current) return;
     finalizedRef.current = true;
+    allowLeaveRef.current = true;
     setCheckoutClosed(true);
     if (stuckTimerRef.current) {
       clearTimeout(stuckTimerRef.current);
@@ -106,15 +114,62 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
     resetNavigationToCart(navigation);
   }, [navigation]);
 
-  const finalizeCancel = useCallback(() => {
+  const sendCancelToGateway = useCallback(async () => {
+    try {
+      try {
+        webRef.current?.injectJavaScript(GATEWAY_CANCEL_INJECT_JS);
+      } catch (_) {}
+
+      let accessToken = '';
+      try {
+        accessToken = (await getSupabaseToken?.()) || '';
+      } catch (_) {}
+
+      await cancelCheckoutPayment({
+        accessToken,
+        orderId,
+        paymentId: activePaymentId,
+        userId,
+        supabaseClient: supabase,
+      });
+    } catch (e) {
+      if (typeof __DEV__ !== 'undefined' && __DEV__) {
+        console.warn('cancelCheckoutPayment:', e?.message || e);
+      }
+    }
+  }, [activePaymentId, getSupabaseToken, orderId, userId]);
+
+  const finalizeCancel = useCallback(async () => {
+    if (finalizedRef.current || cancelInFlightRef.current) return;
+    cancelInFlightRef.current = true;
+    await sendCancelToGateway();
     leaveCheckout();
-  }, [leaveCheckout]);
+  }, [leaveCheckout, sendCancelToGateway]);
 
   const finalizeFailure = useCallback(() => {
     leaveCheckout();
   }, [leaveCheckout]);
 
-  const applyOrderRow = useCallback(
+  const promptAbandonCheckout = useCallback(() => {
+    if (finalizedRef.current || cancelInFlightRef.current) return true;
+    Alert.alert(
+      'Cancel payment?',
+      'If you go back now, this payment will be cancelled and you will need to place the order again.',
+      [
+        { text: 'Stay', style: 'cancel' },
+        {
+          text: 'OK',
+          style: 'destructive',
+          onPress: () => {
+            finalizeCancel();
+          },
+        },
+      ]
+    );
+    return true;
+  }, [finalizeCancel]);
+
+  const applyOrderStatus = useCallback(
     (status) => {
       if (!status || finalizedRef.current) return;
       if (isOrderPlacedSuccessStatus(status)) {
@@ -122,14 +177,15 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
         return;
       }
       if (status === 'payment_cancelled') {
-        finalizeCancel();
+        allowLeaveRef.current = true;
+        leaveCheckout();
         return;
       }
       if (isCancelledLike(status) || status === 'payment_failed') {
         finalizeFailure();
       }
     },
-    [finalizeSuccess, finalizeCancel, finalizeFailure]
+    [finalizeSuccess, leaveCheckout, finalizeFailure]
   );
 
   const refreshPaymentStatus = useCallback(async () => {
@@ -141,11 +197,11 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
         .eq('id', orderId)
         .eq('placed_by', userId)
         .maybeSingle();
-      if (ord?.status) applyOrderRow(ord.status);
+      if (ord?.status) applyOrderStatus(ord.status);
     } catch (_) {
       /* network — next poll */
     }
-  }, [orderId, userId, applyOrderRow]);
+  }, [orderId, userId, applyOrderStatus]);
 
   pollOnceRef.current = refreshPaymentStatus;
 
@@ -167,32 +223,47 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
   );
 
   useEffect(() => {
+    const onHardwareBack = () => promptAbandonCheckout();
+    const sub = BackHandler.addEventListener('hardwareBackPress', onHardwareBack);
+    return () => sub.remove();
+  }, [promptAbandonCheckout]);
+
+  useEffect(() => {
+    const unsub = navigation.addListener('beforeRemove', (e) => {
+      if (allowLeaveRef.current || finalizedRef.current) return;
+      e.preventDefault();
+      promptAbandonCheckout();
+    });
+    return unsub;
+  }, [navigation, promptAbandonCheckout]);
+
+  useEffect(() => {
     if (!orderId || !isValidOrderUuid(orderId)) {
       Alert.alert('Checkout error', 'Missing order reference. Return to the cart and try again.', [
-        { text: 'OK', onPress: () => resetNavigationToCart(navigation) },
+        {
+          text: 'OK',
+          onPress: () => {
+            allowLeaveRef.current = true;
+            resetNavigationToCart(navigation);
+          },
+        },
       ]);
       return;
     }
     if (!userId) {
       Alert.alert('Sign in required', 'Please sign in again to complete payment.', [
-        { text: 'OK', onPress: () => navigation.replace('Login') },
+        {
+          text: 'OK',
+          onPress: () => {
+            allowLeaveRef.current = true;
+            navigation.replace('Login');
+          },
+        },
       ]);
       return;
     }
 
     let pollTimer = null;
-
-    const orderChannel = supabase
-      .channel(`payment-order-${orderId}`)
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'orders', filter: `id=eq.${orderId}` },
-        (payload) => {
-          const s = payload.new?.status;
-          if (s) applyOrderRow(s);
-        }
-      )
-      .subscribe();
 
     refreshPaymentStatus();
     pollTimer = setInterval(() => pollOnceRef.current?.(), POLL_MS);
@@ -224,13 +295,12 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
         clearTimeout(stuckTimerRef.current);
         stuckTimerRef.current = null;
       }
-      supabase.removeChannel(orderChannel);
       linkSub.remove();
     };
   }, [
     orderId,
     userId,
-    applyOrderRow,
+    applyOrderStatus,
     navigation,
     refreshPaymentStatus,
     handlePaymentReturnUrl,
@@ -283,6 +353,7 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
       ) : checkoutUri ? (
         <View style={[styles.webWrap, { marginBottom: insets.bottom }]}>
           <WebView
+            ref={webRef}
             key={webviewKey}
             style={styles.web}
             source={{ uri: checkoutUri }}
@@ -305,7 +376,7 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
               </View>
             )}
             setSupportMultipleWindows={false}
-            originWhitelist={['https://*']}
+            originWhitelist={['https://*', 'hungertap://*']}
             onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
             onNavigationStateChange={onNavigationStateChange}
           />
@@ -323,9 +394,6 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  topStrip: {
-    width: '100%',
-  },
   header: {
     alignItems: 'center',
     justifyContent: 'center',

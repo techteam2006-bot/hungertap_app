@@ -18,20 +18,17 @@ import {
   TextInput,
   ScrollView,
   Easing,
-  Modal,
-  Pressable,
-  TouchableWithoutFeedback,
 } from 'react-native';
 import Constants from 'expo-constants';
 import AppIcon from '../components/AppIcon';
 import { LinearGradient } from 'expo-linear-gradient';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useAuth } from '../lib/AuthContext';
 import { useCart } from '../lib/CartContext';
 import { useTheme } from '../lib/ThemeContext';
 import { useCanteenStatus } from '../lib/CanteenStatusContext';
 // Cart toast removed
-import { foodService, subscribeToFoodAvailability, supabase, deriveItemIsAvailable } from '../lib/supabase';
+import { foodService, supabase, deriveItemIsAvailable } from '../lib/supabase';
+import { rememberCategoryImages } from '../lib/ImageCache';
 import { getFontStyle } from '../lib/utils/fonts';
 import {
   ModernHeader,
@@ -258,9 +255,6 @@ const HomeScreen = ({ navigation, route }) => {
   const categoryScales = useRef({}).current;
   const [snackbarVisible, setSnackbarVisible] = useState(false);
   const snackbarHideTimer = useRef(null);
-  const availabilityChannelRef = useRef(null);
-  /** Invalidates in-flight `subscribeToFoodAvailability` after deps change or unmount (avoids CHANNEL_ERROR spam). */
-  const foodAvailabilitySubGenRef = useRef(0);
 
   // Canteen switcher (only canteens of user's college)
   const [currentCanteenName, setCurrentCanteenName] = useState('');
@@ -268,9 +262,6 @@ const HomeScreen = ({ navigation, route }) => {
   const [collegeName, setCollegeName] = useState('');
   /** When false, menu must not load unscoped items (avoids cart/order mismatch with checkout). */
   const [menuCanteenReady, setMenuCanteenReady] = useState(false);
-  const [collegeCanteens, setCollegeCanteens] = useState([]);
-  const [showCanteenPicker, setShowCanteenPicker] = useState(false);
-  const [canteenPickerLoading, setCanteenPickerLoading] = useState(false);
   
   
   
@@ -405,85 +396,6 @@ const HomeScreen = ({ navigation, route }) => {
       console.log('Error saving veg mode:', error);
     }
   }, [vegMode, user?.id]);
-
-  const performCanteenSwitch = useCallback(
-    async (canteen) => {
-      if (!user?.id) return;
-      if (canteen?.is_open === false) {
-        setShowCanteenPicker(false);
-        return;
-      }
-      setCanteenPickerLoading(true);
-      try {
-        const { error } = await supabase.from('users').update({ canteen_id: canteen.id }).eq('id', user.id);
-        if (error) throw error;
-        setCurrentCanteenId(canteen.id);
-        setCurrentCanteenName(canteen.name);
-        setShowCanteenPicker(false);
-        checkCanteenStatus();
-        await fetchCategories();
-      } catch (e) {
-        console.error('Change canteen error:', e);
-        Alert.alert('Error', 'Could not change canteen. Try again.');
-      } finally {
-        setCanteenPickerLoading(false);
-      }
-    },
-    [user?.id, checkCanteenStatus, fetchCategories]
-  );
-
-  const handleSelectCanteen = useCallback(
-    (canteen) => {
-      if (!user?.id) {
-        setShowCanteenPicker(false);
-        return;
-      }
-      if (canteen?.is_open === false) {
-        setShowCanteenPicker(false);
-        return;
-      }
-      const sameCanteen =
-        currentCanteenId != null && String(canteen.id) === String(currentCanteenId);
-      if (sameCanteen) {
-        setShowCanteenPicker(false);
-        return;
-      }
-
-      if (getTotalItems() > 0) {
-        Alert.alert(
-          'Change canteen?',
-          'Your cart is for the current canteen. Switching will remove all items from your cart.',
-          [
-            {
-              text: 'Cancel',
-              style: 'cancel',
-              onPress: () => setShowCanteenPicker(false),
-            },
-            {
-              text: 'Clear cart & switch',
-              style: 'destructive',
-              onPress: () => {
-                void (async () => {
-                  try {
-                    // ✅ error handled
-                    await clearCart();
-                    await performCanteenSwitch(canteen);
-                  } catch (e) {
-                    console.error('Change canteen (after clear cart):', e);
-                    Alert.alert('Error', 'Could not switch canteen. Try again.');
-                  }
-                })();
-              },
-            },
-          ]
-        );
-        return;
-      }
-
-      void performCanteenSwitch(canteen);
-    },
-    [user?.id, currentCanteenId, getTotalItems, clearCart, performCanteenSwitch]
-  );
 
   // Categories state
   const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
@@ -730,6 +642,7 @@ const HomeScreen = ({ navigation, route }) => {
         fallbackCategoriesAppliedRef.current = false;
         setCategories(sortedCategories);
         setCategoriesLoading(false);
+        rememberCategoryImages(sortedCategories).catch(() => {});
         try {
           await AsyncStorage.setItem(CATEGORIES_CACHE_KEY, JSON.stringify(sortedCategories));
         } catch (cacheError) {
@@ -803,59 +716,6 @@ const HomeScreen = ({ navigation, route }) => {
 
     return unsubscribe;
   }, [navigation, isAtTop, scrollToTop]);
-
-  // Realtime subscribe to availability updates (uses available_stock column)
-  useEffect(() => {
-    if (availabilityChannelRef.current) {
-      try {
-        supabase.removeChannel(availabilityChannelRef.current);
-      } catch (e) {}
-      availabilityChannelRef.current = null;
-    }
-
-    const myGen = ++foodAvailabilitySubGenRef.current;
-
-    const setupSubscription = async () => {
-      const channel = await subscribeToFoodAvailability(
-        (payload) => {
-          const newRow = payload?.new || {};
-          const updatedId = newRow.id;
-          if (!updatedId) return;
-          const newIsAvailable = deriveItemIsAvailable(newRow);
-          setMenuItems((prev) =>
-            prev.map((item) =>
-              item.id === updatedId
-                ? { ...item, isAvailable: newIsAvailable, available_stock: newRow.available_stock }
-                : item
-            )
-          );
-        },
-        { userId: user?.id ?? null, canteenId: currentCanteenId ?? null }
-      );
-
-      if (myGen !== foodAvailabilitySubGenRef.current) {
-        if (channel) {
-          try {
-            supabase.removeChannel(channel);
-          } catch (e) {}
-        }
-        return;
-      }
-      availabilityChannelRef.current = channel;
-    };
-
-    setupSubscription();
-
-    return () => {
-      foodAvailabilitySubGenRef.current += 1;
-      if (availabilityChannelRef.current) {
-        try {
-          supabase.removeChannel(availabilityChannelRef.current);
-        } catch (e) {}
-        availabilityChannelRef.current = null;
-      }
-    };
-  }, [user?.id, currentCanteenId]);
 
   // Check for automatic Veg Mode activation and sync with Profile screen when screen comes into focus
   // DISABLED TEMPORARILY TO CHECK FOR LOOP ISSUE
@@ -987,7 +847,7 @@ const HomeScreen = ({ navigation, route }) => {
     setActiveFilter('all');
   }, [occupancyLookup, activeFilter, categories]);
 
-  // Fetch user's college canteens and current canteen name (for switcher)
+  // Resolve college name (CAPS in UI) + assigned canteen — no canteen switcher.
   useEffect(() => {
     if (!user?.id) return;
     let mounted = true;
@@ -995,13 +855,12 @@ const HomeScreen = ({ navigation, route }) => {
       try {
         const { data: userRow, error: userErr } = await supabase
           .from('users')
-          .select('college_id, canteen_id')
+          .select('college_id, canteen_id, colleges ( name )')
           .eq('id', user.id)
           .maybeSingle();
         if (!mounted) return;
         if (userErr) {
-          // ✅ error handled — offline: keep restored canteen; still unblock menu load
-          console.error('Canteen switcher users:', userErr.message || userErr);
+          console.error('Home college/canteen load:', userErr.message || userErr);
           return;
         }
         if (!userRow?.college_id) {
@@ -1011,69 +870,53 @@ const HomeScreen = ({ navigation, route }) => {
         const collegeId = userRow.college_id;
         const userCanteenId = userRow.canteen_id || null;
 
-        const { data: collegeRow, error: collegeErr } = await supabase
-          .from('colleges')
-          .select('name')
-          .eq('id', collegeId)
-          .maybeSingle();
-        if (!mounted) return;
-        if (collegeErr) {
-          console.error('College name fetch:', collegeErr.message || collegeErr);
-          setCollegeName('');
-        } else if (collegeRow?.name) {
-          setCollegeName(String(collegeRow.name).trim());
+        const joinedName =
+          userRow.colleges && typeof userRow.colleges === 'object'
+            ? userRow.colleges.name
+            : null;
+        if (joinedName) {
+          setCollegeName(String(joinedName).trim());
         } else {
-          setCollegeName('');
+          const { data: collegeRow, error: collegeErr } = await supabase
+            .from('colleges')
+            .select('name')
+            .eq('id', collegeId)
+            .maybeSingle();
+          if (!mounted) return;
+          if (collegeErr) {
+            console.error('College name fetch:', collegeErr.message || collegeErr);
+            setCollegeName('');
+          } else if (collegeRow?.name) {
+            setCollegeName(String(collegeRow.name).trim());
+          } else {
+            setCollegeName('');
+          }
         }
 
-        const { data: canteens, error: cErr } = await supabase
-          .from('canteens')
-          .select('id, name, is_open')
-          .eq('college_id', collegeId)
-          .order('name');
-        if (!mounted) return;
-        if (cErr) {
-          console.error('Canteen switcher canteens:', cErr.message || cErr);
-          return;
-        }
-        if (Array.isArray(canteens)) {
-          // Picker: only open (active) canteens; closed canteens are not shown or switchable
-          const openForSwitcher = canteens.filter((c) => c.is_open !== false);
-          setCollegeCanteens(openForSwitcher);
-
-          if (userCanteenId) {
-            const current = canteens.find((c) => c.id === userCanteenId);
-            if (current) {
-              setCurrentCanteenName(current.name);
-              setCurrentCanteenId(userCanteenId);
-              rememberLastCanteen(userCanteenId, current.name).catch(() => {});
-            } else {
-              const { data: canteenRow } = await supabase
-                .from('canteens')
-                .select('name')
-                .eq('id', userCanteenId)
-                .maybeSingle();
-              if (canteenRow) {
-                setCurrentCanteenName(canteenRow.name);
-                setCurrentCanteenId(userCanteenId);
-                rememberLastCanteen(userCanteenId, canteenRow.name).catch(() => {});
-              }
-            }
-          } else if (openForSwitcher.length > 0) {
-            setCurrentCanteenName(openForSwitcher[0].name);
-            setCurrentCanteenId(openForSwitcher[0].id);
-            rememberLastCanteen(openForSwitcher[0].id, openForSwitcher[0].name).catch(() => {});
+        if (userCanteenId) {
+          const { data: canteenRow } = await supabase
+            .from('canteens')
+            .select('id, name')
+            .eq('id', userCanteenId)
+            .maybeSingle();
+          if (!mounted) return;
+          if (canteenRow) {
+            setCurrentCanteenName(canteenRow.name || '');
+            setCurrentCanteenId(canteenRow.id);
+            rememberLastCanteen(canteenRow.id, canteenRow.name || '').catch(() => {});
           }
         }
       } catch (e) {
-        console.log('Canteen switcher load error:', e);
+        console.log('Home college/canteen load error:', e);
       } finally {
         if (mounted) {
           setMenuCanteenReady(true);
         }
       }
     })();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, [user?.id]);
 
   // Debounce search input to reduce unnecessary filtering on each keystroke
@@ -1883,30 +1726,15 @@ const HomeScreen = ({ navigation, route }) => {
               <View style={styles.locationRow}>
                 <AppIcon name="location" size={14} color={isDarkMode ? '#FFFFFF' : '#000000'} />
                 <Text style={[styles.locationText, { color: isDarkMode ? '#FFFFFF' : '#000000' }]} numberOfLines={1}>
-                  {(collegeName || 'College').toUpperCase()}
+                  {String(collegeName || 'College').trim().toUpperCase()}
                 </Text>
                 {currentCanteenName ? (
-                  <TouchableOpacity
-                    onPress={() => (collegeCanteens.length > 1 ? setShowCanteenPicker(true) : undefined)}
-                    style={[styles.canteenSmallSelector, { backgroundColor: '#F5B041', borderWidth: 0 }]}
-                    activeOpacity={collegeCanteens.length > 1 ? 0.72 : 1}
-                    disabled={collegeCanteens.length <= 1}
-                    accessibilityRole="button"
-                    accessibilityLabel="Switch canteen"
-                    accessibilityHint={
-                      collegeCanteens.length > 1
-                        ? 'Opens a list of canteens at your college'
-                        : 'Only one canteen is available'
-                    }
-                  >
+                  <View style={[styles.canteenSmallSelector, { backgroundColor: '#F5B041', borderWidth: 0 }]}>
                     <AppIcon name="storefront-outline" size={11} color="#FFFFFF" />
                     <Text style={styles.canteenSmallText} numberOfLines={1}>
                       {currentCanteenName}
                     </Text>
-                    {collegeCanteens.length > 1 ? (
-                      <AppIcon name="chevron-down" size={11} color="#FFFFFF" />
-                    ) : null}
-                  </TouchableOpacity>
+                  </View>
                 ) : null}
               </View>
             <TouchableOpacity
@@ -2267,77 +2095,7 @@ const HomeScreen = ({ navigation, route }) => {
           />
         )}
       </KeyboardAvoidingView>
-
-      {/* Canteen picker modal — slide bar of canteens in user's college */}
-      <Modal
-        visible={showCanteenPicker}
-        transparent
-        animationType="slide"
-        presentationStyle={Platform.OS === 'ios' ? 'overFullScreen' : undefined}
-        onRequestClose={() => setShowCanteenPicker(false)}
-      >
-        <GestureHandlerRootView style={styles.canteenPickerGestureRoot}>
-          <View style={styles.canteenPickerModalRoot}>
-            {/* Touch target only; must stay under the sheet in z-order */}
-            <TouchableWithoutFeedback onPress={() => setShowCanteenPicker(false)}>
-              <View style={styles.canteenPickerBackdropFill} />
-            </TouchableWithoutFeedback>
-            <View
-              style={[styles.canteenPickerSheet, { backgroundColor: colors.card }]}
-              collapsable={false}
-            >
-              <View style={[styles.canteenPickerHeader, { borderBottomColor: colors.border }]}>
-                <Text style={[styles.canteenPickerTitle, { color: colors.text }]}>Select canteen</Text>
-                <TouchableOpacity onPress={() => setShowCanteenPicker(false)} hitSlop={12} activeOpacity={1}>
-                  <AppIcon name="close" size={24} color={colors.text} />
-                </TouchableOpacity>
-              </View>
-              <FlatList
-                horizontal
-                data={collegeCanteens}
-                keyExtractor={(c) => String(c.id)}
-                keyboardShouldPersistTaps="always"
-                removeClippedSubviews={false}
-                nestedScrollEnabled
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.canteenPickerScroll}
-                style={styles.canteenPickerList}
-                renderItem={({ item: c }) => {
-                  const selected =
-                    currentCanteenId != null &&
-                    String(c.id) === String(currentCanteenId);
-                  return (
-                    <Pressable
-                      onPress={() => handleSelectCanteen(c)}
-                      disabled={canteenPickerLoading}
-                      style={({ pressed }) => [
-                        styles.canteenPickerCard,
-                        {
-                          backgroundColor: selected ? colors.brandYellow : colors.surface,
-                          borderColor: selected ? colors.brandYellow : colors.border,
-                          opacity: canteenPickerLoading ? 0.65 : pressed ? 0.92 : 1,
-                        },
-                      ]}
-                    >
-                      <AppIcon name="storefront" size={22} color={selected ? '#000000' : colors.text} />
-                      <Text style={[styles.canteenPickerCardText, { color: selected ? '#000000' : colors.text }]} numberOfLines={2}>
-                        {c.name}
-                      </Text>
-                    </Pressable>
-                  );
-                }}
-              />
-              {canteenPickerLoading && (
-                <View style={styles.canteenPickerLoading} pointerEvents="none">
-                  <ActivityIndicator size="small" color={colors.brandYellow} />
-                </View>
-              )}
-            </View>
-          </View>
-        </GestureHandlerRootView>
-      </Modal>
-      
-      <BottomSnackbar
+<BottomSnackbar
         visible={snackbarVisible}
         onPressViewCart={() => {
           setSnackbarVisible(false);

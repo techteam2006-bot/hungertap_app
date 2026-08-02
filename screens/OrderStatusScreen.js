@@ -6,7 +6,6 @@ import {
   ScrollView,
   TouchableOpacity,
   Image,
-  SafeAreaView,
   RefreshControl,
   Dimensions,
   Alert,
@@ -15,8 +14,8 @@ import {
 import * as Clipboard from 'expo-clipboard';
 import AppIcon from '../components/AppIcon';
 import BrandYellowStrip from '../components/BrandYellowStrip';
-import { CommonActions } from '@react-navigation/native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { CommonActions, useFocusEffect } from '@react-navigation/native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../lib/ThemeContext';
 import { useAuth } from '../lib/AuthContext';
 import { useCart } from '../lib/CartContext';
@@ -39,6 +38,7 @@ import {
   getOrderStatusColor,
   getOrderStatusLabel,
   getOrderTimelineStep,
+  isActiveKitchenStatus,
   isCancelledLike,
   isDeliveredLike,
   isPaymentFailedLike,
@@ -273,9 +273,8 @@ const OrderStatusScreen = ({ navigation, route }) => {
       const { data, error } = await fetchOrderWithLineJoins(supabase, resolvedOrderId, user.id);
 
       if (error) {
-        console.error('Error fetching order status:', error);
-        setNotFound(true);
-      } 
+        console.warn('Error fetching order status:', error?.message || error);
+      }
       
       if (data) {
         const orderItemsRows = pickLineRowsFromOrderRow(data);
@@ -295,6 +294,7 @@ const OrderStatusScreen = ({ navigation, route }) => {
             unit_price: unit,
             price: ip,
             item_id: getLineItemIdFromRow(oi),
+            status: oi?.status != null ? String(oi.status) : null,
           };
         });
         const counts = {};
@@ -352,12 +352,13 @@ const OrderStatusScreen = ({ navigation, route }) => {
         console.log('Normalized order:', normalized);
         setNotFound(false);
       } else if (!error) {
-        // No data and no error indicates not found
-        setNotFound(true);
+        // True miss in DB — keep route-hydrated order if navigation passed one
+        if (!order) setNotFound(true);
       }
+      // On fetch error with no data: keep existing currentOrder (from route params)
     } catch (error) {
-      console.error('Error fetching order status:', error);
-      setNotFound(true);
+      console.warn('Error fetching order status:', error?.message || error);
+      if (!order) setNotFound(true);
     } finally {
       isFetchingRef.current = false;
       setInitialOrderHydrated(true);
@@ -374,62 +375,67 @@ const OrderStatusScreen = ({ navigation, route }) => {
     }
   };
 
-  // Fetch order status on mount and set up real-time subscription (NO POLLING)
+  // Fetch once on mount; Realtime only while this screen is focused.
   useEffect(() => {
-    // Force immediate fetch on mount (full data)
     fetchLatestOrderStatus();
-
-    // Set up real-time subscription for order status updates (REALTIME ONLY)
-    const subscription = supabase
-      .channel(`order_status_${resolvedOrderId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'orders',
-          filter: `id=eq.${resolvedOrderId}`
-        },
-        (payload) => {
-          if (payload.new) {
-            fetchLatestOrderStatus();
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'orders',
-          filter: `id=eq.${resolvedOrderId}`
-        },
-        (payload) => {
-          console.log('New order created:', payload.new);
-          if (payload.new) {
-            fetchLatestOrderStatus();
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          // Canteen close deletes live row — refetch loads archieved_* / failed_*
-          event: 'DELETE',
-          schema: 'public',
-          table: 'orders',
-          filter: `id=eq.${resolvedOrderId}`,
-        },
-        () => {
-          fetchLatestOrderStatus();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      subscription.unsubscribe();
-    };
   }, [resolvedOrderId, user?.id]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!resolvedOrderId || !user?.id) return undefined;
+
+      const topic = `order_status_${resolvedOrderId}_${user.id}`;
+      const channel = supabase
+        .channel(topic)
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'orders',
+            filter: `id=eq.${resolvedOrderId}`,
+          },
+          (payload) => {
+            if (payload?.new) fetchLatestOrderStatus();
+          }
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: 'DELETE',
+            schema: 'public',
+            table: 'orders',
+            filter: `id=eq.${resolvedOrderId}`,
+          },
+          () => {
+            fetchLatestOrderStatus();
+          }
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'order_items',
+            filter: `order_id=eq.${resolvedOrderId}`,
+          },
+          () => {
+            fetchLatestOrderStatus();
+          }
+        )
+        .subscribe();
+
+      return () => {
+        try {
+          supabase.removeChannel(channel);
+        } catch (_) {
+          try {
+            channel.unsubscribe();
+          } catch (__) {}
+        }
+      };
+    }, [resolvedOrderId, user?.id])
+  );
 
   // Fetch user's full name (use auth metadata; profiles table may not exist in new backend)
   useEffect(() => {
@@ -783,11 +789,12 @@ const OrderStatusScreen = ({ navigation, route }) => {
         },
         {
           id: 2,
-          title: 'Cancelled',
+          title:
+            status === 'payment_cancelled' ? 'Payment Cancelled' : 'Cancelled by Vendor',
           description:
             status === 'payment_cancelled'
               ? 'Payment was cancelled for this order.'
-              : 'Your order has been cancelled.',
+              : 'Your order has been cancelled by the vendor.',
           time: cancelledTime,
           completed: true,
           failed: true,
@@ -945,6 +952,8 @@ const OrderStatusScreen = ({ navigation, route }) => {
   const getStatusColor = (status) => getOrderStatusColor(status, colors);
   const getStatusText = (status) =>
     status === 'ready' ? 'Ready for pickup' : getOrderStatusLabel(status);
+
+  const orderIsActiveKitchen = isActiveKitchenStatus(currentOrder?.status);
 
   // QR when ready or partially_ready; hidden 30 min after delivered
   const isQRExpired = () => {
@@ -1203,7 +1212,11 @@ const OrderStatusScreen = ({ navigation, route }) => {
                     const priceStr = itemTotal !== null
                       ? `₹${formatCurrencyValue(itemTotal)}`
                       : '₹—';
-                    const statusLabel = getStatusText(currentOrder?.status) || '—';
+                    const lineStatus =
+                      orderIsActiveKitchen && item?.status
+                        ? item.status
+                        : item?.status || currentOrder?.status;
+                    const statusLabel = getStatusText(lineStatus) || '—';
 
                     return (
                       <View key={index} style={styles.tableRow}>
@@ -1224,7 +1237,7 @@ const OrderStatusScreen = ({ navigation, route }) => {
                         </View>
                         <View style={styles.tableColumnStatus}>
                           <Text
-                            style={[styles.tableCellStatus, { color: getStatusColor(currentOrder?.status) }]}
+                            style={[styles.tableCellStatus, { color: getStatusColor(lineStatus) }]}
                             numberOfLines={2}
                           >
                             {statusLabel}

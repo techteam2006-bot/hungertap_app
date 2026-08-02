@@ -52,6 +52,11 @@ const CREATE_ORDER_V2_URL = CREATE_ORDER_V2_URL_RAW
     ? `${String(SUPABASE_URL).replace(/\/$/, '')}/functions/v1/create-order-v2`
     : '';
 
+/** Cancel in-progress Easebuzz checkout — only when EXPO_PUBLIC_CANCEL_PAYMENT_URL is set. */
+const CANCEL_PAYMENT_URL = (
+  process.env.EXPO_PUBLIC_CANCEL_PAYMENT_URL || ''
+).trim().replace(/\/$/, '');
+
 /** Cart: `local` = device-only (AsyncStorage), no `cart_items` table. `remote` = Supabase `cart_items`. */
 const CART_STORAGE = process.env.EXPO_PUBLIC_CART_STORAGE || 'local';
 
@@ -75,6 +80,9 @@ export const CONFIG = {
 
   /** POST with user JWT — returns final Easebuzz checkout payment_url (+ order_id, payment_id). */
   CREATE_ORDER_V2_URL,
+
+  /** POST with user JWT — cancel pending Easebuzz checkout for an order. */
+  CANCEL_PAYMENT_URL,
 
   // Deep Linking Configuration
   DEEP_LINK_PREFIX: `exp://${DEV_IP}`,

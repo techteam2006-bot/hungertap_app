@@ -65,7 +65,7 @@ import { FavoritesProvider } from './lib/FavoritesContext';
 import { CanteenStatusProvider, useCanteenStatus } from './lib/CanteenStatusContext';
 import CartBadgeUpdater from './components/CartBadgeUpdater';
 import AuthHelpScreen from './screens/AuthHelpScreen';
-import NotificationService, { areUserNotificationsEnabled } from './lib/NotificationService';
+import NotificationService from './lib/NotificationService';
 import { registerForPushNotificationsAsync, setupForegroundHandler } from './lib/services/notifications';
 import { backgroundTaskService } from './lib/BackgroundTaskService';
 
@@ -76,15 +76,9 @@ import PrivacyPolicyScreen from './screens/PrivacyPolicyScreen';
 import TermsOfServiceScreen from './screens/TermsOfServiceScreen';
 import LegalitiesScreen from './screens/LegalitiesScreen';
 import LegalWebViewScreen from './screens/LegalWebViewScreen';
-import { supabase } from './lib/supabase';
+import RestoreAccountScreen from './screens/RestoreAccountScreen';
 import { configureImageCache } from './lib/ImageCache';
 import AppErrorBoundary from './components/AppErrorBoundary';
-import { getOrderStatusNotificationBody, isNotifiableOrderStatus } from './lib/orderStatus';
-
-// DEV-only Sentry validation UI — omit from production bundle entry via __DEV__ gate
-const SentryDebugScreen = __DEV__
-  ? require('./screens/SentryDebugScreen').default
-  : null;
 
 installGlobalErrorSafety();
 
@@ -228,7 +222,15 @@ function MainTabs() {
 }
 
 function Navigation() {
-  const { user, userRole, isSignedIn, isLoaded, pendingSignupCompletion, pendingPasswordReset } = useAuth();
+  const {
+    user,
+    userRole,
+    isSignedIn,
+    isLoaded,
+    pendingSignupCompletion,
+    pendingPasswordReset,
+    accountPendingDeletion,
+  } = useAuth();
   const { colors } = useTheme();
   const [hasShownSplash, setHasShownSplash] = React.useState(null);
   const [isCheckingSplash, setIsCheckingSplash] = React.useState(true);
@@ -255,22 +257,29 @@ function Navigation() {
     configureImageCache();
   }, []);
   
-  // CRITICAL: Only allow 'student' role to access the app
-  // Block 'canteen_admin' and 'super_admin' roles
-  // Keep guest stack during mid-signup / password-reset OTP flows
+  // Soft-deleted students only see the restore screen (no MainTabs).
+  // Keep guest stack during mid-signup / password-reset OTP flows.
   const isStudentUser =
     isSignedIn &&
     user &&
     userRole === 'student' &&
     !pendingSignupCompletion &&
-    !pendingPasswordReset;
+    !pendingPasswordReset &&
+    !accountPendingDeletion;
+
+  const navKey = accountPendingDeletion
+    ? 'restore'
+    : isStudentUser
+      ? 'auth'
+      : 'guest';
   
   // Determine initial route
   const getInitialRoute = () => {
     if (isCheckingSplash) return null; // Wait for check to complete
-    if (isStudentUser) return "MainTabs"; // Only allow students
-    if (!hasShownSplash) return "Splash";
-    return "Login";
+    if (accountPendingDeletion) return 'RestoreAccount';
+    if (isStudentUser) return 'MainTabs'; // Only allow active students
+    if (!hasShownSplash) return 'Splash';
+    return 'Login';
   };
   
   if (isCheckingSplash) {
@@ -279,7 +288,7 @@ function Navigation() {
   
   return (
     <Stack.Navigator
-      key={isStudentUser ? 'auth' : 'guest'}
+      key={navKey}
       initialRouteName={getInitialRoute()}
       screenOptions={{
         headerShown: false,
@@ -290,7 +299,9 @@ function Navigation() {
         },
       }}
     >
-      {!isStudentUser ? (
+      {accountPendingDeletion ? (
+        <Stack.Screen name="RestoreAccount" component={RestoreAccountScreen} />
+      ) : !isStudentUser ? (
         <>
           <Stack.Screen name="Splash" component={SplashScreen} />
           <Stack.Screen name="Login" component={LoginScreen} />
@@ -301,13 +312,13 @@ function Navigation() {
         </>
       ) : (
         <>
-          {/* Only students can access these screens */}
+          {/* Only active students can access these screens */}
           <Stack.Screen name="MainTabs" component={MainTabs} />
-                      <Stack.Screen name="ItemDetail" component={ItemDetailScreen} />
-            <Stack.Screen name="Favorites" component={FavoritesScreen} />
-            <Stack.Screen name="Cart" component={CartScreen} />
-            <Stack.Screen name="OrderConfirmation" component={OrderConfirmationScreen} />
-            <Stack.Screen name="PaymentProcessing" component={PaymentProcessingScreen} />
+          <Stack.Screen name="ItemDetail" component={ItemDetailScreen} />
+          <Stack.Screen name="Favorites" component={FavoritesScreen} />
+          <Stack.Screen name="Cart" component={CartScreen} />
+          <Stack.Screen name="OrderConfirmation" component={OrderConfirmationScreen} />
+          <Stack.Screen name="PaymentProcessing" component={PaymentProcessingScreen} />
           <Stack.Screen name="OrderStatus" component={OrderStatusScreen} />
           <Stack.Screen name="Orders" component={OrdersScreen} />
           <Stack.Screen name="Feedback" component={FeedbackScreen} />
@@ -317,13 +328,6 @@ function Navigation() {
           <Stack.Screen name="TermsOfService" component={TermsOfServiceScreen} />
           <Stack.Screen name="Legalities" component={LegalitiesScreen} />
           <Stack.Screen name="LegalWebView" component={LegalWebViewScreen} />
-          {__DEV__ && SentryDebugScreen ? (
-            <Stack.Screen
-              name="SentryDebug"
-              component={SentryDebugScreen}
-              options={{ headerShown: false }}
-            />
-          ) : null}
         </>
       )}
     </Stack.Navigator>
@@ -392,98 +396,20 @@ function AppNavigator() {
     // Set up notification listeners
     const notificationResponseListener = NotificationService.addNotificationResponseReceivedListener(handleNotificationResponse);
 
-    // Subscribe to order status changes via Realtime
-    const subscribeToOrderStatus = () => {
-      if (!user?.id) return null;
+    // Order status Realtime websockets live only on OrderStatusScreen (focused).
+    // Push / local notifications still work via NotificationService + FCM.
 
-      console.log('🔔 Setting up order status subscription for user:', user.id);
-      
-      const channel = supabase
-        .channel('order_status_updates')
-        .on('postgres_changes', {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'orders',
-          filter: `placed_by=eq.${user.id}`,
-        }, async (payload) => {
-          // ✅ error handled — Realtime payloads must never reject the subscription
-          try {
-            console.log('📦 Order status update received:', payload);
-
-            const newOrder = payload?.new ?? null;
-            const oldOrder = payload?.old ?? null;
-            if (!newOrder || !oldOrder) return;
-
-            if (
-              newOrder.status === oldOrder.status ||
-              !isNotifiableOrderStatus(newOrder.status)
-            ) {
-              return;
-            }
-
-            if (!(await areUserNotificationsEnabled())) {
-              return;
-            }
-
-            console.log('🔔 Sending local notification for status:', newOrder.status);
-
-            let itemSummary = '';
-            try {
-              const { data: lines } = await supabase
-                .from('order_items')
-                .select('quantity, items ( name )')
-                .eq('order_id', newOrder.id);
-              if (Array.isArray(lines) && lines.length) {
-                itemSummary = lines
-                  .map((row) => {
-                    const name = row?.items?.name || 'Item';
-                    const qty = Number(row?.quantity) || 1;
-                    return qty > 1 ? `${name} (x${qty})` : name;
-                  })
-                  .filter(Boolean)
-                  .join(', ');
-              }
-            } catch (itemErr) {
-              console.log('Order item names for notification:', itemErr?.message || itemErr);
-            }
-
-            const orderToken = newOrder.order_token;
-            const title = orderToken ? `📦 Order #${orderToken}` : '📦 Your order';
-
-            await Notifications.scheduleNotificationAsync({
-              content: {
-                title,
-                body: getOrderStatusNotificationBody(newOrder.status, itemSummary),
-                data: {
-                  orderId: newOrder.id,
-                  order_token: orderToken,
-                  status: newOrder.status,
-                  type: 'order_status',
-                },
-                sound: true,
-                ...(Platform.OS === 'android' ? { channelId: 'orders' } : {}),
-              },
-              trigger: null,
-            });
-          } catch (e) {
-            console.error('Order status realtime notification:', e?.message || e);
-          }
-        })
-        .subscribe();
-
-      return channel;
-    };
-
-    // Initialize notifications and subscribe to order updates
+    // Initialize notifications
     initializeNotifications();
     maybeRegisterPushToken();
-    const orderChannel = subscribeToOrderStatus();
 
     // Initialize background task service for cart timeout management
     const initializeBackgroundTasks = async () => {
       try {
-        await backgroundTaskService.initialize();
-        console.log('✅ Background task service initialized');
+        const ok = await backgroundTaskService.initialize();
+        if (ok) {
+          console.log('✅ Background task service initialized');
+        }
       } catch (error) {
         console.log('❌ Failed to initialize background task service:', error);
       }
@@ -534,9 +460,6 @@ function AppNavigator() {
       subscription.remove();
       if (notificationResponseListener && notificationResponseListener.remove) {
         notificationResponseListener.remove();
-      }
-      if (orderChannel) {
-        supabase.removeChannel(orderChannel);
       }
     };
   }, [user, isSignedIn, userId]);

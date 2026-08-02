@@ -16,7 +16,7 @@ import AppIcon from '../components/AppIcon';
 import BrandYellowStrip from '../components/BrandYellowStrip';
 import { useTheme } from '../lib/ThemeContext';
 import { appTypography } from '../lib/darkThemeConfig';
-import splashCatLogo from '../assets/logo1.png';
+import splashCatLogo from '../assets/logo.png';
 
 const { width, height } = Dimensions.get('window');
 

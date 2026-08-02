@@ -5,7 +5,6 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
   Alert,
   KeyboardAvoidingView,
@@ -60,12 +59,21 @@ const createLoginStyles = (colors) =>
       marginBottom: height * 0.000625,
     },
     logoContainer: {
-      marginBottom: height * 0.000625,
+      marginBottom: height * 0.01,
+      backgroundColor: '#000000',
+      borderRadius: width * 0.06,
+      overflow: 'hidden',
     },
     logo: {
       width: width * 0.3,
       height: width * 0.3,
-      borderRadius: width * 0.06,
+    },
+    brandTitle: {
+      marginTop: height * 0.008,
+      fontSize: width * 0.07,
+      fontFamily: appTypography.bold,
+      fontWeight: '700',
+      textAlign: 'center',
     },
     toggleContainer: {
       marginTop: height * 0.0125,
@@ -423,7 +431,7 @@ export default function LoginScreen({ navigation }) {
         style={isDarkMode ? 'light' : 'dark'}
       />
       <View style={{ height: insets.top, backgroundColor: BRAND_GOLD, width: '100%' }} />
-      <SafeAreaView style={styles.safeArea}>
+      <View style={[styles.safeArea, { paddingBottom: insets.bottom }]}>
         <KeyboardAvoidingView
           style={styles.keyboardAvoidingView}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -442,6 +450,10 @@ export default function LoginScreen({ navigation }) {
               <View style={styles.logoContainer}>
                 <Image source={LOGIN_SCREEN_LOGO} style={styles.logo} resizeMode="contain" />
               </View>
+              <Text style={styles.brandTitle}>
+                <Text style={{ color: colors.text }}>Hunger</Text>
+                <Text style={{ color: BRAND_GOLD }}>Tap</Text>
+              </Text>
             </View>
 
             <View style={styles.toggleContainer}>
@@ -624,7 +636,7 @@ export default function LoginScreen({ navigation }) {
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
-      </SafeAreaView>
+      </View>
     </View>
   );
 }

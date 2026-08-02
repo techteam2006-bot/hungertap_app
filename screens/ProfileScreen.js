@@ -10,6 +10,11 @@ import {
   Share,
   Linking,
   Platform,
+  Modal,
+  TextInput,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Pressable,
 } from 'react-native';
 import LegalitiesCard from '../components/LegalitiesCard';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -103,10 +108,15 @@ function ProfileRow({
 
 const ProfileScreen = ({ navigation }) => {
   const { colors, isDarkMode, toggleTheme } = useTheme();
-  const { user, userId, signOut } = useAuth();
+  const { user, userId, signOut, softDeleteOwnAccount } = useAuth();
   const [notificationsEnabled, setNotificationsEnabled] = React.useState(true);
   const [notifToggleBusy, setNotifToggleBusy] = React.useState(false);
   const [vegModeEnabled, setVegModeEnabled] = React.useState(false);
+  const [deleteModalVisible, setDeleteModalVisible] = React.useState(false);
+  const [deletePassword, setDeletePassword] = React.useState('');
+  const [deletePasswordVisible, setDeletePasswordVisible] = React.useState(false);
+  const [deleteBusy, setDeleteBusy] = React.useState(false);
+  const [deleteError, setDeleteError] = React.useState('');
 
   const effectiveUserId = userId ?? user?.id ?? null;
 
@@ -287,6 +297,49 @@ const ProfileScreen = ({ navigation }) => {
       { text: 'Cancel', style: 'cancel' },
       { text: 'Sign Out', style: 'destructive', onPress: signOut },
     ]);
+  };
+
+  const openDeleteModal = () => {
+    setDeletePassword('');
+    setDeletePasswordVisible(false);
+    setDeleteError('');
+    setDeleteModalVisible(true);
+  };
+
+  const closeDeleteModal = () => {
+    if (deleteBusy) return;
+    setDeleteModalVisible(false);
+    setDeletePassword('');
+    setDeletePasswordVisible(false);
+    setDeleteError('');
+  };
+
+  const handleConfirmDelete = async () => {
+    const pwd = String(deletePassword || '');
+    if (!pwd) {
+      setDeleteError('Enter your password to continue.');
+      return;
+    }
+    setDeleteBusy(true);
+    setDeleteError('');
+    try {
+      const { error } = await softDeleteOwnAccount(pwd);
+      if (error) {
+        const message = error.message || 'Could not delete account.';
+        setDeleteError(message);
+        if (error.code === 'active_orders') {
+          Alert.alert('Active orders', message);
+        }
+        return;
+      }
+      setDeleteModalVisible(false);
+      Alert.alert(
+        'Account scheduled for deletion',
+        'Your account will be permanently removed from login after 7 days. Sign in again within that window if you want to restore it.'
+      );
+    } finally {
+      setDeleteBusy(false);
+    }
   };
 
   const handleShareApp = async () => {
@@ -492,19 +545,16 @@ const ProfileScreen = ({ navigation }) => {
             title="Share with friends"
             subtitle="Invite others to HungerTap"
             colors={colors}
-            isLast={!__DEV__}
             onPress={handleShareApp}
           />
-          {__DEV__ ? (
-            <ProfileRow
-              icon="bug-outline"
-              title="Sentry Debug"
-              subtitle="Manual crash / ANR probes (__DEV__)"
-              colors={colors}
-              isLast
-              onPress={() => navigation.navigate('SentryDebug')}
-            />
-          ) : null}
+          <ProfileRow
+            icon="trash-outline"
+            title="Delete account"
+            subtitle="Schedule permanent deletion (7-day restore)"
+            colors={colors}
+            isLast
+            onPress={openDeleteModal}
+          />
         </GlassCard>
 
         <View style={styles.signOutInSection}>
@@ -526,6 +576,99 @@ const ProfileScreen = ({ navigation }) => {
         </View>
       </ScrollView>
       </View>
+
+      <Modal
+        visible={deleteModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={closeDeleteModal}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.deleteModalOverlay}
+        >
+          <Pressable style={styles.deleteModalBackdrop} onPress={closeDeleteModal} />
+          <View style={[styles.deleteModalCard, { backgroundColor: colors.elevatedSurface, borderColor: colors.border }]}>
+            <Text style={[styles.deleteModalTitle, { color: colors.text }]}>Delete your account?</Text>
+            <Text style={[styles.deleteModalBody, { color: colors.textSecondary }]}>
+              Your data will be scheduled for complete deletion. You can restore the account within 7
+              days by signing in again. After 7 days, login access is permanently removed; canteen
+              order history is retained.
+            </Text>
+            <Text style={[styles.deleteModalHint, { color: colors.textTertiary }]}>
+              Enter your password to confirm
+            </Text>
+            <View
+              style={[
+                styles.deletePasswordRow,
+                {
+                  borderColor: colors.border,
+                  backgroundColor: colors.mutedRowBackground || colors.contentBackground,
+                },
+              ]}
+            >
+              <TextInput
+                value={deletePassword}
+                onChangeText={setDeletePassword}
+                placeholder="Password"
+                placeholderTextColor={colors.textTertiary}
+                secureTextEntry={!deletePasswordVisible}
+                autoCapitalize="none"
+                autoCorrect={false}
+                editable={!deleteBusy}
+                style={[styles.deletePasswordInput, { color: colors.text }]}
+              />
+              <TouchableOpacity
+                onPress={() => setDeletePasswordVisible((v) => !v)}
+                style={styles.deletePasswordToggle}
+                disabled={deleteBusy}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityLabel={deletePasswordVisible ? 'Hide password' : 'Show password'}
+              >
+                <AppIcon
+                  name={deletePasswordVisible ? 'eye' : 'eye-off'}
+                  size={20}
+                  color={colors.textTertiary}
+                />
+              </TouchableOpacity>
+            </View>
+            {deleteError ? (
+              <Text style={[styles.deleteError, { color: colors.error || '#EF4444' }]}>
+                {deleteError}
+              </Text>
+            ) : null}
+            <View style={styles.deleteModalActions}>
+              <TouchableOpacity
+                onPress={closeDeleteModal}
+                disabled={deleteBusy}
+                style={[styles.deleteCancelBtn, { borderColor: colors.border }]}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.deleteCancelLabel, { color: colors.textSecondary }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={handleConfirmDelete}
+                disabled={deleteBusy}
+                activeOpacity={0.88}
+                style={styles.deleteConfirmTouchable}
+              >
+                <LinearGradient
+                  colors={['#FF5C5C', '#B91C1C']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.deleteConfirmGradient}
+                >
+                  {deleteBusy ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.deleteConfirmLabel}>Delete account</Text>
+                  )}
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 };
@@ -706,6 +849,94 @@ const styles = StyleSheet.create({
     fontFamily: appTypography.regular,
     marginTop: 2,
     lineHeight: 18,
+  },
+  deleteModalOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  deleteModalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  deleteModalCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 20,
+    zIndex: 1,
+  },
+  deleteModalTitle: {
+    fontSize: 18,
+    fontFamily: appTypography.bold,
+    marginBottom: 10,
+  },
+  deleteModalBody: {
+    fontSize: 14,
+    fontFamily: appTypography.regular,
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  deleteModalHint: {
+    fontSize: 12,
+    fontFamily: appTypography.semiBold,
+    marginBottom: 8,
+  },
+  deletePasswordRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    marginBottom: 8,
+  },
+  deletePasswordInput: {
+    flex: 1,
+    paddingVertical: Platform.OS === 'ios' ? 14 : 10,
+    fontSize: 15,
+    fontFamily: appTypography.regular,
+  },
+  deletePasswordToggle: {
+    padding: 4,
+    marginLeft: 4,
+  },
+  deleteError: {
+    fontSize: 13,
+    fontFamily: appTypography.regular,
+    marginBottom: 8,
+  },
+  deleteModalActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 8,
+  },
+  deleteCancelBtn: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deleteCancelLabel: {
+    fontSize: 15,
+    fontFamily: appTypography.semiBold,
+  },
+  deleteConfirmTouchable: {
+    flex: 1,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  deleteConfirmGradient: {
+    minHeight: 48,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  deleteConfirmLabel: {
+    fontSize: 15,
+    fontFamily: appTypography.semiBold,
+    color: '#FFFFFF',
   },
 });
 

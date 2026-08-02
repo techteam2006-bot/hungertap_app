@@ -448,7 +448,7 @@ const styles = StyleSheet.create({
   backPill: {
     position: 'absolute',
     top: 8,
-    right: 20,
+    left: 20,
     width: 44,
     height: 44,
     borderRadius: 22,

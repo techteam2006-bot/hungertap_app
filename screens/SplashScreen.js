@@ -142,8 +142,10 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   logoImage: {
-    width: 350,
-    height: 350,
+    width: 220,
+    height: 220,
+    backgroundColor: '#000000',
+    borderRadius: 48,
   },
   tagline: {
     fontSize: 15,
