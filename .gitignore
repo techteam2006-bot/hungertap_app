@@ -10,6 +10,7 @@ dist/
 !.env.example
 credentials.json
 build-credentials/
+android/sentry.properties
 
 # Android / native build outputs
 android/build/

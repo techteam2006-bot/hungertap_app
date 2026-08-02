@@ -11,6 +11,7 @@
     "ios": "npx expo run:ios",
     "web": "npx expo start --web",
     "measure-bundle": "node scripts/measureBundle.mjs",
+    "check-abis": "node scripts/checkApkAbis.mjs",
     "optimize-assets": "node scripts/optimizeAssets.mjs",
     "generate-icons": "node scripts/generateAppIcon.mjs",
     "prebuild:android": "npx expo prebuild --platform android --clean",
