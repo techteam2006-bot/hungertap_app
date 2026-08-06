@@ -337,7 +337,7 @@ const OrderConfirmationScreen = ({ navigation, route }) => {
                 <AppIcon
                   name={row.icon}
                   size={20}
-                  color="#000000"
+                  color={colors.text}
                 />
               </View>
               <View style={styles.rowText}>

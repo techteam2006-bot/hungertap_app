@@ -60,7 +60,7 @@ const createLoginStyles = (colors) =>
     },
     logoContainer: {
       marginBottom: height * 0.01,
-      backgroundColor: '#000000',
+      backgroundColor: 'transparent',
       borderRadius: width * 0.06,
       overflow: 'hidden',
     },

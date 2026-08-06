@@ -1216,7 +1216,7 @@ const CartScreen = ({ navigation }) => {
             onPress={() => navigateBackFromCart(navigation)}
             style={styles.backButton}
           >
-            <AppIcon name="arrow-back" size={24} color="#4D4D4D" />
+            <AppIcon name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Cart</Text>
           <View style={styles.headerClearButton}>
@@ -1307,7 +1307,7 @@ const CartScreen = ({ navigation }) => {
                           <AppIcon
                             name="receipt-outline"
                             size={28}
-                            color={isDarkMode ? '#FFFFFF' : '#000000'}
+                            color={colors.text}
                             style={{ marginLeft: -6, marginRight: 8 }}
                           />
                           <Text style={styles.toPayLabel}>To Pay</Text>
@@ -1325,7 +1325,7 @@ const CartScreen = ({ navigation }) => {
                   <AppIcon 
                     name={isOrderSummaryExpanded ? "chevron-up" : "chevron-down"} 
                     size={24} 
-                    color="#646464" 
+                    color={isDarkMode ? colors.textSecondary : '#646464'} 
                   />
                 </TouchableOpacity>
               </View>

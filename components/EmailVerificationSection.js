@@ -343,6 +343,7 @@ export default function EmailVerificationSection({
                   disabled={verifying || disabled}
                   error={!!otpError}
                   autoFocus
+                  focusKey={restartKey}
                   accentColor={BRAND_GOLD}
                   borderColor={colors.border}
                   errorColor={colors.error}

@@ -10,7 +10,11 @@ dist/
 !.env.example
 credentials.json
 build-credentials/
-android/sentry.properties
+# Keep android/sentry.properties committed (org/project only — never put auth.token in it).
+# Local overrides with tokens: android/sentry.properties.local (ignored)
+android/sentry.properties.local
+.sentryclirc
+.env.sentry-build-plugin
 
 # Android / native build outputs
 android/build/

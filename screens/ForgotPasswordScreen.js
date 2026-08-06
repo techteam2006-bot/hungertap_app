@@ -23,7 +23,7 @@ import { useTheme } from '../lib/ThemeContext';
 import { useAuth } from '../lib/AuthContext';
 import { appTypography } from '../lib/darkThemeConfig';
 import LoadingButton from '../components/LoadingButton';
-import { GLOBAL_LOADING_LOGO } from '../lib/appLogo';
+import { LOGIN_SCREEN_LOGO } from '../lib/appLogo';
 
 const { width, height } = Dimensions.get('window');
 const OTP_LENGTH = 6;
@@ -79,7 +79,7 @@ const createForgotPasswordStyles = (colors) =>
       width: width * 0.2,
       height: width * 0.2,
       borderRadius: width * 0.1,
-      backgroundColor: '#000000',
+      backgroundColor: 'transparent',
       justifyContent: 'center',
       alignItems: 'center',
       marginBottom: height * 0.018,
@@ -476,7 +476,7 @@ const ForgotPasswordScreen = ({ navigation, route }) => {
             <View style={styles.centerBlock}>
               <View style={styles.headerInner}>
                 <View style={styles.iconWrap}>
-                  <Image source={GLOBAL_LOADING_LOGO} style={styles.brandMark} resizeMode="contain" />
+                  <Image source={LOGIN_SCREEN_LOGO} style={styles.brandMark} resizeMode="contain" />
                 </View>
                 <Text style={styles.title}>Reset Password</Text>
                 <Text style={styles.subtitle}>

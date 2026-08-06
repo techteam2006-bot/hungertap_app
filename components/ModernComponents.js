@@ -174,7 +174,7 @@ export const AnimatedFoodCard = ({
   imagePriority = 'high',
   style
 }) => {
-  const { colors } = useTheme();
+  const { colors, isDarkMode } = useTheme();
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const cardFill = vegMode ? colors.foodCardVegFill : colors.foodCardNeutralFill;
   const cardOutline = {
@@ -311,6 +311,7 @@ export const AnimatedFoodCard = ({
                     backgroundColor: colors.card,
                     borderWidth: 1,
                     borderColor: colors.border,
+                    opacity: item?.isAvailable ? 1 : 0.55,
                   },
                 ]}
               >
@@ -329,21 +330,56 @@ export const AnimatedFoodCard = ({
                 <TouchableOpacity
                   style={styles.newQuantityButton}
                   onPress={() => onIncrease && onIncrease()}
-                  disabled={!onIncrease}
+                  disabled={!onIncrease || !item?.isAvailable}
                 >
-                  <AppIcon name="add" size={18} color={colors.textSecondary} />
+                  <AppIcon
+                    name="add"
+                    size={18}
+                    color={
+                      !item?.isAvailable ? colors.textTertiary || '#9CA3AF' : colors.textSecondary
+                    }
+                  />
                 </TouchableOpacity>
               </View>
             ) : (
               <TouchableOpacity
                 style={[
                   styles.newAddButton,
-                  { backgroundColor: vegMode ? '#00BD32' : colors.brandYellow },
+                  {
+                    backgroundColor: !item?.isAvailable
+                      ? isDarkMode
+                        ? '#3A3A3A'
+                        : '#E5E7EB'
+                      : vegMode
+                        ? '#00BD32'
+                        : colors.brandYellow,
+                  },
+                  !item?.isAvailable && styles.newAddButtonDisabled,
                 ]}
-                onPress={() => onAddToCart && onAddToCart()}
+                onPress={() => {
+                  if (!item?.isAvailable) return;
+                  onAddToCart && onAddToCart();
+                }}
                 disabled={!item?.isAvailable}
+                accessibilityState={{ disabled: !item?.isAvailable }}
+                accessibilityLabel={
+                  item?.isAvailable ? 'Add items' : 'Out of stock'
+                }
               >
-                <Text style={[styles.newAddButtonText, { color: '#000000' }]}>+ Add Items</Text>
+                <Text
+                  style={[
+                    styles.newAddButtonText,
+                    {
+                      color: !item?.isAvailable
+                        ? isDarkMode
+                          ? '#9CA3AF'
+                          : '#6B7280'
+                        : '#000000',
+                    },
+                  ]}
+                >
+                  {item?.isAvailable ? '+ Add Items' : 'Out of Stock'}
+                </Text>
               </TouchableOpacity>
             )}
           </View>
@@ -1370,6 +1406,12 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 2,
     elevation: 2,
+  },
+  newAddButtonDisabled: {
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    elevation: 0,
+    opacity: 1,
   },
   newAddButtonText: {
     fontSize: Platform.OS === 'ios' ? 14 : 13,

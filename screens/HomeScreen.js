@@ -18,10 +18,14 @@ import {
   TextInput,
   ScrollView,
   Easing,
+  Modal,
+  Pressable,
+  TouchableWithoutFeedback,
 } from 'react-native';
 import Constants from 'expo-constants';
 import AppIcon from '../components/AppIcon';
 import { LinearGradient } from 'expo-linear-gradient';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useAuth } from '../lib/AuthContext';
 import { useCart } from '../lib/CartContext';
 import { useTheme } from '../lib/ThemeContext';
@@ -262,11 +266,9 @@ const HomeScreen = ({ navigation, route }) => {
   const [collegeName, setCollegeName] = useState('');
   /** When false, menu must not load unscoped items (avoids cart/order mismatch with checkout). */
   const [menuCanteenReady, setMenuCanteenReady] = useState(false);
-  
-  
-  
-  
-  
+  const [collegeCanteens, setCollegeCanteens] = useState([]);
+  const [showCanteenPicker, setShowCanteenPicker] = useState(false);
+  const [canteenPickerLoading, setCanteenPickerLoading] = useState(false);
 
   // Veg mode: scheduled days (local) override; else signed-in users use public.users.veg_mode_enabled
   const loadVegModePreference = useCallback(async () => {
@@ -663,6 +665,88 @@ const HomeScreen = ({ navigation, route }) => {
     }
   }, []);
 
+  const performCanteenSwitch = useCallback(
+    async (canteen) => {
+      if (!user?.id) return;
+      if (canteen?.is_open === false) {
+        setShowCanteenPicker(false);
+        return;
+      }
+      setCanteenPickerLoading(true);
+      try {
+        const { error } = await supabase.from('users').update({ canteen_id: canteen.id }).eq('id', user.id);
+        if (error) throw error;
+        setCurrentCanteenId(canteen.id);
+        setCurrentCanteenName(canteen.name);
+        setShowCanteenPicker(false);
+        rememberLastCanteen(canteen.id, canteen.name || '').catch(() => {});
+        invalidateCanteenMenuEdgeCache(canteen.id);
+        if (menuFromHttpEnabled()) invalidateHttpMenuCache();
+        invalidateMenu(canteen.id).catch(() => {});
+        checkCanteenStatus();
+        await fetchCategories();
+      } catch (e) {
+        console.error('Change canteen error:', e);
+        Alert.alert('Error', 'Could not change canteen. Try again.');
+      } finally {
+        setCanteenPickerLoading(false);
+      }
+    },
+    [user?.id, checkCanteenStatus, fetchCategories]
+  );
+
+  const handleSelectCanteen = useCallback(
+    (canteen) => {
+      if (!user?.id) {
+        setShowCanteenPicker(false);
+        return;
+      }
+      if (canteen?.is_open === false) {
+        setShowCanteenPicker(false);
+        return;
+      }
+      const sameCanteen =
+        currentCanteenId != null && String(canteen.id) === String(currentCanteenId);
+      if (sameCanteen) {
+        setShowCanteenPicker(false);
+        return;
+      }
+
+      if (getTotalItems() > 0) {
+        Alert.alert(
+          'Change canteen?',
+          'Your cart is for the current canteen. Switching will remove all items from your cart.',
+          [
+            {
+              text: 'Cancel',
+              style: 'cancel',
+              onPress: () => setShowCanteenPicker(false),
+            },
+            {
+              text: 'Clear cart & switch',
+              style: 'destructive',
+              onPress: () => {
+                void (async () => {
+                  try {
+                    await clearCart();
+                    await performCanteenSwitch(canteen);
+                  } catch (e) {
+                    console.error('Change canteen (after clear cart):', e);
+                    Alert.alert('Error', 'Could not switch canteen. Try again.');
+                  }
+                })();
+              },
+            },
+          ]
+        );
+        return;
+      }
+
+      void performCanteenSwitch(canteen);
+    },
+    [user?.id, currentCanteenId, getTotalItems, clearCart, performCanteenSwitch]
+  );
+
   useEffect(() => {
     if (!user?.id) {
       setMenuCanteenReady(true);
@@ -847,7 +931,7 @@ const HomeScreen = ({ navigation, route }) => {
     setActiveFilter('all');
   }, [occupancyLookup, activeFilter, categories]);
 
-  // Resolve college name (CAPS in UI) + assigned canteen — no canteen switcher.
+  // Fetch user's college canteens and current canteen name (for switcher)
   useEffect(() => {
     if (!user?.id) return;
     let mounted = true;
@@ -860,11 +944,13 @@ const HomeScreen = ({ navigation, route }) => {
           .maybeSingle();
         if (!mounted) return;
         if (userErr) {
-          console.error('Home college/canteen load:', userErr.message || userErr);
+          // Offline: keep restored canteen; still unblock menu load in finally.
+          console.error('Canteen switcher users:', userErr.message || userErr);
           return;
         }
         if (!userRow?.college_id) {
           setCollegeName('');
+          setCollegeCanteens([]);
           return;
         }
         const collegeId = userRow.college_id;
@@ -893,21 +979,47 @@ const HomeScreen = ({ navigation, route }) => {
           }
         }
 
-        if (userCanteenId) {
-          const { data: canteenRow } = await supabase
-            .from('canteens')
-            .select('id, name')
-            .eq('id', userCanteenId)
-            .maybeSingle();
-          if (!mounted) return;
-          if (canteenRow) {
-            setCurrentCanteenName(canteenRow.name || '');
-            setCurrentCanteenId(canteenRow.id);
-            rememberLastCanteen(canteenRow.id, canteenRow.name || '').catch(() => {});
+        const { data: canteens, error: cErr } = await supabase
+          .from('canteens')
+          .select('id, name, is_open')
+          .eq('college_id', collegeId)
+          .order('name');
+        if (!mounted) return;
+        if (cErr) {
+          console.error('Canteen switcher canteens:', cErr.message || cErr);
+          return;
+        }
+        if (Array.isArray(canteens)) {
+          // Picker: only open (active) canteens; closed canteens are not shown or switchable
+          const openForSwitcher = canteens.filter((c) => c.is_open !== false);
+          setCollegeCanteens(openForSwitcher);
+
+          if (userCanteenId) {
+            const current = canteens.find((c) => c.id === userCanteenId);
+            if (current) {
+              setCurrentCanteenName(current.name);
+              setCurrentCanteenId(userCanteenId);
+              rememberLastCanteen(userCanteenId, current.name).catch(() => {});
+            } else {
+              const { data: canteenRow } = await supabase
+                .from('canteens')
+                .select('name')
+                .eq('id', userCanteenId)
+                .maybeSingle();
+              if (canteenRow) {
+                setCurrentCanteenName(canteenRow.name);
+                setCurrentCanteenId(userCanteenId);
+                rememberLastCanteen(userCanteenId, canteenRow.name).catch(() => {});
+              }
+            }
+          } else if (openForSwitcher.length > 0) {
+            setCurrentCanteenName(openForSwitcher[0].name);
+            setCurrentCanteenId(openForSwitcher[0].id);
+            rememberLastCanteen(openForSwitcher[0].id, openForSwitcher[0].name).catch(() => {});
           }
         }
       } catch (e) {
-        console.log('Home college/canteen load error:', e);
+        console.log('Canteen switcher load error:', e);
       } finally {
         if (mounted) {
           setMenuCanteenReady(true);
@@ -1724,17 +1836,32 @@ const HomeScreen = ({ navigation, route }) => {
         >
           <View style={styles.fixedHeaderContent}>
               <View style={styles.locationRow}>
-                <AppIcon name="location" size={14} color={isDarkMode ? '#FFFFFF' : '#000000'} />
+                <AppIcon name="location" size={14} color={colors.text} />
                 <Text style={[styles.locationText, { color: isDarkMode ? '#FFFFFF' : '#000000' }]} numberOfLines={1}>
                   {String(collegeName || 'College').trim().toUpperCase()}
                 </Text>
                 {currentCanteenName ? (
-                  <View style={[styles.canteenSmallSelector, { backgroundColor: '#F5B041', borderWidth: 0 }]}>
+                  <TouchableOpacity
+                    onPress={() => (collegeCanteens.length > 1 ? setShowCanteenPicker(true) : undefined)}
+                    style={[styles.canteenSmallSelector, { backgroundColor: '#F5B041', borderWidth: 0 }]}
+                    activeOpacity={collegeCanteens.length > 1 ? 0.72 : 1}
+                    disabled={collegeCanteens.length <= 1}
+                    accessibilityRole="button"
+                    accessibilityLabel="Switch canteen"
+                    accessibilityHint={
+                      collegeCanteens.length > 1
+                        ? 'Opens a list of canteens at your college'
+                        : 'Only one canteen is available'
+                    }
+                  >
                     <AppIcon name="storefront-outline" size={11} color="#FFFFFF" />
                     <Text style={styles.canteenSmallText} numberOfLines={1}>
                       {currentCanteenName}
                     </Text>
-                  </View>
+                    {collegeCanteens.length > 1 ? (
+                      <AppIcon name="chevron-down" size={11} color="#FFFFFF" />
+                    ) : null}
+                  </TouchableOpacity>
                 ) : null}
               </View>
             <TouchableOpacity
@@ -2095,7 +2222,76 @@ const HomeScreen = ({ navigation, route }) => {
           />
         )}
       </KeyboardAvoidingView>
-<BottomSnackbar
+
+      {/* Canteen picker — open canteens in the user's college */}
+      <Modal
+        visible={showCanteenPicker}
+        transparent
+        animationType="slide"
+        presentationStyle={Platform.OS === 'ios' ? 'overFullScreen' : undefined}
+        onRequestClose={() => setShowCanteenPicker(false)}
+      >
+        <GestureHandlerRootView style={styles.canteenPickerGestureRoot}>
+          <View style={styles.canteenPickerModalRoot}>
+            <TouchableWithoutFeedback onPress={() => setShowCanteenPicker(false)}>
+              <View style={styles.canteenPickerBackdropFill} />
+            </TouchableWithoutFeedback>
+            <View
+              style={[styles.canteenPickerSheet, { backgroundColor: colors.card }]}
+              collapsable={false}
+            >
+              <View style={[styles.canteenPickerHeader, { borderBottomColor: colors.border }]}>
+                <Text style={[styles.canteenPickerTitle, { color: colors.text }]}>Select canteen</Text>
+                <TouchableOpacity onPress={() => setShowCanteenPicker(false)} hitSlop={12} activeOpacity={1}>
+                  <AppIcon name="close" size={24} color={colors.text} />
+                </TouchableOpacity>
+              </View>
+              <FlatList
+                horizontal
+                data={collegeCanteens}
+                keyExtractor={(c) => String(c.id)}
+                keyboardShouldPersistTaps="always"
+                removeClippedSubviews={false}
+                nestedScrollEnabled
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.canteenPickerScroll}
+                style={styles.canteenPickerList}
+                renderItem={({ item: c }) => {
+                  const selected =
+                    currentCanteenId != null &&
+                    String(c.id) === String(currentCanteenId);
+                  return (
+                    <Pressable
+                      onPress={() => handleSelectCanteen(c)}
+                      disabled={canteenPickerLoading}
+                      style={({ pressed }) => [
+                        styles.canteenPickerCard,
+                        {
+                          backgroundColor: selected ? colors.brandYellow : colors.surface,
+                          borderColor: selected ? colors.brandYellow : colors.border,
+                          opacity: canteenPickerLoading ? 0.65 : pressed ? 0.92 : 1,
+                        },
+                      ]}
+                    >
+                      <AppIcon name="storefront" size={22} color={selected ? '#000000' : colors.text} />
+                      <Text style={[styles.canteenPickerCardText, { color: selected ? '#000000' : colors.text }]} numberOfLines={2}>
+                        {c.name}
+                      </Text>
+                    </Pressable>
+                  );
+                }}
+              />
+              {canteenPickerLoading && (
+                <View style={styles.canteenPickerLoading} pointerEvents="none">
+                  <ActivityIndicator size="small" color={colors.brandYellow} />
+                </View>
+              )}
+            </View>
+          </View>
+        </GestureHandlerRootView>
+      </Modal>
+
+      <BottomSnackbar
         visible={snackbarVisible}
         onPressViewCart={() => {
           setSnackbarVisible(false);

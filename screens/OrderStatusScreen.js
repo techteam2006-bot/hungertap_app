@@ -94,6 +94,8 @@ const OrderStatusScreen = ({ navigation, route }) => {
   /** Client-side step timestamps recorded as tracking advances. */
   const [stepTimestamps, setStepTimestamps] = useState({});
   const prevStatusRef = useRef(null);
+  /** Lock grand total once delivered so realtime/refetch cannot flicker takeaway totals. */
+  const deliveredTotalLockRef = useRef(null);
 
   const parseOrderSummary = useCallback((summary) => {
     if (!summary) return [];
@@ -612,6 +614,25 @@ const OrderStatusScreen = ({ navigation, route }) => {
     fetchMissingPrices();
   }, [orderItems, priceLookup]);
 
+  const persistedTotalForLock = parseCurrencyValue(currentOrder?.total_amount);
+  const orderIsDeliveredForLock = isDeliveredLike(currentOrder?.status);
+
+  useEffect(() => {
+    if (!orderIsDeliveredForLock) {
+      deliveredTotalLockRef.current = null;
+      return;
+    }
+    if (
+      persistedTotalForLock !== null &&
+      Number.isFinite(persistedTotalForLock) &&
+      persistedTotalForLock > 0 &&
+      (deliveredTotalLockRef.current == null ||
+        persistedTotalForLock > deliveredTotalLockRef.current)
+    ) {
+      deliveredTotalLockRef.current = persistedTotalForLock;
+    }
+  }, [orderIsDeliveredForLock, persistedTotalForLock]);
+
   const handleBackPress = () => {
     // Always go back to the previous screen
     navigation.goBack();
@@ -983,17 +1004,19 @@ const OrderStatusScreen = ({ navigation, route }) => {
   const orderIsPaymentFailed = isPaymentFailedLike(currentOrder.status);
   const orderIsPickupFailed = isPickupFailed(currentOrder.status);
   const isReorderEligible = isReorderEligibleStatus(currentOrder.status);
-  const persistedTotal = parseCurrencyValue(currentOrder?.total_amount);
+  const persistedTotal = persistedTotalForLock;
 
+  /**
+   * Prefer locked/DB `total_amount` over line-item sums. Delivered+takeaway used to
+   * prefer food-only computed totals, which oscillated with realtime/refetch.
+   */
   const finalTotal = (() => {
-    if (orderIsDelivered) {
-      if (computedTotal > 0.005) {
-        return computedTotal;
-      }
-      if (persistedTotal !== null && Number.isFinite(persistedTotal) && persistedTotal > 0) {
-        return persistedTotal;
-      }
-      return computedTotal;
+    if (
+      orderIsDelivered &&
+      deliveredTotalLockRef.current != null &&
+      deliveredTotalLockRef.current > 0
+    ) {
+      return deliveredTotalLockRef.current;
     }
     if (persistedTotal !== null && Number.isFinite(persistedTotal) && persistedTotal > 0) {
       return persistedTotal;
@@ -1168,7 +1191,7 @@ const OrderStatusScreen = ({ navigation, route }) => {
           >
           <View style={styles.billHeaderMainRow}>
             <View style={styles.billHeaderLeft}>
-              <AppIcon name="receipt" size={26} color="#000000" />
+              <AppIcon name="receipt" size={26} color={colors.text} />
               <Text style={[styles.billTitle, { color: colors.text }]}>Total Bill</Text>
             </View>
             <View style={styles.billHeaderRight}>

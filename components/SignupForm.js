@@ -66,6 +66,13 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
   const passwordRef = useRef(null);
   const confirmRef = useRef(null);
   const passwordEnableAnim = useRef(new Animated.Value(0)).current;
+  const didInitialNameFocus = useRef(false);
+  const [otpAwaitingCode, setOtpAwaitingCode] = useState(false);
+  const otpAwaitingCodeRef = useRef(false);
+
+  useEffect(() => {
+    otpAwaitingCodeRef.current = otpAwaitingCode;
+  }, [otpAwaitingCode]);
 
   const scrollFocusedIntoView = useCallback(
     (inputRef) => {
@@ -106,6 +113,17 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
     }
   }, [pendingSignupCompletion, isSignedIn]);
 
+  // Signup opens with focus on User Name once — never steal focus after OTP is shown.
+  useEffect(() => {
+    if (didInitialNameFocus.current) return undefined;
+    if (emailVerified || pendingSignupCompletion || otpAwaitingCode) return undefined;
+    didInitialNameFocus.current = true;
+    const t = setTimeout(() => {
+      if (!otpAwaitingCodeRef.current) nameRef.current?.focus();
+    }, 320);
+    return () => clearTimeout(t);
+  }, [emailVerified, pendingSignupCompletion, otpAwaitingCode]);
+
   useEffect(() => {
     Animated.timing(passwordEnableAnim, {
       toValue: emailVerified ? 1 : 0,
@@ -114,6 +132,7 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
       useNativeDriver: true,
     }).start(() => {
       if (emailVerified) {
+        setOtpAwaitingCode(false);
         setTimeout(() => {
           passwordRef.current?.focus();
           scrollFocusedIntoView(passwordRef);
@@ -437,14 +456,23 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
         onVerifiedChange={(v) => {
           setEmailVerified(v);
           if (v) {
+            setOtpAwaitingCode(false);
             setGeneralSuccess('Email verified. Set your password to finish.');
             setGeneralError('');
           } else {
             clearPendingSignup?.();
+            setOtpAwaitingCode(false);
             setGeneralSuccess('');
           }
         }}
         onOtpSent={() => {
+          setOtpAwaitingCode(true);
+          // Drop any stray focus (username / autofill) so OTP can take the keyboard.
+          nameRef.current?.blur?.();
+          canteenRef.current?.blur?.();
+          emailRef.current?.blur?.();
+          passwordRef.current?.blur?.();
+          confirmRef.current?.blur?.();
           setGeneralSuccess('Verification code sent');
           setGeneralError('');
         }}
@@ -475,7 +503,12 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
         <View
           style={[
             styles.inputRow,
-            { backgroundColor: colors.inputBackground, borderColor: colors.border },
+            {
+              backgroundColor: passwordLocked
+                ? colors.mutedRowBackground || colors.inputBackground
+                : colors.inputBackground,
+              borderColor: colors.border,
+            },
             showPasswordMissing || passwordError ? { borderColor: colors.error } : null,
           ]}
         >
@@ -483,23 +516,33 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
           <TextInput
             ref={passwordRef}
             style={[styles.input, { color: colors.text }]}
-            placeholder="Password"
+            placeholder={passwordLocked ? 'Password (verify email first)' : 'Password'}
             placeholderTextColor={tertiary}
             value={password}
             onChangeText={(t) => {
+              if (passwordLocked) return;
               setPassword(t);
               if (passwordError) setPasswordError('');
             }}
             secureTextEntry={!passwordVisible}
             autoCapitalize="none"
-            autoComplete="new-password"
-            textContentType="newPassword"
+            autoComplete={passwordLocked ? 'off' : 'new-password'}
+            textContentType={passwordLocked ? 'none' : 'newPassword'}
+            importantForAutofill={passwordLocked ? 'no' : 'yes'}
+            showSoftInputOnFocus={!passwordLocked}
             editable={postOtpUnlocked}
             returnKeyType="next"
             blurOnSubmit={false}
             accessibilityLabel="Password"
             accessibilityState={{ disabled: passwordLocked }}
-            onFocus={() => scrollFocusedIntoView(passwordRef)}
+            onFocus={() => {
+              if (passwordLocked) {
+                // Do not bounce focus to username — that steals the OTP keyboard.
+                passwordRef.current?.blur?.();
+                return;
+              }
+              scrollFocusedIntoView(passwordRef);
+            }}
             onBlur={() => setPasswordTouched(true)}
             onSubmitEditing={() => confirmRef.current?.focus()}
           />
@@ -536,7 +579,12 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
         <View
           style={[
             styles.inputRow,
-            { backgroundColor: colors.inputBackground, borderColor: colors.border },
+            {
+              backgroundColor: passwordLocked
+                ? colors.mutedRowBackground || colors.inputBackground
+                : colors.inputBackground,
+              borderColor: colors.border,
+            },
             confirmError || (confirmHint && !confirmHint.ok) ? { borderColor: colors.error } : null,
             confirmHint?.ok ? { borderColor: okGreen } : null,
           ]}
@@ -545,22 +593,33 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
           <TextInput
             ref={confirmRef}
             style={[styles.input, { color: colors.text }]}
-            placeholder="Confirm Password"
+            placeholder={
+              passwordLocked ? 'Confirm Password (verify email first)' : 'Confirm Password'
+            }
             placeholderTextColor={tertiary}
             value={confirmPassword}
             onChangeText={(t) => {
+              if (passwordLocked) return;
               setConfirmPassword(t);
               if (confirmError) setConfirmError('');
             }}
             secureTextEntry={!confirmVisible}
             autoCapitalize="none"
-            autoComplete="new-password"
-            textContentType="newPassword"
+            autoComplete={passwordLocked ? 'off' : 'new-password'}
+            textContentType={passwordLocked ? 'none' : 'newPassword'}
+            importantForAutofill={passwordLocked ? 'no' : 'yes'}
+            showSoftInputOnFocus={!passwordLocked}
             editable={postOtpUnlocked}
             returnKeyType="done"
             accessibilityLabel="Confirm password"
             accessibilityState={{ disabled: passwordLocked }}
-            onFocus={() => scrollFocusedIntoView(confirmRef)}
+            onFocus={() => {
+              if (passwordLocked) {
+                confirmRef.current?.blur?.();
+                return;
+              }
+              scrollFocusedIntoView(confirmRef);
+            }}
             onSubmitEditing={() => {
               if (canSubmit) handleSignUp();
             }}

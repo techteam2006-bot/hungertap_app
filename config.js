@@ -57,6 +57,17 @@ const CANCEL_PAYMENT_URL = (
   process.env.EXPO_PUBLIC_CANCEL_PAYMENT_URL || ''
 ).trim().replace(/\/$/, '');
 
+/**
+ * Signup OTP workaround (bypasses broken Confirm-signup mailer).
+ * Defaults to `{SUPABASE_URL}/functions/v1/send-signup-otp`.
+ * Local: EXPO_PUBLIC_SEND_SIGNUP_OTP_URL=http://192.168.1.4:8787/send-signup-otp
+ * Or an HTTPS tunnel URL while developing (phone must reach it).
+ */
+const SEND_SIGNUP_OTP_URL = (
+  process.env.EXPO_PUBLIC_SEND_SIGNUP_OTP_URL ||
+  (SUPABASE_URL ? `${String(SUPABASE_URL).replace(/\/$/, '')}/functions/v1/send-signup-otp` : '')
+).replace(/\/$/, '');
+
 /** Cart: `local` = device-only (AsyncStorage), no `cart_items` table. `remote` = Supabase `cart_items`. */
 const CART_STORAGE = process.env.EXPO_PUBLIC_CART_STORAGE || 'local';
 
@@ -83,6 +94,9 @@ export const CONFIG = {
 
   /** POST with user JWT — cancel pending Easebuzz checkout for an order. */
   CANCEL_PAYMENT_URL,
+
+  /** POST (anon) — signup email OTP via Edge/local workaround. */
+  SEND_SIGNUP_OTP_URL,
 
   // Deep Linking Configuration
   DEEP_LINK_PREFIX: `exp://${DEV_IP}`,

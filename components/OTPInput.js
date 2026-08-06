@@ -13,6 +13,7 @@ export default function OTPInput({
   disabled = false,
   error = false,
   autoFocus = false,
+  focusKey = 0,
   accessibilityLabel = 'Verification code',
   boxStyle,
   digitStyle,
@@ -29,11 +30,12 @@ export default function OTPInput({
 
   useEffect(() => {
     if (autoFocus && !disabled) {
-      const t = setTimeout(() => inputRef.current?.focus(), 200);
+      // Delay past signup reveal animation / stray field focus so OTP keeps the keyboard.
+      const t = setTimeout(() => inputRef.current?.focus(), 380);
       return () => clearTimeout(t);
     }
     return undefined;
-  }, [autoFocus, disabled]);
+  }, [autoFocus, disabled, focusKey]);
 
   const handleChange = useCallback(
     (text) => {
