@@ -6,5 +6,5 @@
   "enableAutoSessionTracking": true,
   "tracesSampleRate": 0.2,
   "debug": false,
-  "_comment": "Bundled into the APK for RNSentrySDK.init before JS. Keep in sync with project-root sentry.options.json."
+  "_comment": "Native startup crashes read this file (copied to android/.../assets/). Keep dsn/release/dist aligned with JS Sentry.init and app.json version + android.versionCode. Override environment/release/dist at build via SENTRY_ENVIRONMENT / SENTRY_RELEASE / SENTRY_DIST."
 }

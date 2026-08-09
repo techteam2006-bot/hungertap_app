@@ -34,7 +34,7 @@
       "package": "com.hungertap.app",
       "googleServicesFile": "./google-services.json",
       "icon": "./assets/splash_icon.png",
-      "versionCode": 3,
+      "versionCode": 2,
       "softwareKeyboardLayoutMode": "pan",
       "permissions": [
         "INTERNET",

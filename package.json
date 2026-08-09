@@ -1,6 +1,6 @@
 {
   "name": "canteen-app",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "commonjs",
   "main": "index.js",
   "scripts": {
@@ -15,9 +15,9 @@
     "optimize-assets": "node scripts/optimizeAssets.mjs",
     "generate-icons": "node scripts/generateAppIcon.mjs",
     "prebuild:android": "npx expo prebuild --platform android --clean",
-    "build:apk": "eas build --platform android --profile apk --non-interactive",
-    "build:playstore": "eas build --platform android --profile production --non-interactive",
-    "build:apk:local": "cd android && gradlew.bat assembleRelease",
+    "build:apk": "powershell -ExecutionPolicy Bypass -File scripts/eas-build-android.ps1 apk",
+    "build:aab": "powershell -ExecutionPolicy Bypass -File scripts/eas-build-android.ps1 aab",
+    "build:playstore": "powershell -ExecutionPolicy Bypass -File scripts/eas-build-android.ps1 aab",
     "build:apk:local:debug": "cd android && gradlew.bat assembleDebug"
   },
   "dependencies": {
