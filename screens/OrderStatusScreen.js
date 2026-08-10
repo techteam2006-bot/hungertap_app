@@ -47,6 +47,7 @@ import {
   isReorderEligibleStatus,
   canShowPickupQr,
 } from '../lib/orderStatus';
+import { takeawayChargeForLines } from '../lib/cartRules';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 const SUPPORT_EMAIL = 'support@hungertap.online';
@@ -1054,11 +1055,8 @@ const OrderStatusScreen = ({ navigation, route }) => {
       takeawayChargeDisplay = explicit;
     } else {
       const rows = pickLineRowsFromOrderRow(currentOrder);
-      let qty = rows.reduce((s, oi) => s + (Number(oi?.quantity ?? 1) || 1), 0);
-      if (qty <= 0 && Array.isArray(orderItems) && orderItems.length > 0) {
-        qty = orderItems.reduce((s, i) => s + (Number(i?.quantity ?? 1) || 1), 0);
-      }
-      if (qty > 0) takeawayChargeDisplay = qty * 10;
+      const targetLines = rows.length > 0 ? rows : (Array.isArray(orderItems) ? orderItems : []);
+      takeawayChargeDisplay = takeawayChargeForLines(targetLines, true);
     }
   }
 

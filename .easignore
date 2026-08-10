@@ -1,8 +1,8 @@
+# Documentation
 *.md
 
-# Git metadata (never upload to EAS / cloud builds)
+# Git metadata
 .git/
-.git/**
 .gitattributes
 .github/
 
@@ -11,22 +11,40 @@
 .env.*
 !.env.example
 
-# npm / install artifacts (EAS runs npm ci on the server)
+# Sentry token local overrides (keep android/sentry.properties uploaded for symbol upload)
+android/sentry.properties.local
+.sentryclirc
+.env.sentry-build-plugin
+
+# Dependencies & install artifacts (EAS runs npm ci on the server)
 node_modules/
 .npm/
 npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
 # Local build outputs & measurement artifacts
 build-artifacts/
 dist/
+web-build/
 .expo/
+.expo-shared/
 android/app/build/
 android/build/
 android/.gradle/
+android/local.properties
+local.properties
+*.apk
+*.aab
+*.bak
 
-# Credentials — set in EAS Dashboard, never upload key files
+# Credentials & keystores — set in EAS Dashboard, never upload key files
 build-credentials/
 credentials.json
+credentials/
 
-# Dev scripts output
-scripts/
+# OS & Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
