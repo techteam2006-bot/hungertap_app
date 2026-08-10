@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>API_KEY</key>
+	<string>AIzaSyD9Q4Y9W6SSC0cD5e5YWHfI5PnaVjQed_s</string>
+	<key>GCM_SENDER_ID</key>
+	<string>34347963426</string>
+	<key>PLIST_VERSION</key>
+	<string>1</string>
+	<key>BUNDLE_ID</key>
+	<string>com.hungertap.app</string>
+	<key>PROJECT_ID</key>
+	<string>hungertap-b1ee9</string>
+	<key>STORAGE_BUCKET</key>
+	<string>hungertap-b1ee9.firebasestorage.app</string>
+	<key>IS_ADS_ENABLED</key>
+	<false></false>
+	<key>IS_ANALYTICS_ENABLED</key>
+	<false></false>
+	<key>IS_APPINVITE_ENABLED</key>
+	<true></true>
+	<key>IS_GCM_ENABLED</key>
+	<true></true>
+	<key>IS_SIGNIN_ENABLED</key>
+	<true></true>
+	<key>GOOGLE_APP_ID</key>
+	<string>1:34347963426:ios:563012822cda3dd7ca667b</string>
+</dict>
+</plist>

@@ -23,10 +23,12 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.hungertap.app",
+      "googleServicesFile": "./GoogleService-Info.plist",
       "icon": "./assets/splash_icon.png",
       "infoPlist": {
         "UIBackgroundModes": [
-          "fetch"
+          "fetch",
+          "remote-notification"
         ]
       }
     },

@@ -2,12 +2,13 @@ import 'react-native-gesture-handler';
 import 'react-native-url-polyfill/auto';
 import { installGlobalErrorSafety } from './lib/installGlobalErrorSafety';
 import React, { useEffect, useState } from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { StatusBar } from 'expo-status-bar';
 import {
   Animated,
+  AppState,
   Linking,
   Platform,
   StyleSheet,
@@ -15,6 +16,8 @@ import {
   TextInput,
   View,
 } from 'react-native';
+
+export const navigationRef = createNavigationContainerRef();
 import { appTypography } from './lib/darkThemeConfig';
 import { useSafeAreaInsets, SafeAreaProvider } from 'react-native-safe-area-context';
 import { loadFonts } from './lib/utils/fonts';
@@ -66,7 +69,12 @@ import { CanteenStatusProvider, useCanteenStatus } from './lib/CanteenStatusCont
 import CartBadgeUpdater from './components/CartBadgeUpdater';
 import AuthHelpScreen from './screens/AuthHelpScreen';
 import NotificationService from './lib/NotificationService';
-import { registerForPushNotificationsAsync, setupForegroundHandler } from './lib/services/notifications';
+import {
+  registerForPushNotificationsAsync,
+  setupForegroundHandler,
+  updatePushTokenStatusInSupabase,
+  setupPushTokenRefreshListener,
+} from './lib/services/notifications';
 import { backgroundTaskService } from './lib/BackgroundTaskService';
 
 import FeedbackScreen from './screens/FeedbackScreen';
@@ -337,6 +345,34 @@ function Navigation() {
 function AppNavigator() {
   const { user, loading, isSignedIn, userId } = useAuth();
 
+  // Motorola & OEM Android Permission Resume Fix: re-check FCM permission when app transitions to active
+  useEffect(() => {
+    const handleAppStateChange = async (nextAppState) => {
+      if (nextAppState === 'active' && user?.id) {
+        const { status } = await Notifications.getPermissionsAsync();
+        if (status === 'granted') {
+          console.log('🔄 App resumed — retrying FCM token registration (permission granted)');
+          await registerForPushNotificationsAsync(user.id);
+          await updatePushTokenStatusInSupabase(user.id, true);
+        } else if (status === 'denied') {
+          await updatePushTokenStatusInSupabase(user.id, false);
+        }
+      }
+    };
+
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    return () => subscription.remove();
+  }, [user?.id]);
+
+  // Subscribe to OS token rotation updates
+  useEffect(() => {
+    if (!user?.id) return;
+    const cleanup = setupPushTokenRefreshListener(user.id);
+    return () => {
+      if (cleanup) cleanup();
+    };
+  }, [user?.id]);
+
   useEffect(() => {
     // show notifications in foreground
     setupForegroundHandler();
@@ -373,22 +409,20 @@ function AppNavigator() {
       }
     };
 
-    // Handle notification taps
+    // Handle notification taps with deep-linking via navigationRef
     const handleNotificationResponse = (response) => {
-      const data = response.notification.request.content.data;
+      const data = response?.notification?.request?.content?.data || {};
       console.log('📱 Notification tapped:', data);
-      
-      // Handle different notification types
-      if (data.type === 'order_placed') {
-        // Navigate to order status if user is authenticated
-        if (user) {
-          // This would navigate to the order status screen
-          console.log('🎯 Would navigate to order status for order:', data.orderId);
-        }
-      } else if (data.type === 'order_status') {
-        // Navigate to order status screen
-        if (user) {
-          console.log('🎯 Would navigate to order status update for order:', data.orderId);
+
+      if (navigationRef.isReady()) {
+        const orderId = data.orderId || data.order_id;
+        const orderToken = data.order_token || data.orderToken;
+        if (orderId || orderToken) {
+          console.log('🎯 Notification tap navigating to OrderStatus:', { orderId, order_token: orderToken });
+          navigationRef.navigate('OrderStatus', { orderId, order_token: orderToken });
+        } else {
+          console.log('🎯 Notification tap navigating to Orders screen');
+          navigationRef.navigate('Orders');
         }
       }
     };
@@ -396,8 +430,13 @@ function AppNavigator() {
     // Set up notification listeners
     const notificationResponseListener = NotificationService.addNotificationResponseReceivedListener(handleNotificationResponse);
 
-    // Order status Realtime websockets live only on OrderStatusScreen (focused).
-    // Push / local notifications still work via NotificationService + FCM.
+    // Check cold-start notification tap on app launch
+    NotificationService.getLastNotificationResponse().then((initialResponse) => {
+      if (initialResponse) {
+        console.log('🚀 Cold-start notification tap detected:', initialResponse);
+        setTimeout(() => handleNotificationResponse(initialResponse), 600);
+      }
+    });
 
     // Initialize notifications
     initializeNotifications();

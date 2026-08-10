@@ -100,19 +100,7 @@ const OrderConfirmationScreen = ({ navigation, route }) => {
       Vibration.vibrate([0, 80, 40, 80]);
     }
 
-    const notifyTimeout = setTimeout(async () => {
-      try {
-        if (isFailure) return;
-        if (!resolvedOrderId || !NotificationService.isNotificationsAvailable()) return;
-        await NotificationService.sendOrderNotification(
-          resolvedOrderId,
-          totalAmount,
-          orderItems || []
-        );
-      } catch (error) {
-        console.log('Notification from confirmation:', error);
-      }
-    }, 800);
+    // Push notifications for order placement are handled strictly by backend DB triggers & hyper-function Edge Functions.
 
     Animated.parallel([
       Animated.spring(iconScale, {
@@ -140,7 +128,6 @@ const OrderConfirmationScreen = ({ navigation, route }) => {
       }),
     ]).start();
 
-    return () => clearTimeout(notifyTimeout);
   }, [displayToken, totalAmount, orderId, orderItems, passedOrderToken, token, resolvedOrderId, isFailure]);
 
   const handleViewOrderStatus = () => {
