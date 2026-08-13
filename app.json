@@ -29,6 +29,15 @@
         "UIBackgroundModes": [
           "fetch",
           "remote-notification"
+        ],
+        "LSApplicationQueriesSchemes": [
+          "gpay",
+          "tez",
+          "phonepe",
+          "paytmmp",
+          "bhim",
+          "upi",
+          "credpay"
         ]
       }
     },

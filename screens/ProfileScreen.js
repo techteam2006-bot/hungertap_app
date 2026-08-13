@@ -81,7 +81,11 @@ function ProfileRow({
           </Text>
         ) : null}
       </View>
-      {right ?? <AppIcon name="chevron-forward" size={20} color={colors.textTertiary} />}
+      {right ? (
+        <View style={styles.rowRightSlot}>{right}</View>
+      ) : (
+        <AppIcon name="chevron-forward" size={20} color={colors.textTertiary} />
+      )}
     </>
   );
 
@@ -178,8 +182,18 @@ const ProfileScreen = ({ navigation }) => {
     return unsubscribe;
   }, [navigation, user?.id]);
 
-  const switchTrack = { false: '#767577', true: colors.brandYellow };
-  const switchThumb = '#FFFFFF';
+  const switchTrack = React.useMemo(
+    () => ({
+      false: isDarkMode ? '#374151' : '#E5E7EB',
+      true: colors.brandYellow || '#FFB301',
+    }),
+    [isDarkMode, colors.brandYellow]
+  );
+  const iosBgColor = isDarkMode ? '#374151' : '#E5E7EB';
+  const switchThumb = React.useCallback(
+    (val) => (Platform.OS === 'android' ? (val ? '#FFFFFF' : isDarkMode ? '#9CA3AF' : '#FFFFFF') : '#FFFFFF'),
+    [isDarkMode]
+  );
 
   const onToggleNotifications = async (value) => {
     if (notifToggleBusy) return;
@@ -444,13 +458,16 @@ const ProfileScreen = ({ navigation }) => {
             subtitle="Easier reading at night"
             colors={colors}
             right={
-              <Switch
-                value={isDarkMode}
-                onValueChange={toggleTheme}
-                trackColor={switchTrack}
-                thumbColor={switchThumb}
-                ios_backgroundColor="#3e3e3e"
-              />
+              <View style={styles.switchWrapper}>
+                <Switch
+                  value={isDarkMode}
+                  onValueChange={toggleTheme}
+                  trackColor={switchTrack}
+                  thumbColor={switchThumb(isDarkMode)}
+                  ios_backgroundColor={iosBgColor}
+                  style={styles.switchControl}
+                />
+              </View>
             }
           />
           <ProfileRow
@@ -459,14 +476,17 @@ const ProfileScreen = ({ navigation }) => {
             subtitle="Order updates & alerts"
             colors={colors}
             right={
-              <Switch
-                value={notificationsEnabled}
-                onValueChange={onToggleNotifications}
-                disabled={notifToggleBusy}
-                trackColor={switchTrack}
-                thumbColor={switchThumb}
-                ios_backgroundColor="#3e3e3e"
-              />
+              <View style={styles.switchWrapper}>
+                <Switch
+                  value={notificationsEnabled}
+                  onValueChange={onToggleNotifications}
+                  disabled={notifToggleBusy}
+                  trackColor={switchTrack}
+                  thumbColor={switchThumb(notificationsEnabled)}
+                  ios_backgroundColor={iosBgColor}
+                  style={styles.switchControl}
+                />
+              </View>
             }
           />
           <ProfileRow
@@ -476,13 +496,16 @@ const ProfileScreen = ({ navigation }) => {
             colors={colors}
             isLast
             right={
-              <Switch
-                value={vegModeEnabled}
-                onValueChange={onToggleVegMode}
-                trackColor={switchTrack}
-                thumbColor={switchThumb}
-                ios_backgroundColor="#3e3e3e"
-              />
+              <View style={styles.switchWrapper}>
+                <Switch
+                  value={vegModeEnabled}
+                  onValueChange={onToggleVegMode}
+                  trackColor={switchTrack}
+                  thumbColor={switchThumb(vegModeEnabled)}
+                  ios_backgroundColor={iosBgColor}
+                  style={styles.switchControl}
+                />
+              </View>
             }
           />
         </GlassCard>
@@ -749,7 +772,6 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 1,
     marginBottom: 20,
-    overflow: 'hidden',
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.08,
     shadowRadius: 14,
@@ -758,6 +780,8 @@ const styles = StyleSheet.create({
   nameCardAccent: {
     height: 4,
     width: '100%',
+    borderTopLeftRadius: 19,
+    borderTopRightRadius: 19,
   },
   nameCardBody: {
     alignItems: 'center',
@@ -850,6 +874,20 @@ const styles = StyleSheet.create({
     marginTop: 2,
     lineHeight: 18,
   },
+  rowRightSlot: {
+    justifyContent: 'center',
+    alignItems: 'flex-end',
+    minWidth: 52,
+    marginLeft: 8,
+  },
+  switchWrapper: {
+    height: 31,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  switchControl: {
+    transform: Platform.OS === 'ios' ? [{ scaleX: 0.85 }, { scaleY: 0.85 }] : [],
+  },
   deleteModalOverlay: {
     flex: 1,
     justifyContent: 'center',
@@ -940,4 +978,3 @@ const styles = StyleSheet.create({
   },
 });
 
-export default ProfileScreen;
