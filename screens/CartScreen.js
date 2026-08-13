@@ -9,6 +9,7 @@ import {
   Dimensions,
   Image,
   Animated,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import AppIcon from '../components/AppIcon';
@@ -30,6 +31,8 @@ import {
   formatCreateOrderV2Error,
   navigateToPaymentProcessingAfterV2,
 } from '../lib/createOrderV2';
+import { fetchActivePaymentGateways } from '../lib/paymentGatewaysApi';
+import PaymentGatewaySelector from '../components/PaymentGatewaySelector';
 import { toAlertMessage } from '../lib/toAlertMessage';
 import { getMenu, getLastRememberedCanteen } from '../lib/menuCache';
 import { useAuth } from '../lib/AuthContext';
@@ -746,8 +749,48 @@ const CartScreen = ({ navigation }) => {
   const [checkoutErrorToast, setCheckoutErrorToast] = useState('');
   const [isOrderSummaryExpanded, setIsOrderSummaryExpanded] = useState(false); // State for Order Summary dropdown
 
-  const finalPayableTotal = getFinalTotal();
-  const orderOverLimit = exceedsMaxOrderTotal(finalPayableTotal);
+  // Payment Gateway State Ownership
+  const [gateways, setGateways] = useState([]);
+  const [gatewayLoading, setGatewayLoading] = useState(true);
+  const [gatewayError, setGatewayError] = useState(false);
+  const [selectedGateway, setSelectedGateway] = useState(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadGateways() {
+      setGatewayLoading(true);
+      const res = await fetchActivePaymentGateways();
+      if (!isMounted) return;
+
+      if (!res.success || !res.data) {
+        setGatewayError(true);
+        setGatewayLoading(false);
+        return;
+      }
+
+      const activeList = res.data;
+      setGateways(activeList);
+      setGatewayLoading(false);
+
+      if (activeList.length === 0) {
+        setGatewayError(true);
+        return;
+      }
+
+      setGatewayError(false);
+      const defaultGw = activeList.find((g) => g.is_default) || activeList[0];
+      setSelectedGateway(defaultGw.code);
+    }
+    loadGateways();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const canProceedCheckout = !gatewayLoading && !gatewayError && selectedGateway != null;
+
+  const subtotalAmount = getTotalPrice();
+  const orderOverLimit = exceedsMaxOrderTotal(subtotalAmount);
 
   const handleTakeawayToggle = () => {
     if (isTakeaway) {
@@ -891,7 +934,7 @@ const CartScreen = ({ navigation }) => {
       Alert.alert('Empty Cart', 'Please add some items to your cart first.');
       return;
     }
-    if (exceedsMaxOrderTotal(getFinalTotal())) {
+    if (exceedsMaxOrderTotal(getTotalPrice())) {
       Alert.alert('Order limit', CART_MAX_ORDER_TOTAL_MESSAGE);
       return;
     }
@@ -951,6 +994,7 @@ const CartScreen = ({ navigation }) => {
         accessToken: session.access_token,
         items: args.p_items,
         is_takeaway: args.p_is_takeaway,
+        gateway_code: selectedGateway || 'cashfree',
       });
 
       if (!v2.ok) {
@@ -1365,6 +1409,23 @@ const CartScreen = ({ navigation }) => {
               )}
             </View>
 
+            {/* Payment Gateway Selector */}
+            {gatewayLoading ? (
+              <ActivityIndicator size="small" style={{ marginVertical: 12 }} color="#E5A93B" />
+            ) : gatewayError ? (
+              <View style={{ padding: 12, backgroundColor: 'rgba(255,77,77,0.1)', borderRadius: 8, marginVertical: 12 }}>
+                <Text style={{ color: '#FF4D4D', fontWeight: '600', fontSize: 13 }}>
+                  ⚠️ Payment methods currently unavailable. Please try again later.
+                </Text>
+              </View>
+            ) : (
+              <PaymentGatewaySelector
+                gateways={gateways}
+                selectedGateway={selectedGateway}
+                onSelectGateway={setSelectedGateway}
+              />
+            )}
+
             {/* Cancellation Policy */}
             <View style={styles.policySection}>
               <Text style={styles.policyTitle}>Cancellation Policy:</Text>
@@ -1388,8 +1449,8 @@ const CartScreen = ({ navigation }) => {
             loadingTitle="Starting checkout..."
             loading={isCreatingOrder}
             onPress={handlePayment}
-            disabled={orderOverLimit}
-            style={[styles.placeOrderButton, orderOverLimit && { opacity: 0.55 }]}
+            disabled={orderOverLimit || !canProceedCheckout}
+            style={[styles.placeOrderButton, (orderOverLimit || !canProceedCheckout) && { opacity: 0.55 }]}
             textStyle={styles.placeOrderText}
             indicatorColor="#FFFFFF"
           />

@@ -26,4 +26,14 @@
 # Expo modules
 -keep class expo.modules.** { *; }
 
+# Payment gateway native SDKs — reached reflectively / via WebView JS bridges,
+# so R8 must not rename or strip them in release builds.
+-keep class com.cashfree.** { *; }
+-dontwarn com.cashfree.**
+-keep class com.easebuzz.** { *; }
+-keep class in.easebuzz.** { *; }
+-keep class com.easebuzzsdk.** { *; }
+-keep class datamodels.** { *; }
+-dontwarn in.easebuzz.**
+
 # Add any project specific keep options here:

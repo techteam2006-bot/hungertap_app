@@ -1,2 +1,11 @@
 [functions.send-signup-otp]
 verify_jwt = false
+
+[functions.cashfree-webhook-v2]
+verify_jwt = false
+
+[functions.easebuzz-webhook-v2]
+verify_jwt = false
+
+[functions.easebuzz-refund-webhook-v2]
+verify_jwt = false

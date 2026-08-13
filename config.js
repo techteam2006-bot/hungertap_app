@@ -43,9 +43,12 @@ const GET_CANTEEN_MENU_URL = (
 ).replace(/\/$/, '');
 
 /** Paid checkout: Edge Function creates order + Easebuzz session (webhook updates DB). */
-const CREATE_ORDER_V2_URL_RAW = (
+let CREATE_ORDER_V2_URL_RAW = (
   process.env.EXPO_PUBLIC_CREATE_ORDER_V2_URL || ''
 ).trim();
+if (CREATE_ORDER_V2_URL_RAW.endsWith('/create-order-v2-app')) {
+  CREATE_ORDER_V2_URL_RAW = CREATE_ORDER_V2_URL_RAW.replace('/create-order-v2-app', '/create-order-v2');
+}
 const CREATE_ORDER_V2_URL = CREATE_ORDER_V2_URL_RAW
   ? CREATE_ORDER_V2_URL_RAW.replace(/\/$/, '')
   : SUPABASE_URL
