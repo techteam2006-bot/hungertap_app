@@ -355,12 +355,12 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
     [refreshPaymentStatus, finalizeCancel, finalizeFailure]
   );
 
-  // Active polling loop while verifying === true (runs every 1.5s for up to 30s)
+  // Active polling loop while verifying === true (runs every 0.5s for up to 30s)
   useEffect(() => {
     if (!verifying || finalizedRef.current) return undefined;
 
     let attempts = 0;
-    const maxAttempts = 20; // 20 * 1.5s = 30 seconds total
+    const maxAttempts = 60; // 60 * 0.5s = 30 seconds total
 
     const intervalId = setInterval(async () => {
       attempts += 1;
@@ -392,7 +392,7 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
           );
         }
       }
-    }, 1500);
+    }, 500);
 
     return () => clearInterval(intervalId);
   }, [verifying, refreshPaymentStatus, navigation]);
