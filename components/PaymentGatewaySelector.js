@@ -1,67 +1,123 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useTheme } from '../lib/ThemeContext';
+import AppIcon from './AppIcon';
+import { appTypography } from '../lib/darkThemeConfig';
+
+/**
+ * Format the gateway title to cleanly display only the gateway name
+ * and its environment in brackets as requested:
+ * - Cashfree (Production)
+ * - Easebuzz (Testing)
+ */
+function formatGatewayDisplayName(gw) {
+  const code = String(gw?.code || '').toLowerCase();
+  const name = String(gw?.display_name || '').trim();
+
+  if (code.includes('cashfree') || name.toLowerCase().includes('cashfree')) {
+    return 'Cashfree (Production)';
+  }
+  if (code.includes('easebuzz') || name.toLowerCase().includes('easebuzz')) {
+    return 'Easebuzz (Testing)';
+  }
+
+  // Generic fallback if new gateway is added
+  return name.replace(/\s*\([^)]*\)/g, '').trim();
+}
 
 export default function PaymentGatewaySelector({ gateways, selectedGateway, onSelectGateway }) {
-  const { colors } = useTheme();
+  const { colors, isDarkMode } = useTheme();
 
   // Hide selector UI if 0 or 1 gateway is available
   if (!Array.isArray(gateways) || gateways.length <= 1) return null;
 
+  const brandYellow = colors.brandYellow || '#FFB301';
+
   return (
     <View style={styles.container}>
-      <Text style={[styles.headerText, { color: colors.text || '#FFFFFF' }]}>
-        Payment Method
-      </Text>
+      <View style={styles.headerRow}>
+        <View style={styles.headerLeft}>
+          <AppIcon name="wallet-outline" size={18} color={brandYellow} />
+          <Text
+            style={[
+              styles.headerTitle,
+              { color: colors.text, fontFamily: appTypography.bold },
+            ]}
+          >
+            Payment Options
+          </Text>
+        </View>
+        <View style={styles.secureTag}>
+          <AppIcon name="shield-checkmark-outline" size={12} color="#10B981" />
+          <Text style={styles.secureText}>100% SECURE</Text>
+        </View>
+      </View>
+
       {gateways.map((gw) => {
         const isSelected = selectedGateway === gw.code;
+        const displayName = formatGatewayDisplayName(gw);
+
         return (
           <TouchableOpacity
             key={gw.code}
-            activeOpacity={0.8}
+            activeOpacity={0.75}
             onPress={() => onSelectGateway(gw.code)}
             style={[
               styles.card,
               {
-                backgroundColor: isSelected
-                  ? (colors.primaryContainer || '#2A2415')
-                  : (colors.surface || '#121212'),
-                borderColor: isSelected
-                  ? (colors.primary || '#E5A93B')
-                  : (colors.border || '#333333'),
+                backgroundColor: colors.elevatedSurface,
+                borderColor: isSelected ? brandYellow : colors.border,
+                borderWidth: isSelected ? 1.5 : 1,
               },
             ]}
           >
-            <View style={styles.radioRow}>
+            <View style={styles.contentRow}>
+              {/* Radio Indicator matching app theme */}
               <View
                 style={[
-                  styles.radioOuter,
-                  { borderColor: isSelected ? (colors.primary || '#E5A93B') : '#666666' },
+                  styles.radioButton,
+                  {
+                    borderColor: isSelected ? brandYellow : (isDarkMode ? '#555555' : '#CCCCCC'),
+                    backgroundColor: isSelected ? brandYellow : 'transparent',
+                  },
                 ]}
               >
-                {isSelected && (
-                  <View
-                    style={[
-                      styles.radioInner,
-                      { backgroundColor: colors.primary || '#E5A93B' },
-                    ]}
-                  />
-                )}
+                {isSelected && <View style={styles.radioButtonInner} />}
               </View>
 
-              <View style={styles.textContainer}>
+              {/* Main Info */}
+              <View style={styles.infoCol}>
                 <View style={styles.titleRow}>
-                  <Text style={[styles.title, { color: colors.text || '#FFFFFF' }]}>
-                    {gw.display_name}
+                  <Text
+                    style={[
+                      styles.gatewayName,
+                      {
+                        color: colors.text,
+                        fontFamily: appTypography.bold,
+                      },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {displayName}
                   </Text>
                   {gw.is_default && (
-                    <View style={styles.badge}>
+                    <View style={[styles.badge, { backgroundColor: brandYellow }]}>
                       <Text style={styles.badgeText}>RECOMMENDED</Text>
                     </View>
                   )}
                 </View>
-                <Text style={[styles.subText, { color: colors.textSecondary || '#AAAAAA' }]}>
-                  UPI (GPay / PhonePe / Paytm / Cred), Cards & NetBanking
+
+                <Text
+                  style={[
+                    styles.subText,
+                    {
+                      color: colors.textSecondary,
+                      fontFamily: appTypography.regular,
+                    },
+                  ]}
+                  numberOfLines={1}
+                >
+                  UPI (GPay, PhonePe, Paytm), Cards & NetBanking
                 </Text>
               </View>
             </View>
@@ -73,16 +129,93 @@ export default function PaymentGatewaySelector({ gateways, selectedGateway, onSe
 }
 
 const styles = StyleSheet.create({
-  container: { marginVertical: 12 },
-  headerText: { fontSize: 14, fontWeight: '700', marginBottom: 8 },
-  card: { padding: 14, borderRadius: 12, borderWidth: 1.5, marginBottom: 8 },
-  radioRow: { flexDirection: 'row', alignItems: 'center' },
-  radioOuter: { width: 20, height: 20, borderRadius: 10, borderWidth: 2, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
-  radioInner: { width: 10, height: 10, borderRadius: 5 },
-  textContainer: { flex: 1 },
-  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  title: { fontSize: 14, fontWeight: '600' },
-  badge: { backgroundColor: 'rgba(229, 169, 59, 0.2)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
-  badgeText: { color: '#E5A93B', fontSize: 9, fontWeight: '800' },
-  subText: { fontSize: 11, marginTop: 2 },
+  container: {
+    marginHorizontal: 16,
+    marginBottom: 20,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+    paddingHorizontal: 2,
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+  headerTitle: {
+    fontSize: 15,
+  },
+  secureTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  secureText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#10B981',
+    letterSpacing: 0.3,
+  },
+  card: {
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginBottom: 10,
+  },
+  contentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  radioButton: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  radioButtonInner: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#000000',
+  },
+  infoCol: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 3,
+  },
+  gatewayName: {
+    fontSize: 14.5,
+    flexShrink: 1,
+    marginRight: 8,
+  },
+  badge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  badgeText: {
+    color: '#000000',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+  subText: {
+    fontSize: 11.5,
+    lineHeight: 15,
+  },
 });

@@ -43,6 +43,28 @@
       <action android:name="android.intent.action.VIEW"/>
       <data android:scheme="credpay"/>
     </intent>
+    <!-- Explicit package queries for Android 11+ (API 30+) UPI App Auto-Discovery -->
+    <package android:name="com.google.android.apps.nbu.paisa.user"/> <!-- Google Pay -->
+    <package android:name="com.phonepe.app"/> <!-- PhonePe -->
+    <package android:name="net.one97.paytm"/> <!-- Paytm -->
+    <package android:name="in.org.npci.upiapp"/> <!-- BHIM -->
+    <package android:name="com.whatsapp"/> <!-- WhatsApp -->
+    <package android:name="com.dreamplug.androidapp"/> <!-- CRED -->
+    <package android:name="in.amazon.mShop.android.shopping"/> <!-- Amazon Pay -->
+    <package android:name="com.mobikwik_new"/> <!-- MobiKwik -->
+    <package android:name="com.freecharge.android"/> <!-- Freecharge -->
+    <package android:name="com.axis.mobile"/> <!-- Axis Mobile -->
+    <package android:name="com.sbi.upi"/> <!-- SBI Pay / YONO -->
+    <package android:name="com.msf.kfa"/> <!-- Kotak Bank -->
+    <package android:name="com.icicibank.pockets"/> <!-- ICICI Pockets -->
+    <package android:name="com.csam.icici.bank.imobile"/> <!-- iMobile Pay -->
+    <package android:name="com.hdfcbank.payzapp"/> <!-- PayZapp -->
+    <package android:name="com.myairtelapp"/> <!-- Airtel Thanks -->
+    <package android:name="com.jupiter.money"/> <!-- Jupiter -->
+    <package android:name="money.fi.app"/> <!-- Fi Money -->
+    <package android:name="co.superpayments.app"/> <!-- Super.money -->
+    <package android:name="com.slice"/> <!-- Slice -->
+    <package android:name="com.navi.personal.loan.upi.cash.app"/> <!-- Navi UPI -->
   </queries>
   <application android:name=".MainApplication" android:label="@string/app_name" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:allowBackup="true" android:theme="@style/AppTheme" android:supportsRtl="true" android:enableOnBackInvokedCallback="false" android:fullBackupContent="@xml/secure_store_backup_rules" android:dataExtractionRules="@xml/secure_store_data_extraction_rules" tools:replace="android:enableOnBackInvokedCallback">
     <meta-data android:name="expo.modules.updates.ENABLED" android:value="false"/>

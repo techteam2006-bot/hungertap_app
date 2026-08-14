@@ -34,6 +34,8 @@ import {
 import {
   isCashfreeNativeSdkAvailable,
   describeCashfreeSdkAvailability,
+  describeCashfreeSdkError,
+  isCashfreeUserCancelError,
   configureCashfreeCallbacks,
   clearCashfreeCallbacks,
   startCashfreeCheckout,
@@ -49,6 +51,17 @@ const STUCK_MS = 180000;
 const SDK_FALLBACK_MS = 30000;
 const WEBVIEW_OVERLAY_MAX_MS = 5000;
 const CHECKOUT_LAUNCH_GRACE_MS = 35000;
+/**
+ * `enforce_order_rate_limits` Guard 1: 5s cooldown between a student's orders
+ * ("Order placed too quickly. Please wait N seconds"). One second of margin.
+ *
+ * Only the order-recreating path has to respect this — reusing an existing
+ * session does not place an order at all, which is why that is the default path.
+ *
+ * Guard 2 (max 3 orders / 60s) cannot be waited out here; a 60s spinner is worse
+ * than a clear message, so that rejection is surfaced to the user instead.
+ */
+const ORDER_COOLDOWN_MS = 6000;
 
 /**
  * Both gateways run through their native SDK. Easebuzz additionally keeps the
@@ -112,13 +125,13 @@ function buildCashfreeWebJsSdkHtml(sessionId, isSandbox) {
       * { box-sizing: border-box; }
       body {
         margin: 0; padding: 0;
-        background-color: #0d1117; color: #ffffff;
+        background-color: #FFFFFF; color: #1A1A1A;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
         display: flex; align-items: center; justify-content: center; height: 100vh;
       }
       .spinner {
-        width: 38px; height: 38px;
-        border: 4px solid rgba(255,255,255,0.15); border-left-color: #e5c100;
+        width: 40px; height: 40px;
+        border: 4px solid rgba(0,0,0,0.08); border-left-color: #FFB301;
         border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px auto;
       }
       @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
@@ -127,7 +140,8 @@ function buildCashfreeWebJsSdkHtml(sessionId, isSandbox) {
   <body>
     <div style="text-align:center;">
       <div class="spinner"></div>
-      <div style="font-size:15px;color:#cbd5e0;">Loading Cashfree Secure Checkout…</div>
+      <div style="font-size:16px;font-weight:600;color:#1A1A1A;margin-bottom:4px;">HungerTap Checkout</div>
+      <div style="font-size:14px;color:#666666;">Opening secure payment…</div>
     </div>
     <script>
       (function () {
@@ -217,11 +231,18 @@ function useGatewayLaunchFallback({
  * @returns {'success'|'cancelled'|'failure'}
  */
 function mapGatewaySdkResult(payload) {
-  const result = String(payload?.result ?? payload ?? '').toLowerCase();
+  if (!payload) return 'failure';
+  if (typeof payload === 'string') {
+    const s = payload.toLowerCase();
+    if (s.includes('payment_success') || s.includes('success') || s.includes('txn_success')) return 'success';
+    if (s.includes('cancel') || s.includes('back_press') || s.includes('dropped') || s.includes('user_cancelled')) return 'cancelled';
+    return 'failure';
+  }
+  const result = String(payload?.result ?? '').toLowerCase();
   const status = String(payload?.payment_response?.status ?? payload?.status ?? '').toLowerCase();
   const s = `${result} ${status}`;
 
-  if (s.includes('success')) return 'success';
+  if (s.includes('payment_success') || s.includes('success') || s.includes('txn_success')) return 'success';
   if (s.includes('cancel') || s.includes('back_press') || s.includes('dropped') || s.includes('user_cancelled')) return 'cancelled';
   return 'failure';
 }
@@ -255,6 +276,12 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
   const checkoutOpenedAtRef = useRef(Date.now());
   const refreshInFlightRef = useRef(false);
   const webViewFallbackRequestedRef = useRef(false);
+  /**
+   * Set when refreshCheckoutSessionForWebView has already told the user why it
+   * failed. Its reasons (rate limits, closed canteen, stock) are specific and
+   * actionable, so the caller must not bury them under generic copy.
+   */
+  const refreshAlertedRef = useRef(false);
 
   const [checkoutOrderId, setCheckoutOrderId] = useState(() => String(initialOrderId || '').trim());
   const [activePaymentUrl] = useState(() => String(initialPaymentUrl || '').trim());
@@ -411,9 +438,17 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
     leaveCheckout();
   }, [leaveCheckout]);
 
+  /**
+   * Last resort: abandon the current order and buy a fresh checkout session.
+   *
+   * Only for when no usable `payment_session_id` survives — replacing a session
+   * that still works burns an order for nothing. See
+   * switchToCashfreeWebViewFallback.
+   */
   const refreshCheckoutSessionForWebView = useCallback(async () => {
     if (refreshInFlightRef.current || finalizedRef.current || !isCashfree) return false;
     refreshInFlightRef.current = true;
+    refreshAlertedRef.current = false;
     setRefreshingCheckout(true);
 
     try {
@@ -422,16 +457,27 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
         await cancelOwnPendingPayment({ supabaseClient: supabase, orderId: oldOrderId });
       }
 
+      // The order being replaced was placed seconds ago, so create-order-v2 runs
+      // straight into the per-user order cooldown unless we wait it out. Without
+      // this the replacement is always rejected and the fallback cannot succeed.
+      const sinceLastOrder = Date.now() - checkoutOpenedAtRef.current;
+      if (sinceLastOrder < ORDER_COOLDOWN_MS) {
+        await new Promise((r) => setTimeout(r, ORDER_COOLDOWN_MS - sinceLastOrder));
+      }
+      if (finalizedRef.current) return false;
+
       const {
         data: { session },
       } = await supabase.auth.getSession();
       if (!session?.access_token) {
+        refreshAlertedRef.current = true;
         Alert.alert('Sign in required', 'Please sign in again to complete payment.');
         return false;
       }
 
       const args = prepareCheckoutOrderArgs(orderItems, isTakeaway);
       if (!args.ok) {
+        refreshAlertedRef.current = true;
         Alert.alert('Checkout error', args.error || 'Invalid cart for checkout.');
         return false;
       }
@@ -444,6 +490,7 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
       });
 
       if (!v2.ok) {
+        refreshAlertedRef.current = true;
         Alert.alert('Checkout error', v2.error || 'Could not restart checkout.');
         return false;
       }
@@ -451,6 +498,7 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
       const newSessionId = String(v2.payment_session_id || '').trim();
       const newOrderId = v2.order_id != null ? String(v2.order_id).trim() : '';
       if (!newSessionId || !isValidOrderUuid(newOrderId)) {
+        refreshAlertedRef.current = true;
         Alert.alert('Checkout error', 'Payment session was not returned. Please try again from the cart.');
         return false;
       }
@@ -470,6 +518,7 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
       setMode(MODE.CASHFREE_WEBVIEW);
       return true;
     } catch (_) {
+      refreshAlertedRef.current = true;
       Alert.alert('Checkout error', 'Could not restart checkout. Please try again from the cart.');
       return false;
     } finally {
@@ -485,18 +534,42 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
     bumpWebViewKey,
   ]);
 
+  /**
+   * Fall back from the Cashfree native SDK to their Web JS SDK in a WebView.
+   *
+   * The `payment_session_id` is issued by create-order-v2 and is not bound to the
+   * native SDK — the native module failing to present it says nothing about the
+   * session, so reuse it. `buildCashfreeWebJsSdkHtml` needs only the session and
+   * the environment, both already in state.
+   *
+   * This used to cancel the order and call create-order-v2 for a replacement.
+   * That replacement landed ~1s after the order it replaced, which
+   * `enforce_order_rate_limits` always rejects, so the fallback could only ever
+   * end in "Could not open the payment page" — the checkout never reached a
+   * WebView at all. The order is now only recreated when there is genuinely no
+   * session left to show.
+   */
   const switchToCashfreeWebViewFallback = useCallback(async () => {
     if (finalizedRef.current || webViewFallbackRequestedRef.current) return;
     webViewFallbackRequestedRef.current = true;
+
+    if (cashfreeSessionId) {
+      sdkStartedRef.current = false;
+      clearCashfreeCallbacks();
+      bumpWebViewKey();
+      setMode(MODE.CASHFREE_WEBVIEW);
+      return;
+    }
+
     const ok = await refreshCheckoutSessionForWebView();
-    if (!ok && !finalizedRef.current) {
+    if (!ok && !finalizedRef.current && !refreshAlertedRef.current) {
       Alert.alert(
         'Checkout error',
         'Could not open the payment page. Please go back and try Place Order again.',
         [{ text: 'OK', onPress: () => leaveCheckout() }]
       );
     }
-  }, [refreshCheckoutSessionForWebView, leaveCheckout]);
+  }, [cashfreeSessionId, bumpWebViewKey, refreshCheckoutSessionForWebView, leaveCheckout]);
 
   const switchToEasebuzzWebViewFallback = useCallback(() => {
     if (finalizedRef.current) return;
@@ -591,9 +664,19 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
         return;
       }
 
+      // Falling back only makes sense while the *native SDK* owns the checkout.
+      // In a WebView mode this outcome is the payer's own decision — reloading
+      // the same WebView would reopen a checkout they just dismissed, and the
+      // `hungertap://payment-cancel` that triggerGatewayCheckoutCancel injects
+      // arrives here as exactly this 'cancelled', so the reload would fight the
+      // cancel it was asked to perform.
       const inLaunchGrace = Date.now() - checkoutOpenedAtRef.current < CHECKOUT_LAUNCH_GRACE_MS;
-      if (inLaunchGrace && (outcome === 'cancelled' || outcome === 'failure')) {
-        if (isCashfree) {
+      const canStillFallBack = SDK_MODES.includes(mode) && !cancelInFlightRef.current;
+      if (inLaunchGrace && canStillFallBack && (outcome === 'cancelled' || outcome === 'failure')) {
+        // Once the fallback has been used, switchToCashfreeWebViewFallback is a
+        // no-op — returning here would silently drop the outcome instead of
+        // cancelling, leaving the payer stuck on the checkout screen.
+        if (isCashfree && !webViewFallbackRequestedRef.current) {
           switchToCashfreeWebViewFallback();
           return;
         }
@@ -612,6 +695,7 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
       }
     },
     [
+      mode,
       refreshPaymentStatus,
       finalizeCancel,
       finalizeFailure,
@@ -698,16 +782,25 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
         applyOutcomeRef.current?.('success');
       },
       onError: (error) => {
+        const userCancelled = isCashfreeUserCancelError(error);
         if (typeof __DEV__ !== 'undefined' && __DEV__) {
           // eslint-disable-next-line no-console
-          console.warn('[Cashfree] SDK onError — trying WebView fallback:', error?.message || error);
+          console.warn(
+            `[Cashfree] SDK onError (${userCancelled ? 'user cancelled' : 'launch/session failure'}):`,
+            describeCashfreeSdkError(error)
+          );
         }
+        // The orders row is authoritative — a late webhook may already have
+        // settled this payment, so check before acting on the SDK's verdict.
         pollOnceRef.current?.();
+
+        if (userCancelled) {
+          // Reopening checkout in a WebView would resurrect a screen the payer
+          // just dismissed. Treat it as the cancellation it is.
+          applyOutcomeRef.current?.('cancelled');
+          return;
+        }
         switchToCashfreeWebViewFallback();
-        return;
-        setTimeout(() => {
-          if (!finalizedRef.current) applyOutcomeRef.current?.('cancelled');
-        }, 800);
       },
     });
 
@@ -719,7 +812,9 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
       }
       try {
         startCashfreeCheckout({
-          paymentSessionId: activePaymentSessionId,
+          // The validated id, matching what the WebView fallback renders — the
+          // raw value may carry whitespace CFSession accepts but Cashfree rejects.
+          paymentSessionId: cashfreeSessionId,
           orderId: cashfreeOrderId || checkoutOrderId,
           environment,
         });
@@ -735,7 +830,7 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
     return () => clearCashfreeCallbacks();
   }, [
     mode,
-    activePaymentSessionId,
+    cashfreeSessionId,
     cashfreeOrderId,
     checkoutOrderId,
     environment,
@@ -955,10 +1050,10 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
 
       <View style={[styles.header, { backgroundColor: colors.elevatedSurface, borderBottomColor: colors.border }]}>
         <Text
-          style={[styles.headerTitle, { color: colors.textSecondary, fontFamily: appTypography.bold }]}
+          style={[styles.headerTitle, { color: colors.text, fontFamily: appTypography.bold }]}
           numberOfLines={1}
         >
-          Pay securely
+          HungerTap
         </Text>
       </View>
 

@@ -1,7 +1,8 @@
 /// @ts-nocheck
 // Supabase Edge Function (Deno runtime) — not checked by the Expo/React Native tsconfig.
 
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { crypto } from "https://deno.land/std@0.168.0/crypto/mod.ts";
 
 const corsHeaders = {
@@ -178,17 +179,65 @@ serve(async (req: Request) => {
         );
       }
 
+      // Expire the Cashfree order on the same schedule expire_stale_payments()
+      // uses locally. Without this Cashfree keeps it open for the account default
+      // (days) while the local pending_payment row is cancelled within minutes,
+      // so a late failure webhook lands on an order that no longer exists.
+      // Set CASHFREE_ORDER_TTL_MIN to match that cron's cutoff. Cashfree requires
+      // this to be at least 15 minutes out.
+      const orderTtlMin = Math.max(15, Number(Deno.env.get("CASHFREE_ORDER_TTL_MIN") || "20") || 20);
+      const orderExpiryTime = new Date(Date.now() + orderTtlMin * 60 * 1000).toISOString();
+
+      // user.phone is only populated for phone-auth accounts; these are email
+      // signups, so it is always empty and every order so far went out as
+      // 9999999999. UPI *collect* sends the request to this number — a
+      // placeholder produces a collect nobody can approve, which is what the
+      // "U69::Expired" event in webhook_events is.
+      const rawPhone = String(
+        user.phone ||
+          user.user_metadata?.phone ||
+          user.user_metadata?.phone_number ||
+          user.user_metadata?.mobile ||
+          ""
+      ).replace(/[^0-9]/g, "");
+      const customerPhone = rawPhone.length >= 10 ? rawPhone.slice(-10) : "9999999999";
+      if (customerPhone === "9999999999") {
+        console.warn(
+          `[create-order-v2-app] No real phone for user ${user.id} — UPI collect cannot reach the payer. order_id=${order_id}`
+        );
+      }
+
+      const customerName =
+        String(user.user_metadata?.full_name || user.user_metadata?.name || "").trim().slice(0, 100) ||
+        "HungerTap Customer";
+
       const cashfreeBody = {
         order_id: String(order_id),
         order_amount: Number(total_amount),
         order_currency: "INR",
+        order_expiry_time: orderExpiryTime,
         customer_details: {
           customer_id: user.id,
-          customer_phone: user.phone || "9999999999",
+          customer_name: customerName,
+          customer_phone: customerPhone,
           customer_email: user.email || "customer@hungertap.com",
         },
         order_meta: {
-          return_url: `${supabaseUrl}/functions/v1/cashfree-webhook-v2?order_id=${order_id}`,
+          // return_url deliberately omitted.
+          //
+          // Both checkout paths are SDK-driven and neither survives a browser
+          // redirect. The WebView fallback runs
+          //   Cashfree().checkout({ redirectTarget: "_self" })
+          // (PaymentProcessingScreen.js:136), so a return_url navigates the live
+          // checkout view away the moment Cashfree considers the session done —
+          // to this project's own webhook, whose GET handler serves plain text.
+          // On a UPI handoff to PhonePe/GPay that can fire before the payer has
+          // authenticated, and Cashfree records it as
+          // "User dropped and did not complete the two factor authentication".
+          //
+          // The native path reports completion through
+          // CFPaymentGatewayService.setCallback onVerify/onError
+          // (lib/cashfreeCheckout.js:98). notify_url is unaffected.
           notify_url: `${supabaseUrl}/functions/v1/cashfree-webhook-v2`,
         },
       };
@@ -207,7 +256,17 @@ serve(async (req: Request) => {
       const cfData = await cfRes.json();
 
       if (!cfRes.ok) {
-        console.error("[create-order-v2-app] Cashfree PG Error:", cfData);
+        // Log the full Cashfree error body and the request shape. cfData.message
+        // alone usually omits which field was rejected, which is why the 400s in
+        // the function log have been unexplained.
+        console.error(
+          "[create-order-v2-app] Cashfree PG Error:",
+          JSON.stringify({
+            http: cfRes.status,
+            body: cfData,
+            sent: { ...cashfreeBody, customer_details: { customer_id: user.id } },
+          })
+        );
         await voidFailedCheckout(supabaseAdmin, order_id, payment_id, "Cashfree session creation failed");
         return new Response(
           JSON.stringify({ success: false, error: cfData.message || "Failed to create Cashfree session" }),
@@ -225,6 +284,10 @@ serve(async (req: Request) => {
         );
       }
 
+      const cfPaymentUrl = isProduction
+        ? `https://payments.cashfree.com/order/#${cfSessionId}`
+        : `https://sandbox.cashfree.com/order/#${cfSessionId}`;
+
       return new Response(
         JSON.stringify({
           success: true,
@@ -232,6 +295,7 @@ serve(async (req: Request) => {
           payment_id,
           gateway: "cashfree",
           payment_session_id: cfSessionId,
+          payment_url: cfPaymentUrl,
           // Additive: lets the app's native SDK pick its environment without guessing.
           gateway_environment: isProduction ? "PRODUCTION" : "SANDBOX",
           gateway_response: cfData,

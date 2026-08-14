@@ -30,7 +30,31 @@
 # so R8 must not rename or strip them in release builds.
 -keep class com.reactnativecashfreepgsdk.** { *; }
 -keep class com.cashfree.** { *; }
+-keep class com.cashfree.pg.** { *; }
+-keep class com.cashfree.pg.api.** { *; }
+-keep class com.cashfree.pg.core.** { *; }
+-keep class com.cashfree.pg.ui.** { *; }
+-keep class com.cashfree.pg.cf_analytics.** { *; }
 -dontwarn com.cashfree.**
+-dontwarn com.cashfree.pg.**
+
+# Keep Gson Serialized fields and Annotations used by Cashfree DropPaymentParser
+-keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod
+-keepclassmembers class * {
+    @com.google.gson.annotations.SerializedName <fields>;
+}
+-keepclassmembers class * {
+    @com.google.gson.annotations.Expose <fields>;
+}
+-keep class com.google.gson.** { *; }
+-dontwarn com.google.gson.**
+
+# Networking and reflection dependencies used by Cashfree SDK
+-dontwarn retrofit2.**
+-dontwarn okhttp3.**
+-dontwarn okio.**
+
+# Easebuzz SDK
 -keep class com.easebuzz.** { *; }
 -keep class in.easebuzz.** { *; }
 -keep class com.easebuzzsdk.** { *; }
@@ -38,3 +62,4 @@
 -dontwarn in.easebuzz.**
 
 # Add any project specific keep options here:
+
