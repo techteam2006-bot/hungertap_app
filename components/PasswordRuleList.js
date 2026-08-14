@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import AppIcon from './AppIcon';
 import { appTypography } from '../lib/darkThemeConfig';
@@ -8,27 +8,27 @@ export const MIN_PASSWORD = 8;
 export const PASSWORD_RULES = [
   {
     id: 'len',
-    label: 'Minimum 8 characters',
+    label: '8+ characters',
     test: (p) => p.length >= MIN_PASSWORD,
   },
   {
     id: 'upper',
-    label: 'One uppercase letter',
+    label: 'uppercase letter',
     test: (p) => /[A-Z]/.test(p),
   },
   {
     id: 'lower',
-    label: 'One lowercase letter',
+    label: 'lowercase letter',
     test: (p) => /[a-z]/.test(p),
   },
   {
     id: 'number',
-    label: 'One number',
+    label: 'number',
     test: (p) => /\d/.test(p),
   },
   {
     id: 'special',
-    label: 'One special character',
+    label: 'special character',
     test: (p) => /[^A-Za-z0-9]/.test(p),
   },
 ];
@@ -38,7 +38,7 @@ export function passwordMeetsAllRules(password) {
 }
 
 /**
- * Live password requirement checklist (X → check as rules pass).
+ * Compact password hints — one line, only rules still missing.
  */
 export default function PasswordRuleList({
   password,
@@ -47,47 +47,44 @@ export default function PasswordRuleList({
   dimmed = false,
   style,
 }) {
+  const missed = useMemo(
+    () => PASSWORD_RULES.filter((rule) => !rule.test(password || '')),
+    [password]
+  );
+
+  if (dimmed || missed.length === 0) {
+    return null;
+  }
+
+  const hint = missed.map((rule) => rule.label).join(' · ');
+
   return (
     <View
-      style={[styles.rulesWrap, dimmed && styles.dimmed, style]}
+      style={[styles.rulesWrap, style]}
       accessibilityRole="summary"
+      accessibilityLiveRegion="polite"
     >
-      {PASSWORD_RULES.map((rule) => {
-        const ok = rule.test(password || '');
-        return (
-          <View key={rule.id} style={styles.ruleRow}>
-            <AppIcon
-              name={ok ? 'checkmark-circle' : 'close-circle'}
-              size={14}
-              color={ok ? okColor : mutedColor}
-            />
-            <Text style={[styles.ruleText, { color: ok ? okColor : mutedColor }]}>
-              {rule.label}
-            </Text>
-          </View>
-        );
-      })}
+      <AppIcon name="information-circle-outline" size={14} color={mutedColor} />
+      <Text style={[styles.ruleText, { color: mutedColor }]} numberOfLines={2}>
+        Still need: {hint}
+      </Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   rulesWrap: {
-    marginTop: -4,
-    marginBottom: 12,
-    paddingHorizontal: 4,
-    gap: 4,
-  },
-  ruleRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 6,
+    marginTop: -4,
+    marginBottom: 10,
+    paddingHorizontal: 4,
   },
   ruleText: {
+    flex: 1,
     fontSize: 12,
+    lineHeight: 16,
     fontFamily: appTypography.regular,
-  },
-  dimmed: {
-    opacity: 0.45,
   },
 });

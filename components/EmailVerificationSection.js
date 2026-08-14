@@ -107,7 +107,9 @@ export default function EmailVerificationSection({
     try {
       const result = await onSendOtp(email.trim());
       if (result?.error) {
-        setEmailError(describeError(result.error, 'send'));
+        if (result.error.code !== 'CANTEEN_VALIDATION') {
+          setEmailError(describeError(result.error, 'send'));
+        }
         return;
       }
       setOtp('');
@@ -133,7 +135,9 @@ export default function EmailVerificationSection({
     try {
       const result = await onSendOtp(email.trim());
       if (result?.error) {
-        setOtpError(describeError(result.error, 'send'));
+        if (result.error.code !== 'CANTEEN_VALIDATION') {
+          setOtpError(describeError(result.error, 'send'));
+        }
         return;
       }
       setOtp('');

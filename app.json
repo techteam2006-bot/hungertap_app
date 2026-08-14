@@ -3,7 +3,7 @@
     "name": "HungerTap",
     "slug": "canteen-app",
     "scheme": "hungertap",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "owner": "24951a66p9",
@@ -45,7 +45,7 @@
       "package": "com.hungertap.app",
       "googleServicesFile": "./google-services.json",
       "icon": "./assets/splash_icon.png",
-      "versionCode": 2,
+      "versionCode": 3,
       "softwareKeyboardLayoutMode": "pan",
       "permissions": [
         "INTERNET",

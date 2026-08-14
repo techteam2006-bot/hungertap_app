@@ -1008,6 +1008,7 @@ const CartScreen = ({ navigation }) => {
         userId,
         orderItems: [...linesForOrder],
         orderTotal,
+        isTakeaway: args.p_is_takeaway,
       });
       if (!nav.ok) {
         setCheckoutErrorToast(toAlertMessage(nav.error, 'Checkout incomplete.'));

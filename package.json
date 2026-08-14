@@ -1,6 +1,6 @@
 {
   "name": "canteen-app",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "type": "commonjs",
   "main": "index.js",
   "scripts": {
@@ -16,9 +16,11 @@
     "generate-icons": "node scripts/generateAppIcon.mjs",
     "prebuild:android": "npx expo prebuild --platform android --clean",
     "build:apk": "powershell -ExecutionPolicy Bypass -File scripts/eas-build-android.ps1 apk",
+    "build:apk:local": "powershell -ExecutionPolicy Bypass -File scripts/build-apk-local.ps1",
+    "build:apk:local:debug": "powershell -ExecutionPolicy Bypass -File scripts/build-apk-local.ps1 -Debug",
+    "build:aab:local": "powershell -ExecutionPolicy Bypass -File scripts/build-aab-local.ps1",
     "build:aab": "powershell -ExecutionPolicy Bypass -File scripts/eas-build-android.ps1 aab",
-    "build:playstore": "powershell -ExecutionPolicy Bypass -File scripts/eas-build-android.ps1 aab",
-    "build:apk:local:debug": "cd android && gradlew.bat assembleDebug"
+    "build:playstore": "powershell -ExecutionPolicy Bypass -File scripts/eas-build-android.ps1 aab"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",

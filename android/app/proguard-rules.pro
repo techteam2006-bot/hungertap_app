@@ -28,6 +28,7 @@
 
 # Payment gateway native SDKs — reached reflectively / via WebView JS bridges,
 # so R8 must not rename or strip them in release builds.
+-keep class com.reactnativecashfreepgsdk.** { *; }
 -keep class com.cashfree.** { *; }
 -dontwarn com.cashfree.**
 -keep class com.easebuzz.** { *; }

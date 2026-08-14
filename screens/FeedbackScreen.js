@@ -8,6 +8,7 @@ import {
   Linking,
   Alert,
   Image,
+  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Clipboard from 'expo-clipboard';
@@ -15,8 +16,10 @@ import AppIcon from '../components/AppIcon';
 import BrandYellowStrip from '../components/BrandYellowStrip';
 import { useTheme } from '../lib/ThemeContext';
 import { appTypography } from '../lib/darkThemeConfig';
-import { SPLASH_SCREEN_LOGO } from '../lib/appLogo';
+import splashCatLogo from '../assets/logo.png';
 import { pxToPercentX, pxToPercentY } from '../utils/percent';
+
+const { width, height } = Dimensions.get('window');
 
 const SUPPORT_EMAIL = 'support@hungertap.online';
 
@@ -65,9 +68,9 @@ const createStyles = (colors, isDarkMode) =>
       marginBottom: pxToPercentY(32),
     },
     heroLogo: {
-      width: 88,
-      height: 88,
-      marginBottom: pxToPercentY(20),
+      width: width * 0.22,
+      height: width * 0.22,
+      marginBottom: height * 0.016,
     },
     heroTitle: {
       fontSize: 24,
@@ -257,7 +260,7 @@ const FeedbackScreen = ({ navigation }) => {
         contentContainerStyle={styles.scrollContent}
       >
         <View style={styles.hero}>
-          <Image source={SPLASH_SCREEN_LOGO} style={styles.heroLogo} resizeMode="contain" />
+          <Image source={splashCatLogo} style={styles.heroLogo} resizeMode="contain" />
           <Text style={styles.heroTitle}>We would love to hear from you</Text>
           <Text style={styles.heroSubtitle}>
             Share ideas, report a problem, or tell us what is working well. Your message goes straight to our team.

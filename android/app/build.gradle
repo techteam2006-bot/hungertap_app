@@ -92,8 +92,8 @@ android {
         applicationId 'com.hungertap.app'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2
-        versionName "1.0.1"
+        versionCode 3
+        versionName "1.0.2"
     }
     signingConfigs {
         debug {
@@ -102,14 +102,33 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        release {
+            def keystorePropsFile = rootProject.file('keystore.properties')
+            if (keystorePropsFile.exists()) {
+                def keystoreProps = new Properties()
+                keystoreProps.load(new FileInputStream(keystorePropsFile))
+                def keystorePath = keystoreProps['storeFile']
+                def keystoreFile = file(keystorePath)
+                if (keystoreFile.exists()) {
+                    storeFile keystoreFile
+                    storePassword keystoreProps['storePassword']
+                    keyAlias keystoreProps['keyAlias']
+                    keyPassword keystoreProps['keyPassword']
+                } else {
+                    println "WARNING: keystore.properties storeFile not found (${keystorePath}) — release will use debug signing."
+                }
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Production APK/AAB: use EAS (npm run build:apk / build:aab) — remote hungertapApp keystore.
-            signingConfig signingConfigs.debug
+            def keystorePropsFile = rootProject.file('keystore.properties')
+            def releaseSigning = signingConfigs.release
+            def hasReleaseKeystore = keystorePropsFile.exists() && releaseSigning.storeFile != null && releaseSigning.storeFile.exists()
+            signingConfig hasReleaseKeystore ? signingConfigs.release : signingConfigs.debug
             shrinkResources (findProperty('android.enableShrinkResourcesInReleaseBuilds')?.toBoolean() ?: false)
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"

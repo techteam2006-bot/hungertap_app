@@ -1,8 +1,8 @@
 {
   "dsn": "https://bb60d6a835d37cb605b3912fc132c486@o4511688461975552.ingest.us.sentry.io/4511688470560768",
   "environment": "production",
-  "release": "com.hungertap.app@1.0.0+1",
-  "dist": "1",
+  "release": "com.hungertap.app@1.0.2+3",
+  "dist": "3",
   "enableAutoSessionTracking": true,
   "tracesSampleRate": 0.2,
   "debug": false,

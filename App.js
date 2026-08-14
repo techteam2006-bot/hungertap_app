@@ -87,6 +87,7 @@ import LegalWebViewScreen from './screens/LegalWebViewScreen';
 import RestoreAccountScreen from './screens/RestoreAccountScreen';
 import { configureImageCache } from './lib/ImageCache';
 import AppErrorBoundary from './components/AppErrorBoundary';
+import ForceUpdateGate from './components/ForceUpdateGate';
 
 installGlobalErrorSafety();
 
@@ -272,7 +273,6 @@ function Navigation() {
     user &&
     userRole === 'student' &&
     !pendingSignupCompletion &&
-    !pendingPasswordReset &&
     !accountPendingDeletion;
 
   const navKey = accountPendingDeletion
@@ -336,6 +336,7 @@ function Navigation() {
           <Stack.Screen name="TermsOfService" component={TermsOfServiceScreen} />
           <Stack.Screen name="Legalities" component={LegalitiesScreen} />
           <Stack.Screen name="LegalWebView" component={LegalWebViewScreen} />
+          <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
         </>
       )}
     </Stack.Navigator>
@@ -542,13 +543,15 @@ export default function App() {
           {!fontsLoaded ? (
             <ThemedFontLoading />
           ) : (
-            <CanteenStatusProvider>
-              <CartProvider>
-                <FavoritesProvider>
-                  <AppWithTheme />
-                </FavoritesProvider>
-              </CartProvider>
-            </CanteenStatusProvider>
+            <ForceUpdateGate>
+              <CanteenStatusProvider>
+                <CartProvider>
+                  <FavoritesProvider>
+                    <AppWithTheme />
+                  </FavoritesProvider>
+                </CartProvider>
+              </CanteenStatusProvider>
+            </ForceUpdateGate>
           )}
         </ThemeProvider>
       </AuthProvider>

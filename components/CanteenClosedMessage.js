@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,8 @@ import {
   ScrollView,
   Pressable,
   Image,
+  ActivityIndicator,
+  useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AppIcon from './AppIcon';
@@ -16,16 +18,37 @@ import { useNavigation } from '@react-navigation/native';
 import { appTypography } from '../lib/darkThemeConfig';
 import { CANTEEN_STATUS_LOGO } from '../lib/appLogo';
 
-const CanteenClosedMessage = ({ onRefresh }) => {
+const COPY = {
+  kitchen_closed: {
+    title: 'Kitchen is closed',
+    subtitle:
+      'Ordering is paused for now. You can still review your profile and past orders—we will be back when service hours resume.',
+  },
+  orders_paused: {
+    title: 'App ordering paused',
+    subtitle:
+      'The canteen has temporarily turned off in-app orders. You can still view your profile and order history—we will let you order again when it is re-enabled.',
+  },
+};
+
+const CanteenClosedMessage = ({ onRefresh, refreshing = false, reason = 'kitchen_closed' }) => {
   const { colors, isDarkMode } = useTheme();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
 
-  const iconTint = isDarkMode ? 'rgba(245, 188, 59, 0.2)' : 'rgba(245, 188, 59, 0.12)';
+  const copy = COPY[reason] || COPY.kitchen_closed;
+  const logoSize = Math.min(Math.round(width * 0.32), 140);
+
   const hintBg = isDarkMode ? 'rgba(255, 255, 255, 0.08)' : colors.mutedRowBackground;
   const secondarySurface = isDarkMode ? 'rgba(255, 255, 255, 0.08)' : colors.elevatedSurface;
   const cardSurface = isDarkMode ? 'rgba(255, 255, 255, 0.07)' : colors.elevatedSurface;
   const cardOutline = isDarkMode ? colors.glassBorder : colors.border;
+
+  const logoStyle = useMemo(
+    () => [styles.brandMark, { width: logoSize, height: logoSize }],
+    [logoSize]
+  );
 
   return (
     <ScrollView
@@ -54,17 +77,10 @@ const CanteenClosedMessage = ({ onRefresh }) => {
           style={styles.cardAccent}
         />
 
-        <Image source={CANTEEN_STATUS_LOGO} style={styles.brandMark} resizeMode="contain" />
+        <Image source={CANTEEN_STATUS_LOGO} style={logoStyle} resizeMode="contain" />
 
-        <View style={[styles.iconRing, { backgroundColor: iconTint }]}>
-          <AppIcon name="moon-outline" size={36} color={colors.brandYellow} />
-        </View>
-
-        <Text style={[styles.title, { color: colors.text }]}>Kitchen is closed</Text>
-        <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-          Ordering is paused for now. You can still review your profile and past orders—we will be back
-          when service hours resume.
-        </Text>
+        <Text style={[styles.title, { color: colors.text }]}>{copy.title}</Text>
+        <Text style={[styles.subtitle, { color: colors.textSecondary }]}>{copy.subtitle}</Text>
 
         <View style={[styles.hint, { backgroundColor: hintBg, borderColor: cardOutline }]}>
           <AppIcon name="time-outline" size={20} color={colors.textTertiary} style={styles.hintIcon} />
@@ -73,15 +89,26 @@ const CanteenClosedMessage = ({ onRefresh }) => {
           </Text>
         </View>
 
-        <TouchableOpacity activeOpacity={0.88} onPress={onRefresh} style={styles.ctaWrap}>
+        <TouchableOpacity
+          activeOpacity={0.88}
+          onPress={onRefresh}
+          disabled={refreshing}
+          style={styles.ctaWrap}
+        >
           <LinearGradient
             colors={[colors.brandYellow, '#D4A017']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.cta}
           >
-            <AppIcon name="refresh" size={22} color="#FFFFFF" />
-            <Text style={[styles.ctaLabel, styles.ctaLabelSpacing]}>Check again</Text>
+            {refreshing ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <AppIcon name="refresh" size={22} color="#FFFFFF" />
+            )}
+            <Text style={[styles.ctaLabel, styles.ctaLabelSpacing]}>
+              {refreshing ? 'Checking…' : 'Check again'}
+            </Text>
           </LinearGradient>
         </TouchableOpacity>
 
@@ -153,20 +180,9 @@ const styles = StyleSheet.create({
     height: 4,
   },
   brandMark: {
-    width: 72,
-    height: 72,
     alignSelf: 'center',
-    marginBottom: 12,
+    marginBottom: 20,
     marginTop: 8,
-  },
-  iconRing: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
-    alignItems: 'center',
-    justifyContent: 'center',
-    alignSelf: 'center',
-    marginBottom: 18,
   },
   title: {
     fontSize: 22,

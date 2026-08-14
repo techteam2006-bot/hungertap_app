@@ -1,5 +1,7 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+/// @ts-nocheck
+// Supabase Edge Function (Deno runtime) — not checked by the Expo/React Native tsconfig.
+
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { crypto } from "https://deno.land/std@0.168.0/crypto/mod.ts";
 
 const corsHeaders = {
@@ -33,6 +35,27 @@ function sanitizeRpcError(rawMsg?: string): string {
     return "Invalid quantity specified for cart items";
   }
   return rawMsg;
+}
+
+/** Roll back a pending checkout when the payment gateway session cannot be created. */
+async function voidFailedCheckout(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  orderId: string,
+  paymentId: string | null | undefined,
+  reason: string
+): Promise<void> {
+  try {
+    const { error } = await supabaseAdmin.rpc("void_failed_checkout_order", {
+      p_order_id: orderId,
+      p_payment_id: paymentId || null,
+      p_reason: reason,
+    });
+    if (error) {
+      console.error("[create-order-v2-app] void_failed_checkout_order failed:", error, { orderId, paymentId, reason });
+    }
+  } catch (err) {
+    console.error("[create-order-v2-app] void_failed_checkout_order exception:", err, { orderId, paymentId, reason });
+  }
 }
 
 serve(async (req: Request) => {
@@ -117,12 +140,12 @@ serve(async (req: Request) => {
       const env = (Deno.env.get("CASHFREE_ENV") || "sandbox").toLowerCase();
 
       if (!clientId || !clientSecret) {
+        await voidFailedCheckout(supabaseAdmin, order_id, payment_id, "Cashfree keys not configured");
         return new Response(
           JSON.stringify({ success: false, error: "Gateway 'cashfree' is not configured (missing keys)" }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
-
       const isProduction = env === "production" || env === "prod";
       const cashfreeUrl = isProduction
         ? "https://api.cashfree.com/pg/orders"
@@ -134,6 +157,7 @@ serve(async (req: Request) => {
       // order id as Cashfree's order_id below, so the value is known up front.
       if (!payment_id) {
         console.error("[create-order-v2-app] RPC returned no payment_id for order", order_id);
+        await voidFailedCheckout(supabaseAdmin, order_id, null, "Missing payment_id after order creation");
         return new Response(
           JSON.stringify({ success: false, error: "internal_order_error" }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -147,6 +171,7 @@ serve(async (req: Request) => {
 
       if (stampErr) {
         console.error("[create-order-v2-app] Failed to stamp gateway_order_id:", stampErr);
+        await voidFailedCheckout(supabaseAdmin, order_id, payment_id, "Failed to stamp gateway_order_id");
         return new Response(
           JSON.stringify({ success: false, error: "internal_order_error" }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -183,6 +208,7 @@ serve(async (req: Request) => {
 
       if (!cfRes.ok) {
         console.error("[create-order-v2-app] Cashfree PG Error:", cfData);
+        await voidFailedCheckout(supabaseAdmin, order_id, payment_id, "Cashfree session creation failed");
         return new Response(
           JSON.stringify({ success: false, error: cfData.message || "Failed to create Cashfree session" }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -192,6 +218,7 @@ serve(async (req: Request) => {
       const cfSessionId = String(cfData.payment_session_id || "").trim();
       if (!cfSessionId) {
         console.error("[create-order-v2-app] Cashfree returned no payment_session_id:", cfData);
+        await voidFailedCheckout(supabaseAdmin, order_id, payment_id, "Cashfree returned no payment_session_id");
         return new Response(
           JSON.stringify({ success: false, error: "Cashfree did not return a payment session" }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -222,12 +249,12 @@ serve(async (req: Request) => {
       const env = (Deno.env.get("EASEBUZZ_ENV") || "test").toLowerCase();
 
       if (!key || !salt) {
+        await voidFailedCheckout(supabaseAdmin, order_id, payment_id, "Easebuzz keys not configured");
         return new Response(
           JSON.stringify({ success: false, error: "Gateway 'easebuzz' is not configured (missing key or salt)" }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
-
       const isProduction = env === "prod" || env === "production";
       const easebuzzUrl = isProduction
         ? "https://pay.easebuzz.in/payment/initiateLink"
@@ -238,6 +265,7 @@ serve(async (req: Request) => {
       // "Missing paymentId/orderId" and the order never leaves pending_payment.
       if (!payment_id) {
         console.error("[create-order-v2-app] RPC returned no payment_id for order", order_id);
+        await voidFailedCheckout(supabaseAdmin, order_id, null, "Missing payment_id after order creation");
         return new Response(
           JSON.stringify({ success: false, error: "internal_order_error" }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -294,6 +322,7 @@ serve(async (req: Request) => {
 
       if (!ebRes.ok || ebData.status !== 1) {
         console.error("[create-order-v2-app] Easebuzz PG Error:", ebData);
+        await voidFailedCheckout(supabaseAdmin, order_id, payment_id, "Easebuzz session creation failed");
         return new Response(
           JSON.stringify({ success: false, error: ebData.data || ebData.error_desc || "Failed to initiate Easebuzz payment" }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -322,14 +351,21 @@ serve(async (req: Request) => {
       );
     }
 
+    await voidFailedCheckout(
+      supabaseAdmin,
+      order_id,
+      payment_id,
+      `Unsupported gateway: ${gateway_code}`
+    );
     return new Response(
       JSON.stringify({ success: false, error: `Unsupported gateway: ${gateway_code}` }),
       { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Internal server error";
     console.error("[create-order-v2-app] Server Exception:", err);
     return new Response(
-      JSON.stringify({ success: false, error: err.message || "Internal server error" }),
+      JSON.stringify({ success: false, error: message }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }

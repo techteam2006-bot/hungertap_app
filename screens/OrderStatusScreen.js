@@ -10,10 +10,12 @@ import {
   Dimensions,
   Alert,
   Linking,
+  Platform,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import AppIcon from '../components/AppIcon';
 import BrandYellowStrip from '../components/BrandYellowStrip';
+import { pullRefreshControlProps } from '../lib/pullToRefresh';
 import { CommonActions, useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../lib/ThemeContext';
@@ -1107,6 +1109,19 @@ const OrderStatusScreen = ({ navigation, route }) => {
       <ScrollView
         style={[styles.scrollView, { backgroundColor: colors.pageBackground }]}
         showsVerticalScrollIndicator={false}
+        contentInsetAdjustmentBehavior={Platform.OS === 'ios' ? 'never' : 'automatic'}
+        automaticallyAdjustContentInsets={false}
+        refreshControl={
+          <RefreshControl
+            {...pullRefreshControlProps({
+              refreshing,
+              onRefresh,
+              tintColor: colors.primary,
+              progressOffset: 0,
+              androidBackgroundColor: colors.elevatedSurface,
+            })}
+          />
+        }
       >
         {/* Order Summary Card */}
         <View style={[styles.orderSummaryCard, { backgroundColor: colors.elevatedSurface }, cardOutline]}>

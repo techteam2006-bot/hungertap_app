@@ -30,6 +30,10 @@ import { openLegalPage } from '../lib/legalLinks';
 const BRAND_GOLD = '#D4A017';
 const EMAIL_RE = /^\S+@\S+\.\S+$/;
 
+const canteenValidationError = (message) => ({
+  error: { code: 'CANTEEN_VALIDATION', message },
+});
+
 export default function SignupForm({ navigation, onSwitchToLogin, style, scrollRef }) {
   const { colors } = useTheme();
   const {
@@ -59,6 +63,7 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
   const [generalSuccess, setGeneralSuccess] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [nameError, setNameError] = useState('');
+  const [canteenError, setCanteenError] = useState('');
 
   const nameRef = useRef(null);
   const canteenRef = useRef(null);
@@ -155,6 +160,8 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
 
   const describeError = useCallback((error, context) => {
     if (isEmailAlreadyInUseError(error)) return EMAIL_ALREADY_EXISTS_MESSAGE;
+    const raw = (error && error.message) || String(error || '');
+    if (raw.toLowerCase().includes('canteen')) return raw;
     return describeOtpFailure(error, { context }).message;
   }, []);
 
@@ -202,35 +209,38 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
       }
       setNameError('');
       if (!canteenName.trim()) {
-        return { error: { message: 'Please enter your canteen name before sending the code.' } };
+        const message = 'Please enter your canteen name before sending the code.';
+        setCanteenError(message);
+        return canteenValidationError(message);
       }
       const canteenLookup = await lookupCanteenForSignup(canteenName);
       if (canteenLookup.reason === 'fetch' && canteenLookup.error) {
-        return { error: { message: 'Could not verify your canteen. Check your internet and try again.' } };
+        const message = 'Could not verify your canteen. Check your internet and try again.';
+        setCanteenError(message);
+        return canteenValidationError(message);
       }
       if (!canteenLookup.ok) {
+        let message;
         if (canteenLookup.reason === 'ambiguous' && canteenLookup.rows?.length) {
           const hint = canteenLookup.rows
             .slice(0, 4)
             .map((r) => r.name)
             .filter(Boolean)
             .join(', ');
-          return {
-            error: {
-              message: `More than one canteen matches. Type the full official name. Examples: ${hint}`,
-            },
-          };
+          message = `More than one canteen matches. Type the full official name. Examples: ${hint}`;
+        } else {
+          message =
+            'Canteen not found. Use the full canteen name or paste the canteen ID from your admin.';
         }
-        return {
-          error: {
-            message:
-              'Canteen not found. Use the full canteen name or paste the canteen ID from your admin.',
-          },
-        };
+        setCanteenError(message);
+        return canteenValidationError(message);
       }
       if (canteenLookup.row?.is_open === false) {
-        return { error: { message: 'This canteen is closed. Please contact admin.' } };
+        const message = 'This canteen is closed. Please contact admin.';
+        setCanteenError(message);
+        return canteenValidationError(message);
       }
+      setCanteenError('');
       // Store canteen on auth metadata at OTP send so public.users can be created right after verify.
       return sendSignupEmailOtp(addr, {
         full_name: fullName.trim(),
@@ -285,6 +295,7 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
     try {
       const canteenLookup = await lookupCanteenForSignup(canteenName);
       if (canteenLookup.reason === 'fetch' && canteenLookup.error) {
+        setCanteenError('Could not verify your canteen. Check your internet and try again.');
         setGeneralError('Could not verify your canteen. Check your internet and try again.');
         return;
       }
@@ -295,22 +306,26 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
             .map((r) => r.name)
             .filter(Boolean)
             .join(', ');
-          setGeneralError(
-            `More than one canteen matches. Type the full official name. Examples: ${hint}`
-          );
+          const message = `More than one canteen matches. Type the full official name. Examples: ${hint}`;
+          setCanteenError(message);
+          setGeneralError(message);
         } else {
-          setGeneralError(
-            'Canteen not found. Use the full canteen name or paste the canteen ID from your admin.'
-          );
+          const message =
+            'Canteen not found. Use the full canteen name or paste the canteen ID from your admin.';
+          setCanteenError(message);
+          setGeneralError(message);
         }
         return;
       }
 
       const canteenRow = canteenLookup.row;
       if (canteenRow.is_open === false) {
-        setGeneralError('This canteen is closed. Please contact admin.');
+        const message = 'This canteen is closed. Please contact admin.';
+        setCanteenError(message);
+        setGeneralError(message);
         return;
       }
+      setCanteenError('');
 
       const { error } = await completeSignupAfterEmailOtp(password, {
         full_name: fullName.trim(),
@@ -416,7 +431,10 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
       <View
         style={[
           styles.inputRow,
-          { backgroundColor: colors.inputBackground, borderColor: colors.border },
+          {
+            backgroundColor: colors.inputBackground,
+            borderColor: canteenError ? colors.error : colors.border,
+          },
         ]}
       >
         <AppIcon name="business-outline" size={18} color={tertiary} style={styles.icon} />
@@ -426,7 +444,10 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
           placeholder="Canteen name"
           placeholderTextColor={tertiary}
           value={canteenName}
-          onChangeText={setCanteenName}
+          onChangeText={(t) => {
+            setCanteenName(t);
+            if (canteenError) setCanteenError('');
+          }}
           autoCapitalize="none"
           autoCorrect={false}
           autoComplete="off"
@@ -439,6 +460,9 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
           accessibilityLabel="Canteen name"
         />
       </View>
+      {canteenError ? (
+        <Text style={[styles.fieldError, { color: colors.error }]}>{canteenError}</Text>
+      ) : null}
 
       <EmailVerificationSection
         email={email}
@@ -473,7 +497,7 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
           emailRef.current?.blur?.();
           passwordRef.current?.blur?.();
           confirmRef.current?.blur?.();
-          setGeneralSuccess('Verification code sent');
+          setGeneralSuccess('');
           setGeneralError('');
         }}
         resendSeconds={60}

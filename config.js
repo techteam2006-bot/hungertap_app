@@ -74,6 +74,11 @@ const SEND_SIGNUP_OTP_URL = (
 /** Cart: `local` = device-only (AsyncStorage), no `cart_items` table. `remote` = Supabase `cart_items`. */
 const CART_STORAGE = process.env.EXPO_PUBLIC_CART_STORAGE || 'local';
 
+/** Google Play listing — force-update screen opens this URL. */
+const PLAY_STORE_URL =
+  process.env.EXPO_PUBLIC_PLAY_STORE_URL ||
+  'https://play.google.com/store/apps/details?id=com.hungertap.app';
+
 if (typeof __DEV__ !== 'undefined' && __DEV__ && (!SUPABASE_URL || !SUPABASE_ANON_KEY)) {
   // eslint-disable-next-line no-console
   console.warn(
@@ -100,6 +105,9 @@ export const CONFIG = {
 
   /** POST (anon) — signup email OTP via Edge/local workaround. */
   SEND_SIGNUP_OTP_URL,
+
+  /** Force update — Play Store listing opened from ForceUpdateScreen. */
+  PLAY_STORE_URL,
 
   // Deep Linking Configuration
   DEEP_LINK_PREFIX: `exp://${DEV_IP}`,

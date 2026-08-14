@@ -8,6 +8,7 @@ import {
   Alert,
   ScrollView,
   Image,
+  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Clipboard from 'expo-clipboard';
@@ -16,7 +17,9 @@ import BrandYellowStrip from '../components/BrandYellowStrip';
 import { useTheme } from '../lib/ThemeContext';
 import { appTypography } from '../lib/darkThemeConfig';
 import { pxToPercentX, pxToPercentY } from '../utils/percent';
-import { GLOBAL_LOADING_LOGO } from '../lib/appLogo';
+import splashCatLogo from '../assets/logo.png';
+
+const { width, height } = Dimensions.get('window');
 
 const SUPPORT_EMAIL = 'support@hungertap.online';
 
@@ -65,9 +68,9 @@ const createStyles = (colors) =>
       marginBottom: pxToPercentY(40),
     },
     heroLogo: {
-      width: 88,
-      height: 88,
-      marginBottom: pxToPercentY(20),
+      width: width * 0.22,
+      height: width * 0.22,
+      marginBottom: height * 0.016,
     },
     heroTitle: {
       fontSize: 24,
@@ -231,7 +234,7 @@ const ContactUsScreen = ({ navigation }) => {
         contentContainerStyle={styles.scrollContent}
       >
         <View style={styles.hero}>
-          <Image source={GLOBAL_LOADING_LOGO} style={styles.heroLogo} resizeMode="contain" />
+          <Image source={splashCatLogo} style={styles.heroLogo} resizeMode="contain" />
           <Text style={styles.heroTitle}>Get in touch</Text>
           <Text style={styles.heroSubtitle}>
             Questions about orders, your account, or the app? We are happy to help.

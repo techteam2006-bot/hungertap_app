@@ -35,7 +35,6 @@ import { foodService, supabase, deriveItemIsAvailable } from '../lib/supabase';
 import { rememberCategoryImages } from '../lib/ImageCache';
 import { getFontStyle } from '../lib/utils/fonts';
 import {
-  ModernHeader,
   ModernSearchBar,
   AnimatedFoodCard,
   GlassCard,
@@ -44,10 +43,11 @@ import {
 import BottomSnackbar from '../components/BottomSnackbar';
 import { sortItemsByTime, getTimeSortingInfo, getTimePeriodDescription } from '../lib/utils/timeBasedSorting';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { LOADING_MASCOT, CANTEEN_STATUS_LOGO } from '../lib/appLogo';
+import { LOADING_MASCOT } from '../lib/appLogo';
 import { appTypography } from '../lib/darkThemeConfig';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import BrandYellowStrip, { useBrandStripHeight } from '../components/BrandYellowStrip';
+import { pullRefreshControlProps, pullRefreshProgressOffset } from '../lib/pullToRefresh';
 import CanteenClosedMessage from '../components/CanteenClosedMessage';
 import { pxToPercentX, pxToPercentY } from '../utils/percent';
 import { invalidateHttpMenuCache, menuFromHttpEnabled } from '../lib/menuHttp';
@@ -107,51 +107,6 @@ function categoryHasVisibleItems(category, occupancy) {
 const fetchUserVegModeEnabled = async () => null;
 const updateUserVegModeEnabled = async () => ({ ok: true, error: null });
 
-const DEFAULT_CATEGORIES = [
-  {
-    id: 'category-breakfast',
-    name: 'Breakfast',
-    icon: '🍳',
-    sort_order: 1,
-    is_active: true,
-  },
-  {
-    id: 'category-lunch',
-    name: 'Lunch',
-    icon: '🍱',
-    sort_order: 2,
-    is_active: true,
-  },
-  {
-    id: 'category-snacks',
-    name: 'Snacks',
-    icon: '🥪',
-    sort_order: 3,
-    is_active: true,
-  },
-  {
-    id: 'category-beverages',
-    name: 'Beverages',
-    icon: '🥤',
-    sort_order: 4,
-    is_active: true,
-  },
-  {
-    id: 'category-combos',
-    name: 'Combos',
-    icon: '🍽️',
-    sort_order: 5,
-    is_active: true,
-  },
-  {
-    id: 'category-vegetarian',
-    name: 'Vegetarian',
-    icon: '🥗',
-    sort_order: 6,
-    is_active: true,
-  },
-];
-
 // Auto-scroll constants removed to keep bar position fixed
 
 const HomeScreen = ({ navigation, route }) => {
@@ -199,6 +154,10 @@ const HomeScreen = ({ navigation, route }) => {
   const TOP_STRIP_HEIGHT = brandStripHeight;
   const FIXED_HEADER_OFFSET_TOP = TOP_STRIP_HEIGHT;
   const FIXED_HEADER_HEIGHT = FIXED_HEADER_OFFSET_TOP + 60;
+  const pullRefreshOffset = useMemo(
+    () => pullRefreshProgressOffset(brandStripHeight, 60),
+    [brandStripHeight]
+  );
   const SEARCH_BAR_HEIGHT = 56;
   const CATEGORIES_SECTION_HEIGHT = 84;
   /** Matches `styles.banner.marginTop` — keep pin math in sync with layout. */
@@ -400,14 +359,14 @@ const HomeScreen = ({ navigation, route }) => {
   }, [vegMode, user?.id]);
 
   // Categories state
-  const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
+  const [categories, setCategories] = useState([]);
   const [categoriesLoading, setCategoriesLoading] = useState(true);
   const fallbackCategoriesAppliedRef = useRef(false);
   /** null = menu occupancy not known yet; otherwise ids/names with ≥1 visible item. */
   const [categoryOccupancy, setCategoryOccupancy] = useState(null);
   
   const hasCategories = Array.isArray(categories) && categories.length > 0;
-  const showCategorySkeleton = categoriesLoading && !hasCategories;
+  const showCategorySkeleton = categoriesLoading;
 
   const occupancyLookup = useMemo(() => {
     if (!categoryOccupancy) return null;
@@ -763,7 +722,6 @@ const HomeScreen = ({ navigation, route }) => {
           const parsed = JSON.parse(cached);
           if (Array.isArray(parsed) && parsed.length > 0) {
             setCategories(parsed);
-            setCategoriesLoading(false);
           }
         }
       } catch (error) {
@@ -1392,6 +1350,24 @@ const HomeScreen = ({ navigation, route }) => {
     // Search functionality is handled in the filter
   };
 
+  const renderCategorySkeleton = useCallback(
+    () => (
+      <View style={styles.quickActionContainer}>
+        <View style={styles.quickActionButton}>
+          <View style={styles.quickActionContent}>
+            <View style={styles.quickActionIconContainer}>
+              <EnhancedLoadingShimmer type="circle" />
+            </View>
+            <View style={styles.categorySkeletonText}>
+              <EnhancedLoadingShimmer type="text" />
+            </View>
+          </View>
+        </View>
+      </View>
+    ),
+    []
+  );
+
   const renderQuickAction = useCallback(({ item }) => {
     const isActive = activeFilter === item.filter;
     if (!categoryScales[item.filter]) {
@@ -1517,7 +1493,7 @@ const HomeScreen = ({ navigation, route }) => {
         </View>
         <FlatList
           data={showCategorySkeleton ? [1, 2, 3, 4, 5] : quickActions}
-          renderItem={showCategorySkeleton ? (() => null) : renderQuickAction}
+          renderItem={showCategorySkeleton ? renderCategorySkeleton : renderQuickAction}
           keyExtractor={(item) => (showCategorySkeleton ? `skeleton-${item}` : item.id)}
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -1535,6 +1511,7 @@ const HomeScreen = ({ navigation, route }) => {
       showCategorySkeleton,
       quickActions,
       renderQuickAction,
+      renderCategorySkeleton,
       activeFilter,
       CATEGORIES_SECTION_HEIGHT,
     ]
@@ -1647,20 +1624,7 @@ const HomeScreen = ({ navigation, route }) => {
       <View style={styles.quickActionsSection}>
         <FlatList
           data={showCategorySkeleton ? [1, 2, 3, 4, 5] : quickActions}
-          renderItem={showCategorySkeleton ? (() => (
-            <View style={styles.quickActionContainer}>
-              <View style={styles.quickActionButton}>
-                <View style={styles.quickActionContent}>
-                  <View style={styles.quickActionIconContainer}>
-                    <EnhancedLoadingShimmer type="circle" />
-                  </View>
-                  <View style={styles.categorySkeletonText}>
-                    <EnhancedLoadingShimmer type="text" />
-                  </View>
-                </View>
-              </View>
-            </View>
-          )) : renderQuickAction}
+          renderItem={showCategorySkeleton ? renderCategorySkeleton : renderQuickAction}
           keyExtractor={(item) => showCategorySkeleton ? `skeleton-${item}` : item.id}
           horizontal
           removeClippedSubviews={false}
@@ -1680,7 +1644,7 @@ const HomeScreen = ({ navigation, route }) => {
       </View>
       </View>
     ),
-    [activeFilter, quickActions, showCategorySkeleton, vegMode, renderQuickAction]
+    [activeFilter, quickActions, showCategorySkeleton, vegMode, renderQuickAction, renderCategorySkeleton]
   );
 
   const listHeaderWithStickyBanner = useMemo(
@@ -1786,29 +1750,14 @@ const HomeScreen = ({ navigation, route }) => {
     );
   }
 
-  // Full closed UI only after server confirms is_open === false (not on fetch/network errors).
-  if (!canteenStatus.loading && kitchenConfirmedClosed) {
+  // Full closed UI whenever server has confirmed closed (stay up during refresh).
+  if (kitchenConfirmedClosed) {
     return (
       <View style={[styles.container, { backgroundColor: colors.contentBackground }]}>
         <BrandYellowStrip />
-        <View
-          style={
-            isDarkMode
-              ? {
-                  backgroundColor: 'rgba(255, 255, 255, 0.06)',
-                  borderBottomWidth: StyleSheet.hairlineWidth,
-                  borderBottomColor: colors.glassBorder,
-                }
-              : undefined
-          }
-        >
-          <ModernHeader
-            logo={CANTEEN_STATUS_LOGO}
-            subtitle="Currently Closed"
-            style={styles.headerSpaced}
-          />
-        </View>
         <CanteenClosedMessage
+          reason={canteenStatus.closureReason || 'kitchen_closed'}
+          refreshing={canteenStatus.loading}
           onRefresh={() => checkCanteenStatus({ showAlertOnFailure: true })}
         />
       </View>
@@ -1963,6 +1912,8 @@ const HomeScreen = ({ navigation, route }) => {
           }
           renderItem={renderFoodItem}
           showsVerticalScrollIndicator={false}
+          contentInsetAdjustmentBehavior={Platform.OS === 'ios' ? 'never' : 'automatic'}
+          automaticallyAdjustContentInsets={false}
           scrollEnabled={filteredItems.length > 0}
           alwaysBounceVertical={filteredItems.length > 0}
           bounces={filteredItems.length > 0}
@@ -1981,15 +1932,13 @@ const HomeScreen = ({ navigation, route }) => {
           )}
           refreshControl={
             <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              tintColor={colors.primary}
-              colors={Platform.OS === 'android' ? [colors.primary] : undefined}
-              progressViewOffset={
-                Platform.OS === 'android'
-                  ? Math.round(insets.top) + FIXED_HEADER_HEIGHT
-                  : undefined
-              }
+              {...pullRefreshControlProps({
+                refreshing,
+                onRefresh,
+                tintColor: colors.primary,
+                progressOffset: pullRefreshOffset,
+                androidBackgroundColor: colors.elevatedSurface,
+              })}
             />
           }
           ListHeaderComponent={listHeaderWithStickyBanner}

@@ -10,10 +10,12 @@ import {
   TextInput,
   Animated,
   RefreshControl,
+  Platform,
 } from 'react-native';
 import Constants from 'expo-constants';
 import AppIcon from '../components/AppIcon';
 import BrandYellowStrip from '../components/BrandYellowStrip';
+import { pullRefreshControlProps } from '../lib/pullToRefresh';
 import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../lib/ThemeContext';
 import { useAuth } from '../lib/AuthContext';
@@ -607,7 +609,10 @@ const OrdersScreen = ({ navigation }) => {
             : !isSearchFocused && !isDarkMode && { backgroundColor: colors.mutedRowBackground },
           isSearchFocused && [
             styles.searchBarFocused,
-            { backgroundColor: colors.searchFocusedTint },
+            {
+              backgroundColor: isDarkMode ? colors.elevatedSurface : '#FFFFFF',
+              borderColor: colors.border,
+            },
           ],
         ]}>
           <AppIcon name="search" size={20} color={colors.textTertiary} />
@@ -625,6 +630,7 @@ const OrdersScreen = ({ navigation }) => {
             autoCapitalize="none"
             autoCorrect={false}
             selectTextOnFocus={true}
+            selectionColor={isDarkMode ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.15)'}
           />
           {searchQuery.length > 0 && (
             <TouchableOpacity
@@ -695,15 +701,21 @@ const OrdersScreen = ({ navigation }) => {
             visibleOrders.length === 0 && styles.listContainerEmpty,
           ]}
           showsVerticalScrollIndicator={false}
+          contentInsetAdjustmentBehavior={Platform.OS === 'ios' ? 'never' : 'automatic'}
+          automaticallyAdjustContentInsets={false}
           ListEmptyComponent={renderEmptyState}
           ListFooterComponent={renderOrdersFooter}
+          contentInsetAdjustmentBehavior={Platform.OS === 'ios' ? 'never' : 'automatic'}
+          automaticallyAdjustContentInsets={false}
           refreshControl={
             <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              tintColor={colors.text}
-              colors={[colors.brandYellow || '#f5bc3b']}
-              progressBackgroundColor={colors.elevatedSurface}
+              {...pullRefreshControlProps({
+                refreshing,
+                onRefresh,
+                tintColor: colors.text,
+                progressOffset: 0,
+                androidBackgroundColor: colors.elevatedSurface,
+              })}
             />
           }
         />
@@ -761,7 +773,7 @@ const styles = StyleSheet.create({
   searchBarFocused: {
     borderColor: '#000000',
     borderWidth: StyleSheet.hairlineWidth,
-    backgroundColor: '#FFF5F0',
+    backgroundColor: '#FFFFFF',
   },
   searchBar: {
     flexDirection: 'row',

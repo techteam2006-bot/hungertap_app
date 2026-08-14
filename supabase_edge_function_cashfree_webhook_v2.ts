@@ -1,3 +1,6 @@
+/// @ts-nocheck
+// Supabase Edge Function (Deno runtime) — not checked by the Expo/React Native tsconfig.
+
 /**
  * cashfree-webhook-v2 — PRODUCTION
  *

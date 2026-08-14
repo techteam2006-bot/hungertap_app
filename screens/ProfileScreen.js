@@ -6,8 +6,6 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
-  Switch,
-  Share,
   Linking,
   Platform,
   Modal,
@@ -15,11 +13,15 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Pressable,
+  RefreshControl,
+  Share,
 } from 'react-native';
 import LegalitiesCard from '../components/LegalitiesCard';
+import HomeStyleToggle from '../components/HomeStyleToggle';
 import { LinearGradient } from 'expo-linear-gradient';
 import AppIcon from '../components/AppIcon';
 import BrandYellowStrip from '../components/BrandYellowStrip';
+import { pullRefreshControlProps } from '../lib/pullToRefresh';
 import { useAuth } from '../lib/AuthContext';
 import {
   getNotificationsEnabled,
@@ -39,8 +41,6 @@ const updateUserVegModeEnabled = async () => ({ ok: true, error: null });
 
 const SOCIAL_LINKS = {
   instagram: 'https://www.instagram.com/hungertap.iare/',
-  twitter: 'https://twitter.com/HungerTap',
-  facebook: 'https://www.facebook.com/profile.php?id=61563114927891',
 };
 
 /** Play Store listing for this app (`app.json` → android.package). */
@@ -121,6 +121,7 @@ const ProfileScreen = ({ navigation }) => {
   const [deletePasswordVisible, setDeletePasswordVisible] = React.useState(false);
   const [deleteBusy, setDeleteBusy] = React.useState(false);
   const [deleteError, setDeleteError] = React.useState('');
+  const [refreshing, setRefreshing] = React.useState(false);
 
   const effectiveUserId = userId ?? user?.id ?? null;
 
@@ -181,19 +182,6 @@ const ProfileScreen = ({ navigation }) => {
     });
     return unsubscribe;
   }, [navigation, user?.id]);
-
-  const switchTrack = React.useMemo(
-    () => ({
-      false: isDarkMode ? '#374151' : '#E5E7EB',
-      true: colors.brandYellow || '#FFB301',
-    }),
-    [isDarkMode, colors.brandYellow]
-  );
-  const iosBgColor = isDarkMode ? '#374151' : '#E5E7EB';
-  const switchThumb = React.useCallback(
-    (val) => (Platform.OS === 'android' ? (val ? '#FFFFFF' : isDarkMode ? '#9CA3AF' : '#FFFFFF') : '#FFFFFF'),
-    [isDarkMode]
-  );
 
   const onToggleNotifications = async (value) => {
     if (notifToggleBusy) return;
@@ -380,6 +368,28 @@ const ProfileScreen = ({ navigation }) => {
   const initial = displayName.charAt(0).toUpperCase();
   const emailDisplay = user?.email || '—';
 
+  const onRefresh = React.useCallback(async () => {
+    setRefreshing(true);
+    try {
+      setNotificationsEnabled(await getNotificationsEnabled());
+      if (user?.id) {
+        const fromBackend = await fetchUserVegModeEnabled(user.id);
+        if (fromBackend !== null) {
+          setVegModeEnabled(fromBackend);
+          await setVegMode(fromBackend);
+        } else {
+          setVegModeEnabled(await getVegMode());
+        }
+      } else {
+        setVegModeEnabled(await getVegMode());
+      }
+    } catch (_) {
+      /* keep current values */
+    } finally {
+      setRefreshing(false);
+    }
+  }, [user?.id]);
+
   return (
     <View style={[styles.root, { backgroundColor: colors.contentBackground }]}>
       <BrandYellowStrip barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
@@ -408,6 +418,19 @@ const ProfileScreen = ({ navigation }) => {
         style={styles.scroll}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
+        contentInsetAdjustmentBehavior={Platform.OS === 'ios' ? 'never' : 'automatic'}
+        automaticallyAdjustContentInsets={false}
+        refreshControl={
+          <RefreshControl
+            {...pullRefreshControlProps({
+              refreshing,
+              onRefresh,
+              tintColor: colors.primary,
+              progressOffset: 0,
+              androidBackgroundColor: colors.elevatedSurface,
+            })}
+          />
+        }
       >
         {/* Name card */}
         <View
@@ -459,13 +482,10 @@ const ProfileScreen = ({ navigation }) => {
             colors={colors}
             right={
               <View style={styles.switchWrapper}>
-                <Switch
+                <HomeStyleToggle
                   value={isDarkMode}
                   onValueChange={toggleTheme}
-                  trackColor={switchTrack}
-                  thumbColor={switchThumb(isDarkMode)}
-                  ios_backgroundColor={iosBgColor}
-                  style={styles.switchControl}
+                  activeColor={colors.brandYellow || '#F5B041'}
                 />
               </View>
             }
@@ -477,14 +497,11 @@ const ProfileScreen = ({ navigation }) => {
             colors={colors}
             right={
               <View style={styles.switchWrapper}>
-                <Switch
+                <HomeStyleToggle
                   value={notificationsEnabled}
                   onValueChange={onToggleNotifications}
                   disabled={notifToggleBusy}
-                  trackColor={switchTrack}
-                  thumbColor={switchThumb(notificationsEnabled)}
-                  ios_backgroundColor={iosBgColor}
-                  style={styles.switchControl}
+                  activeColor={colors.brandYellow || '#F5B041'}
                 />
               </View>
             }
@@ -497,13 +514,10 @@ const ProfileScreen = ({ navigation }) => {
             isLast
             right={
               <View style={styles.switchWrapper}>
-                <Switch
+                <HomeStyleToggle
                   value={vegModeEnabled}
                   onValueChange={onToggleVegMode}
-                  trackColor={switchTrack}
-                  thumbColor={switchThumb(vegModeEnabled)}
-                  ios_backgroundColor={iosBgColor}
-                  style={styles.switchControl}
+                  activeColor="#00C137"
                 />
               </View>
             }
@@ -515,24 +529,10 @@ const ProfileScreen = ({ navigation }) => {
           <ProfileRow
             icon="logo-instagram"
             title="Instagram"
-            subtitle="hungertap"
-            colors={colors}
-            onPress={() => openExternalUrl(SOCIAL_LINKS.instagram)}
-          />
-          <ProfileRow
-            icon="logo-twitter"
-            title="Twitter"
-            subtitle="@HungerTap"
-            colors={colors}
-            onPress={() => openExternalUrl(SOCIAL_LINKS.twitter)}
-          />
-          <ProfileRow
-            icon="logo-facebook"
-            title="Facebook"
-            subtitle="HungerTap"
+            subtitle="hungertap.iare"
             colors={colors}
             isLast
-            onPress={() => openExternalUrl(SOCIAL_LINKS.facebook)}
+            onPress={() => openExternalUrl(SOCIAL_LINKS.instagram)}
           />
         </GlassCard>
 
@@ -542,6 +542,23 @@ const ProfileScreen = ({ navigation }) => {
         {/* More */}
         <Text style={[styles.sectionLabel, { color: colors.textTertiary }]}>More</Text>
         <GlassCard style={[styles.card, { borderColor: colors.border, backgroundColor: colors.elevatedSurface }]}>
+          <ProfileRow
+            icon="key-outline"
+            title="Change password"
+            subtitle="Verify your email and set a new password"
+            colors={colors}
+            onPress={() => {
+              const accountEmail = user?.email || '';
+              if (!accountEmail) {
+                Alert.alert('Change password', 'No email is linked to your account.');
+                return;
+              }
+              navigation.navigate('ForgotPassword', {
+                email: accountEmail,
+                changePassword: true,
+              });
+            }}
+          />
           <ProfileRow
             icon="receipt-outline"
             title="Order history"
@@ -977,4 +994,6 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
 });
+
+export default ProfileScreen;
 

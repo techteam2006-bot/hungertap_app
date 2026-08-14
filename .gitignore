@@ -14,6 +14,9 @@ build-credentials/
 # Keep android/sentry.properties committed (org/project only — never put auth.token in it).
 # Local overrides with tokens: android/sentry.properties.local (ignored)
 android/sentry.properties.local
+android/keystore.properties
+android/upload-keystore.jks
+android/*.jks
 .sentryclirc
 .env.sentry-build-plugin
 

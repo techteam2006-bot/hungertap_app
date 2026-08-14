@@ -12,6 +12,7 @@ import {
   Image,
   Dimensions,
   Animated,
+  Keyboard,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -48,10 +49,15 @@ const createLoginStyles = (colors) =>
     },
     scrollContent: {
       flexGrow: 1,
+      justifyContent: 'center',
       paddingHorizontal: width * 0.06,
-      paddingTop: height * 0.025,
-      paddingBottom: height * 0.28,
+      paddingTop: height * 0.02,
+      paddingBottom: height * 0.1,
       backgroundColor: 'transparent',
+    },
+    centerBlock: {
+      width: '100%',
+      marginTop: -height * 0.04,
     },
     logoSection: {
       alignItems: 'center',
@@ -59,7 +65,7 @@ const createLoginStyles = (colors) =>
       marginBottom: height * 0.000625,
     },
     logoContainer: {
-      marginBottom: height * 0.01,
+      marginBottom: height * 0.002,
       backgroundColor: 'transparent',
       borderRadius: width * 0.06,
       overflow: 'hidden',
@@ -69,14 +75,14 @@ const createLoginStyles = (colors) =>
       height: width * 0.3,
     },
     brandTitle: {
-      marginTop: height * 0.008,
+      marginTop: height * 0.008 - 12,
       fontSize: width * 0.07,
       fontFamily: appTypography.bold,
       fontWeight: '700',
       textAlign: 'center',
     },
     toggleContainer: {
-      marginTop: height * 0.0125,
+      marginTop: height * 0.024,
       marginBottom: height * 0.025,
     },
     toggleBackground: {
@@ -276,6 +282,18 @@ export default function LoginScreen({ navigation }) {
   const scrollRef = useRef(null);
   const emailRef = useRef(null);
   const passwordRef = useRef(null);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, () => setKeyboardVisible(true));
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardVisible(false));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   const switchToLogin = useCallback((creds) => {
     setIsLoginMode(true);
@@ -435,7 +453,7 @@ export default function LoginScreen({ navigation }) {
         <KeyboardAvoidingView
           style={styles.keyboardAvoidingView}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
+          enabled={keyboardVisible}
         >
           <ScrollView
             ref={scrollRef}
@@ -444,19 +462,19 @@ export default function LoginScreen({ navigation }) {
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
             bounces={false}
-            automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
           >
-            <View style={styles.logoSection}>
-              <View style={styles.logoContainer}>
-                <Image source={LOGIN_SCREEN_LOGO} style={styles.logo} resizeMode="contain" />
+            <View style={styles.centerBlock}>
+              <View style={styles.logoSection}>
+                <View style={styles.logoContainer}>
+                  <Image source={LOGIN_SCREEN_LOGO} style={styles.logo} resizeMode="contain" />
+                </View>
+                <Text style={styles.brandTitle}>
+                  <Text style={{ color: colors.text }}>Hunger</Text>
+                  <Text style={{ color: BRAND_GOLD }}>Tap</Text>
+                </Text>
               </View>
-              <Text style={styles.brandTitle}>
-                <Text style={{ color: colors.text }}>Hunger</Text>
-                <Text style={{ color: BRAND_GOLD }}>Tap</Text>
-              </Text>
-            </View>
 
-            <View style={styles.toggleContainer}>
+              <View style={styles.toggleContainer}>
               <View style={styles.toggleBackground}>
                 <Animated.View
                   style={[
@@ -504,9 +522,9 @@ export default function LoginScreen({ navigation }) {
                   </Animated.View>
                 </TouchableOpacity>
               </View>
-            </View>
+              </View>
 
-            <View style={styles.contentCard}>
+              <View style={styles.contentCard}>
               {isLoginMode ? (
                 <>
                   <Text style={styles.welcomeText}>Login and satisfy Your Cravings !</Text>
@@ -633,6 +651,7 @@ export default function LoginScreen({ navigation }) {
                   scrollRef={scrollRef}
                 />
               )}
+              </View>
             </View>
           </ScrollView>
         </KeyboardAvoidingView>

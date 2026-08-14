@@ -76,17 +76,14 @@ const createForgotPasswordStyles = (colors) =>
       marginBottom: height * 0.022,
     },
     iconWrap: {
-      width: width * 0.2,
-      height: width * 0.2,
-      borderRadius: width * 0.1,
       backgroundColor: 'transparent',
       justifyContent: 'center',
       alignItems: 'center',
-      marginBottom: height * 0.018,
+      marginBottom: height * 0.016,
     },
     brandMark: {
-      width: width * 0.14,
-      height: width * 0.14,
+      width: width * 0.22,
+      height: width * 0.22,
     },
     title: {
       fontSize: width * 0.065,
@@ -152,7 +149,7 @@ const createForgotPasswordStyles = (colors) =>
       marginLeft: width * 0.01,
     },
     fieldLabel: {
-      fontSize: width * 0.032,
+      fontSize: width * 0.04,
       fontFamily: appTypography.semiBold,
       color: colors.textSecondary,
       marginBottom: height * 0.01,
@@ -162,12 +159,12 @@ const createForgotPasswordStyles = (colors) =>
       marginBottom: height * 0.016,
     },
     otpHint: {
-      fontSize: width * 0.032,
+      fontSize: width * 0.04,
       fontFamily: appTypography.regular,
       color: colors.textSecondary,
       textAlign: 'center',
       marginBottom: height * 0.016,
-      lineHeight: width * 0.045,
+      lineHeight: width * 0.055,
     },
     otpEmailHighlight: {
       fontFamily: appTypography.semiBold,
@@ -184,12 +181,12 @@ const createForgotPasswordStyles = (colors) =>
       justifyContent: 'center',
     },
     resendText: {
-      fontSize: width * 0.034,
+      fontSize: width * 0.04,
       fontFamily: appTypography.medium,
       color: colors.textTertiary,
     },
     resendReady: {
-      fontSize: width * 0.034,
+      fontSize: width * 0.04,
       fontFamily: appTypography.semiBold,
       color: '#D4A017',
     },
@@ -202,7 +199,7 @@ const createForgotPasswordStyles = (colors) =>
       marginBottom: height * 0.006,
     },
     verifiedText: {
-      fontSize: width * 0.034,
+      fontSize: width * 0.04,
       fontFamily: appTypography.semiBold,
       color: '#16A34A',
     },
@@ -215,12 +212,12 @@ const createForgotPasswordStyles = (colors) =>
       minHeight: height * 0.028,
     },
     verifyingText: {
-      fontSize: width * 0.034,
+      fontSize: width * 0.04,
       fontFamily: appTypography.medium,
       color: colors.textTertiary,
     },
     passwordSectionLabel: {
-      fontSize: width * 0.032,
+      fontSize: width * 0.04,
       fontFamily: appTypography.semiBold,
       color: colors.textSecondary,
       marginTop: height * 0.01,
@@ -256,11 +253,12 @@ const createForgotPasswordStyles = (colors) =>
     },
     backToLogin: {
       alignItems: 'center',
-      paddingVertical: height * 0.012,
+      paddingVertical: height * 0.018,
+      marginTop: height * 0.006,
     },
     backToLoginText: {
-      fontSize: width * 0.04,
-      fontFamily: appTypography.medium,
+      fontSize: width * 0.046,
+      fontFamily: appTypography.semiBold,
       color: '#D4A017',
     },
   });
@@ -276,6 +274,8 @@ const ForgotPasswordScreen = ({ navigation, route }) => {
     signOut,
     loading,
   } = useAuth();
+
+  const changePassword = route.params?.changePassword === true;
 
   const [step, setStep] = useState(1);
   const [email, setEmail] = useState(route.params?.email || '');
@@ -436,8 +436,15 @@ const ForgotPasswordScreen = ({ navigation, route }) => {
       if (result.success) {
         Alert.alert(
           'Password Updated',
-          'Your password has been changed successfully. Please sign in.',
-          [{ text: 'OK', onPress: () => navigation.navigate('Login') }]
+          changePassword
+            ? 'Your password has been changed. Please sign in again with your new password.'
+            : 'Your password has been changed successfully. Please sign in.',
+          [
+            {
+              text: 'OK',
+              onPress: () => navigation.navigate('Login'),
+            },
+          ]
         );
       } else {
         setErrors({ general: result.error || 'Failed to reset password.' });
@@ -478,10 +485,12 @@ const ForgotPasswordScreen = ({ navigation, route }) => {
                 <View style={styles.iconWrap}>
                   <Image source={LOGIN_SCREEN_LOGO} style={styles.brandMark} resizeMode="contain" />
                 </View>
-                <Text style={styles.title}>Reset Password</Text>
+                <Text style={styles.title}>{changePassword ? 'Change Password' : 'Reset Password'}</Text>
                 <Text style={styles.subtitle}>
                   {step === 1
-                    ? 'Enter your email to receive a reset code.'
+                    ? changePassword
+                      ? 'We will send a verification code to your email.'
+                      : 'Enter your email to receive a reset code.'
                     : otpVerified
                       ? 'Code verified. Choose a new password.'
                       : 'Enter the 6-digit code sent to your email.'}
@@ -515,7 +524,7 @@ const ForgotPasswordScreen = ({ navigation, route }) => {
                     returnKeyType="done"
                     blurOnSubmit
                     onSubmitEditing={handleSendCode}
-                    editable={!(loading || submitting)}
+                    editable={!(changePassword || loading || submitting)}
                   />
                 </View>
                 {errors.email ? (
@@ -690,7 +699,7 @@ const ForgotPasswordScreen = ({ navigation, route }) => {
               <LoadingButton
                 style={[styles.actionButton, { backgroundColor: '#D4A017' }]}
                 textStyle={styles.actionButtonText}
-                title="Send Reset Code"
+                title={changePassword ? 'Send Verification Code' : 'Send Reset Code'}
                 loadingTitle="Sending code..."
                 loading={loading || submitting}
                 onPress={handleSendCode}
@@ -708,8 +717,13 @@ const ForgotPasswordScreen = ({ navigation, route }) => {
               />
             ) : null}
 
-            <TouchableOpacity style={styles.backToLogin} onPress={() => navigation.navigate('Login')}>
-              <Text style={styles.backToLoginText}>Back to Sign In</Text>
+            <TouchableOpacity
+              style={styles.backToLogin}
+              onPress={() => (changePassword ? navigation.goBack() : navigation.navigate('Login'))}
+            >
+              <Text style={styles.backToLoginText}>
+                {changePassword ? 'Back to Profile' : 'Back to Sign In'}
+              </Text>
             </TouchableOpacity>
               </View>
             </View>

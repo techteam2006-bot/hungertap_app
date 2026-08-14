@@ -14,7 +14,8 @@ import { WebView } from 'react-native-webview';
 import { useTheme } from '../lib/ThemeContext';
 import BrandYellowStrip from '../components/BrandYellowStrip';
 import { appTypography } from '../lib/darkThemeConfig';
-import { supabase } from '../lib/supabase';
+import { supabase, prepareCheckoutOrderArgs } from '../lib/supabase';
+import { postCreateOrderV2 } from '../lib/createOrderV2';
 import { useCart } from '../lib/CartContext';
 import { useAuth } from '../lib/AuthContext';
 import {
@@ -26,8 +27,9 @@ import { isValidOrderUuid } from '../lib/checkoutSecurity';
 import { resetNavigationToCart } from '../lib/navigateHome';
 import { isOrderPlacedSuccessStatus, isCancelledLike } from '../lib/orderStatus';
 import {
-  cancelCheckoutPayment,
-  GATEWAY_CANCEL_INJECT_JS,
+  triggerGatewayCheckoutCancel,
+  cancelOwnPendingPayment,
+  abandonCheckoutPayment,
 } from '../lib/cancelCheckoutPayment';
 import {
   isCashfreeNativeSdkAvailable,
@@ -43,6 +45,10 @@ import {
 
 const POLL_MS = 2500;
 const STUCK_MS = 180000;
+/** Wait this long for native SDK UI before falling back to hosted checkout WebView. */
+const SDK_FALLBACK_MS = 30000;
+const WEBVIEW_OVERLAY_MAX_MS = 5000;
+const CHECKOUT_LAUNCH_GRACE_MS = 35000;
 
 /**
  * Both gateways run through their native SDK. Easebuzz additionally keeps the
@@ -59,8 +65,34 @@ const MODE = {
 
 const SDK_MODES = [MODE.CASHFREE_SDK, MODE.EASEBUZZ_SDK];
 
+function resolveInitialCheckoutMode({
+  isCashfree,
+  cashfreeSessionId,
+  activePaymentSessionId,
+  activePaymentUrl,
+}) {
+  if (isCashfree) {
+    if (!cashfreeSessionId) return MODE.UNAVAILABLE;
+    if (isCashfreeNativeSdkAvailable()) return MODE.CASHFREE_SDK;
+    return MODE.CASHFREE_WEBVIEW;
+  }
+
+  if (isEasebuzzNativeSdkAvailable() && activePaymentSessionId) {
+    return MODE.EASEBUZZ_SDK;
+  }
+  if (isAllowedCheckoutUrl(activePaymentUrl)) return MODE.EASEBUZZ_WEBVIEW;
+  return MODE.UNAVAILABLE;
+}
+
 /** Cashfree session ids are interpolated into a <script> tag — validate, never trust. */
 const CASHFREE_SESSION_RE = /^session_[A-Za-z0-9_-]{10,400}$/;
+const CASHFREE_SESSION_FALLBACK_RE = /^[A-Za-z0-9_-]{10,400}$/;
+
+function normalizeCashfreeSessionId(raw) {
+  const s = String(raw || '').trim();
+  if (CASHFREE_SESSION_RE.test(s) || CASHFREE_SESSION_FALLBACK_RE.test(s)) return s;
+  return '';
+}
 
 /**
  * Cashfree has no URL you can navigate to for a payment_session_id — the session
@@ -99,18 +131,83 @@ function buildCashfreeWebJsSdkHtml(sessionId, isSandbox) {
     </div>
     <script>
       (function () {
-        try {
-          Cashfree({ mode: "${mode}" }).checkout({
-            paymentSessionId: "${sessionId}",
-            redirectTarget: "_self"
+        function startCheckout() {
+          try {
+            Cashfree({ mode: "${mode}" }).checkout({
+              paymentSessionId: "${sessionId}",
+              redirectTarget: "_self"
+            });
+          } catch (e) {
+            console.error("Cashfree checkout error:", e);
+          }
+        }
+        var sdkScript = document.querySelector('script[src*="sdk.cashfree.com"]');
+        if (window.Cashfree) {
+          startCheckout();
+        } else if (sdkScript) {
+          sdkScript.addEventListener("load", startCheckout);
+          sdkScript.addEventListener("error", function () {
+            console.error("Cashfree SDK script failed to load");
           });
-        } catch (e) {
-          console.error("Cashfree checkout error:", e);
+        } else {
+          setTimeout(startCheckout, 1500);
         }
       })();
     </script>
   </body>
 </html>`;
+}
+
+/** UPI / wallet deep links opened from gateway WebViews on Android. */
+const EXTERNAL_PAYMENT_SCHEMES = [
+  'upi:',
+  'intent:',
+  'tez:',
+  'gpay:',
+  'phonepe:',
+  'paytmmp:',
+  'bhim:',
+  'credpay:',
+];
+
+function isExternalPaymentAppUrl(url) {
+  const lower = String(url || '').trim().toLowerCase();
+  return EXTERNAL_PAYMENT_SCHEMES.some((scheme) => lower.startsWith(scheme));
+}
+
+function isWebViewCheckoutMode(mode) {
+  return mode === MODE.CASHFREE_WEBVIEW || mode === MODE.EASEBUZZ_WEBVIEW;
+}
+
+/** Fall back from native SDK to checkout WebView when SDK UI never appears. */
+function useGatewayLaunchFallback({
+  mode,
+  isCashfree,
+  activePaymentUrl,
+  switchToCashfreeWebViewFallback,
+  switchToEasebuzzWebViewFallback,
+}) {
+  useEffect(() => {
+    if (!SDK_MODES.includes(mode)) return undefined;
+
+    const timer = setTimeout(() => {
+      if (isCashfree) {
+        switchToCashfreeWebViewFallback?.();
+        return;
+      }
+      if (isAllowedCheckoutUrl(activePaymentUrl)) {
+        switchToEasebuzzWebViewFallback?.();
+      }
+    }, SDK_FALLBACK_MS);
+
+    return () => clearTimeout(timer);
+  }, [
+    mode,
+    isCashfree,
+    activePaymentUrl,
+    switchToCashfreeWebViewFallback,
+    switchToEasebuzzWebViewFallback,
+  ]);
 }
 
 /**
@@ -133,16 +230,18 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const { clearCart } = useCart();
-  const { userId, getSupabaseToken } = useAuth();
+  const { userId } = useAuth();
   const {
     gateway = 'cashfree',
     paymentUrl: initialPaymentUrl,
     paymentSessionId: initialPaymentSessionId,
     environment: initialEnvironment,
-    orderId,
+    cashfreeOrderId: initialCashfreeOrderId,
+    orderId: initialOrderId,
     paymentId: initialPaymentId,
     orderItems = [],
     orderTotal = 0,
+    isTakeaway = false,
   } = route.params || {};
 
   const finalizedRef = useRef(false);
@@ -151,39 +250,60 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
   const webRef = useRef(null);
   const cancelInFlightRef = useRef(false);
   const allowLeaveRef = useRef(false);
+  const blockExitRef = useRef(true);
   const sdkStartedRef = useRef(false);
+  const checkoutOpenedAtRef = useRef(Date.now());
+  const refreshInFlightRef = useRef(false);
+  const webViewFallbackRequestedRef = useRef(false);
 
+  const [checkoutOrderId, setCheckoutOrderId] = useState(() => String(initialOrderId || '').trim());
   const [activePaymentUrl] = useState(() => String(initialPaymentUrl || '').trim());
-  const [activePaymentId] = useState(
+  const [activePaymentId, setActivePaymentId] = useState(
     initialPaymentId != null ? String(initialPaymentId) : ''
   );
-  const [activePaymentSessionId] = useState(
+  const [activePaymentSessionId, setActivePaymentSessionId] = useState(
     initialPaymentSessionId != null ? String(initialPaymentSessionId).trim() : ''
   );
-  const [environment] = useState(() =>
+  const [environment, setEnvironment] = useState(() =>
     String(initialEnvironment || '').toUpperCase() === 'PRODUCTION' ? 'PRODUCTION' : 'SANDBOX'
   );
-  const [webviewKey] = useState(0);
-  const [checkoutClosed, setCheckoutClosed] = useState(false);
+  const [webviewKey, setWebviewKey] = useState(0);
+  const webViewReadyRef = useRef(false);
+  const bumpWebViewKey = useCallback(() => {
+    webViewReadyRef.current = false;
+    setWebviewKey((k) => k + 1);
+  }, []);
   const [verifying, setVerifying] = useState(false);
+  const [refreshingCheckout, setRefreshingCheckout] = useState(false);
+  const [webViewLoaded, setWebViewLoaded] = useState(false);
+  const [blockExit, setBlockExit] = useState(true);
+
+  useEffect(() => {
+    blockExitRef.current = blockExit;
+  }, [blockExit]);
 
   const isCashfree = gateway === 'cashfree';
+  const cashfreeOrderId = useMemo(
+    () => String(initialCashfreeOrderId || checkoutOrderId || '').trim(),
+    [initialCashfreeOrderId, checkoutOrderId]
+  );
 
   const cashfreeSessionId = useMemo(
-    () => (CASHFREE_SESSION_RE.test(activePaymentSessionId) ? activePaymentSessionId : ''),
+    () => normalizeCashfreeSessionId(activePaymentSessionId),
     [activePaymentSessionId]
   );
 
-  const [mode, setMode] = useState(() => {
-    if (isCashfree) {
-      if (isCashfreeNativeSdkAvailable()) return MODE.CASHFREE_SDK;
-      return CASHFREE_SESSION_RE.test(activePaymentSessionId)
-        ? MODE.CASHFREE_WEBVIEW
-        : MODE.UNAVAILABLE;
-    }
-    if (isEasebuzzNativeSdkAvailable() && activePaymentSessionId) return MODE.EASEBUZZ_SDK;
-    return isAllowedCheckoutUrl(activePaymentUrl) ? MODE.EASEBUZZ_WEBVIEW : MODE.UNAVAILABLE;
-  });
+  const [mode, setMode] = useState(() =>
+    resolveInitialCheckoutMode({
+      isCashfree,
+      cashfreeSessionId: normalizeCashfreeSessionId(
+        initialPaymentSessionId != null ? String(initialPaymentSessionId).trim() : ''
+      ),
+      activePaymentSessionId:
+        initialPaymentSessionId != null ? String(initialPaymentSessionId).trim() : '',
+      activePaymentUrl: String(initialPaymentUrl || '').trim(),
+    })
+  );
 
   const webViewSource = useMemo(() => {
     if (mode === MODE.CASHFREE_WEBVIEW) {
@@ -197,6 +317,20 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
     const url = String(activePaymentUrl || '').trim();
     return isAllowedCheckoutUrl(url) ? { uri: url } : null;
   }, [mode, cashfreeSessionId, environment, activePaymentUrl]);
+
+  useEffect(() => {
+    webViewReadyRef.current = false;
+    setWebViewLoaded(false);
+  }, [mode, webviewKey, webViewSource]);
+
+  useEffect(() => {
+    if (!isWebViewCheckoutMode(mode)) return undefined;
+    const timer = setTimeout(() => {
+      webViewReadyRef.current = true;
+      setWebViewLoaded(true);
+    }, WEBVIEW_OVERLAY_MAX_MS);
+    return () => clearTimeout(timer);
+  }, [mode, webviewKey]);
 
   const finalizeSuccess = useCallback(async () => {
     if (finalizedRef.current) return;
@@ -213,11 +347,11 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
     let orderToken = '';
     let total = Number(orderTotal) || 0;
     try {
-      if (userId && isValidOrderUuid(orderId)) {
+      if (userId && isValidOrderUuid(checkoutOrderId)) {
         const { data: row } = await supabase
           .from('orders')
           .select('order_token, total_amount')
-          .eq('id', orderId)
+          .eq('id', checkoutOrderId)
           .eq('placed_by', userId)
           .maybeSingle();
         orderToken = row?.order_token != null ? String(row.order_token) : '';
@@ -227,19 +361,20 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
     } catch (_) {}
 
     navigation.replace('OrderConfirmation', {
-      orderId,
+      orderId: checkoutOrderId,
       orderToken,
       totalAmount: total,
       orderItems,
       paymentMethod: gateway === 'cashfree' ? 'cashfree' : 'easebuzz_v2',
     });
-  }, [clearCart, navigation, orderId, orderItems, orderTotal, userId, gateway]);
+  }, [clearCart, navigation, checkoutOrderId, orderItems, orderTotal, userId, gateway]);
 
   const leaveCheckout = useCallback(() => {
     if (finalizedRef.current) return;
     finalizedRef.current = true;
     allowLeaveRef.current = true;
-    setCheckoutClosed(true);
+    blockExitRef.current = false;
+    setBlockExit(false);
     if (stuckTimerRef.current) {
       clearTimeout(stuckTimerRef.current);
       stuckTimerRef.current = null;
@@ -247,41 +382,136 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
     resetNavigationToCart(navigation);
   }, [navigation]);
 
-  const sendCancelToGateway = useCallback(async () => {
-    try {
-      try {
-        webRef.current?.injectJavaScript(GATEWAY_CANCEL_INJECT_JS);
-      } catch (_) {}
-
-      let accessToken = '';
-      try {
-        accessToken = (await getSupabaseToken?.()) || '';
-      } catch (_) {}
-
-      await cancelCheckoutPayment({
-        accessToken,
-        orderId,
-        paymentId: activePaymentId,
-        userId,
+  const resolveGatewayCancellation = useCallback(
+    ({ fromGateway = false } = {}) =>
+      abandonCheckoutPayment({
         supabaseClient: supabase,
-      });
-    } catch (e) {
-      if (typeof __DEV__ !== 'undefined' && __DEV__) {
-        console.warn('cancelCheckoutPayment:', e?.message || e);
-      }
-    }
-  }, [activePaymentId, getSupabaseToken, orderId, userId]);
+        orderId: checkoutOrderId,
+        userId,
+        webViewRef: webRef,
+        fromGateway,
+      }),
+    [checkoutOrderId, userId]
+  );
 
-  const finalizeCancel = useCallback(async () => {
-    if (finalizedRef.current || cancelInFlightRef.current) return;
-    cancelInFlightRef.current = true;
-    await sendCancelToGateway();
-    leaveCheckout();
-  }, [leaveCheckout, sendCancelToGateway]);
+  const finalizeCancel = useCallback(
+    ({ fromGateway = false } = {}) => {
+      if (finalizedRef.current || cancelInFlightRef.current) return;
+      cancelInFlightRef.current = true;
+      allowLeaveRef.current = true;
+      blockExitRef.current = false;
+      setBlockExit(false);
+      leaveCheckout();
+      resolveGatewayCancellation({ fromGateway }).catch(() => {});
+    },
+    [leaveCheckout, resolveGatewayCancellation]
+  );
 
   const finalizeFailure = useCallback(() => {
     leaveCheckout();
   }, [leaveCheckout]);
+
+  const refreshCheckoutSessionForWebView = useCallback(async () => {
+    if (refreshInFlightRef.current || finalizedRef.current || !isCashfree) return false;
+    refreshInFlightRef.current = true;
+    setRefreshingCheckout(true);
+
+    try {
+      const oldOrderId = checkoutOrderId;
+      if (isValidOrderUuid(oldOrderId)) {
+        await cancelOwnPendingPayment({ supabaseClient: supabase, orderId: oldOrderId });
+      }
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        Alert.alert('Sign in required', 'Please sign in again to complete payment.');
+        return false;
+      }
+
+      const args = prepareCheckoutOrderArgs(orderItems, isTakeaway);
+      if (!args.ok) {
+        Alert.alert('Checkout error', args.error || 'Invalid cart for checkout.');
+        return false;
+      }
+
+      const v2 = await postCreateOrderV2({
+        accessToken: session.access_token,
+        items: args.p_items,
+        is_takeaway: args.p_is_takeaway,
+        gateway_code: gateway,
+      });
+
+      if (!v2.ok) {
+        Alert.alert('Checkout error', v2.error || 'Could not restart checkout.');
+        return false;
+      }
+
+      const newSessionId = String(v2.payment_session_id || '').trim();
+      const newOrderId = v2.order_id != null ? String(v2.order_id).trim() : '';
+      if (!newSessionId || !isValidOrderUuid(newOrderId)) {
+        Alert.alert('Checkout error', 'Payment session was not returned. Please try again from the cart.');
+        return false;
+      }
+
+      setCheckoutOrderId(newOrderId);
+      setActivePaymentSessionId(newSessionId);
+      setActivePaymentId(v2.payment_id != null ? String(v2.payment_id) : '');
+      setEnvironment(
+        String(v2.gateway_environment || 'SANDBOX').toUpperCase() === 'PRODUCTION'
+          ? 'PRODUCTION'
+          : 'SANDBOX'
+      );
+      checkoutOpenedAtRef.current = Date.now();
+      sdkStartedRef.current = false;
+      clearCashfreeCallbacks();
+      bumpWebViewKey();
+      setMode(MODE.CASHFREE_WEBVIEW);
+      return true;
+    } catch (_) {
+      Alert.alert('Checkout error', 'Could not restart checkout. Please try again from the cart.');
+      return false;
+    } finally {
+      refreshInFlightRef.current = false;
+      setRefreshingCheckout(false);
+    }
+  }, [
+    isCashfree,
+    checkoutOrderId,
+    orderItems,
+    isTakeaway,
+    gateway,
+    bumpWebViewKey,
+  ]);
+
+  const switchToCashfreeWebViewFallback = useCallback(async () => {
+    if (finalizedRef.current || webViewFallbackRequestedRef.current) return;
+    webViewFallbackRequestedRef.current = true;
+    const ok = await refreshCheckoutSessionForWebView();
+    if (!ok && !finalizedRef.current) {
+      Alert.alert(
+        'Checkout error',
+        'Could not open the payment page. Please go back and try Place Order again.',
+        [{ text: 'OK', onPress: () => leaveCheckout() }]
+      );
+    }
+  }, [refreshCheckoutSessionForWebView, leaveCheckout]);
+
+  const switchToEasebuzzWebViewFallback = useCallback(() => {
+    if (finalizedRef.current) return;
+    sdkStartedRef.current = false;
+    bumpWebViewKey();
+    setMode(isAllowedCheckoutUrl(activePaymentUrl) ? MODE.EASEBUZZ_WEBVIEW : MODE.UNAVAILABLE);
+  }, [activePaymentUrl, bumpWebViewKey]);
+
+  useGatewayLaunchFallback({
+    mode,
+    isCashfree,
+    activePaymentUrl,
+    switchToCashfreeWebViewFallback,
+    switchToEasebuzzWebViewFallback,
+  });
 
   const promptAbandonCheckout = useCallback(() => {
     if (finalizedRef.current || cancelInFlightRef.current) return true;
@@ -294,7 +524,7 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
           text: 'OK',
           style: 'destructive',
           onPress: () => {
-            finalizeCancel();
+            finalizeCancel({ fromGateway: false });
           },
         },
       ]
@@ -309,6 +539,18 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
         finalizeSuccess();
         return;
       }
+
+      // Ignore transient failed/cancel statuses while the gateway UI is still opening.
+      const inLaunchGrace = Date.now() - checkoutOpenedAtRef.current < CHECKOUT_LAUNCH_GRACE_MS;
+      if (
+        inLaunchGrace &&
+        (status === 'payment_failed' ||
+          status === 'payment_cancelled' ||
+          isCancelledLike(status))
+      ) {
+        return;
+      }
+
       if (status === 'payment_cancelled') {
         allowLeaveRef.current = true;
         leaveCheckout();
@@ -322,19 +564,19 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
   );
 
   const refreshPaymentStatus = useCallback(async () => {
-    if (!orderId || !userId || !isValidOrderUuid(orderId) || finalizedRef.current) return;
+    if (!checkoutOrderId || !userId || !isValidOrderUuid(checkoutOrderId) || finalizedRef.current) return;
     try {
       const { data: ord } = await supabase
         .from('orders')
         .select('status')
-        .eq('id', orderId)
+        .eq('id', checkoutOrderId)
         .eq('placed_by', userId)
         .maybeSingle();
       if (ord?.status) applyOrderStatus(ord.status);
     } catch (_) {
       /* network — next poll */
     }
-  }, [orderId, userId, applyOrderStatus]);
+  }, [checkoutOrderId, userId, applyOrderStatus]);
 
   pollOnceRef.current = refreshPaymentStatus;
 
@@ -346,13 +588,38 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
         // money moved — cover the checkout UI while the order row is polled.
         setVerifying(true);
         refreshPaymentStatus();
-      } else if (outcome === 'cancelled') {
-        finalizeCancel();
+        return;
+      }
+
+      const inLaunchGrace = Date.now() - checkoutOpenedAtRef.current < CHECKOUT_LAUNCH_GRACE_MS;
+      if (inLaunchGrace && (outcome === 'cancelled' || outcome === 'failure')) {
+        if (isCashfree) {
+          switchToCashfreeWebViewFallback();
+          return;
+        }
+        if (!isCashfree && isAllowedCheckoutUrl(activePaymentUrl)) {
+          sdkStartedRef.current = false;
+          bumpWebViewKey();
+          setMode(MODE.EASEBUZZ_WEBVIEW);
+          return;
+        }
+      }
+
+      if (outcome === 'cancelled') {
+        finalizeCancel({ fromGateway: true });
       } else {
         finalizeFailure();
       }
     },
-    [refreshPaymentStatus, finalizeCancel, finalizeFailure]
+    [
+      refreshPaymentStatus,
+      finalizeCancel,
+      finalizeFailure,
+      isCashfree,
+      activePaymentUrl,
+      bumpWebViewKey,
+      switchToCashfreeWebViewFallback,
+    ]
   );
 
   // Active polling loop while verifying === true (runs every 0.5s for up to 30s)
@@ -433,10 +700,11 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
       onError: (error) => {
         if (typeof __DEV__ !== 'undefined' && __DEV__) {
           // eslint-disable-next-line no-console
-          console.log('🎉 [Step 7/7] Cashfree SDK onError:', error?.message || error);
+          console.warn('[Cashfree] SDK onError — trying WebView fallback:', error?.message || error);
         }
-        // The user dismissed or the payment failed — the order row decides which.
         pollOnceRef.current?.();
+        switchToCashfreeWebViewFallback();
+        return;
         setTimeout(() => {
           if (!finalizedRef.current) applyOutcomeRef.current?.('cancelled');
         }, 800);
@@ -452,7 +720,7 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
       try {
         startCashfreeCheckout({
           paymentSessionId: activePaymentSessionId,
-          orderId,
+          orderId: cashfreeOrderId || checkoutOrderId,
           environment,
         });
       } catch (e) {
@@ -460,12 +728,19 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
           console.warn('[Cashfree] startCashfreeCheckout failed, falling back to WebView:', e?.message || e);
         }
         sdkStartedRef.current = false;
-        setMode(cashfreeSessionId ? MODE.CASHFREE_WEBVIEW : MODE.UNAVAILABLE);
+        switchToCashfreeWebViewFallback();
       }
     }
 
     return () => clearCashfreeCallbacks();
-  }, [mode, activePaymentSessionId, cashfreeSessionId, orderId, environment]);
+  }, [
+    mode,
+    activePaymentSessionId,
+    cashfreeOrderId,
+    checkoutOrderId,
+    environment,
+    switchToCashfreeWebViewFallback,
+  ]);
 
   // --- Native SDK: Easebuzz (falls back to the server-issued URL) -----------
   useEffect(() => {
@@ -486,12 +761,8 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
       if (cancelled) return;
 
       if (res.launchFailed) {
-        // Checkout never opened — nothing was shown to the user, so fall back.
         sdkStartedRef.current = false;
-        if (typeof __DEV__ !== 'undefined' && __DEV__) {
-          // eslint-disable-next-line no-console
-          console.log('↩️ [PaymentProcessingScreen] Easebuzz SDK unavailable, falling back to payment URL.');
-        }
+        bumpWebViewKey();
         setMode(isAllowedCheckoutUrl(activePaymentUrl) ? MODE.EASEBUZZ_WEBVIEW : MODE.UNAVAILABLE);
         return;
       }
@@ -507,7 +778,7 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
     return () => {
       cancelled = true;
     };
-  }, [mode, activePaymentSessionId, activePaymentUrl, environment]);
+  }, [mode, activePaymentSessionId, activePaymentUrl, environment, bumpWebViewKey]);
 
   useEffect(() => {
     if (typeof __DEV__ === 'undefined' || !__DEV__) return;
@@ -532,16 +803,42 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
   }, [promptAbandonCheckout]);
 
   useEffect(() => {
-    const unsub = navigation.addListener('beforeRemove', (e) => {
-      if (allowLeaveRef.current || finalizedRef.current) return;
+    const unsubscribe = navigation.addListener('beforeRemove', (e) => {
+      if (allowLeaveRef.current || finalizedRef.current || !blockExitRef.current) {
+        return;
+      }
       e.preventDefault();
-      promptAbandonCheckout();
+      Alert.alert(
+        'Cancel payment?',
+        'If you go back now, this payment will be cancelled and you will need to place the order again.',
+        [
+          { text: 'Stay', style: 'cancel' },
+          {
+            text: 'OK',
+            style: 'destructive',
+            onPress: () => {
+              cancelInFlightRef.current = true;
+              finalizedRef.current = true;
+              allowLeaveRef.current = true;
+              blockExitRef.current = false;
+              setBlockExit(false);
+              if (stuckTimerRef.current) {
+                clearTimeout(stuckTimerRef.current);
+                stuckTimerRef.current = null;
+              }
+              triggerGatewayCheckoutCancel(webRef);
+              cancelOwnPendingPayment({ supabaseClient: supabase, orderId: checkoutOrderId }).catch(() => {});
+              navigation.dispatch(e.data.action);
+            },
+          },
+        ]
+      );
     });
-    return unsub;
-  }, [navigation, promptAbandonCheckout]);
+    return unsubscribe;
+  }, [navigation, resolveGatewayCancellation]);
 
   useEffect(() => {
-    if (!orderId || !isValidOrderUuid(orderId)) {
+    if (!checkoutOrderId || !isValidOrderUuid(checkoutOrderId)) {
       Alert.alert('Checkout error', 'Missing order reference. Return to the cart and try again.', [
         {
           text: 'OK',
@@ -601,7 +898,7 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
       linkSub.remove();
     };
   }, [
-    orderId,
+    checkoutOrderId,
     userId,
     applyOrderStatus,
     navigation,
@@ -617,13 +914,25 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
         handlePaymentReturnUrl(url);
         return false;
       }
+      if (isExternalPaymentAppUrl(url)) {
+        Linking.openURL(url).catch(() => {});
+        return false;
+      }
       const lower = url.toLowerCase();
-      if (lower.startsWith('http://') || lower.startsWith('https://')) {
+      if (lower.startsWith('https://')) {
+        // Gateways redirect to bank / 3DS pages on many domains once checkout starts.
+        if (isWebViewCheckoutMode(mode)) return true;
         return isAllowedCheckoutUrl(url);
+      }
+      if (lower.startsWith('http://')) {
+        if (typeof __DEV__ !== 'undefined' && __DEV__) {
+          return isWebViewCheckoutMode(mode) || isAllowedCheckoutUrl(url);
+        }
+        return false;
       }
       return false;
     },
-    [handlePaymentReturnUrl]
+    [handlePaymentReturnUrl, mode]
   );
 
   const onNavigationStateChange = useCallback(
@@ -631,6 +940,10 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
       const url = (navState?.url || '').trim();
       if (url && isPaymentReturnUrl(url)) {
         handlePaymentReturnUrl(url);
+      }
+      if (navState?.loading === false && url) {
+        webViewReadyRef.current = true;
+        setWebViewLoaded(true);
       }
     },
     [handlePaymentReturnUrl]
@@ -649,11 +962,7 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
         </Text>
       </View>
 
-      {checkoutClosed ? (
-        <View style={[styles.webLoading, { paddingBottom: insets.bottom }]}>
-          <ActivityIndicator size="large" color={colors.primary} />
-        </View>
-      ) : verifying ? (
+      {verifying ? (
         <View style={[styles.webLoading, { paddingBottom: insets.bottom }]}>
           <ActivityIndicator size="large" color={colors.primary} />
           <Text
@@ -671,7 +980,7 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
             Could not start checkout. Go back and try Place Order again.
           </Text>
         </View>
-      ) : SDK_MODES.includes(mode) ? (
+      ) : SDK_MODES.includes(mode) || refreshingCheckout ? (
         <View style={[styles.webLoading, { paddingBottom: insets.bottom }]}>
           <ActivityIndicator size="large" color={colors.primary} />
           <Text
@@ -680,11 +989,24 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
               { color: colors.textSecondary, fontFamily: appTypography.regular },
             ]}
           >
-            Opening secure payment…
+            {refreshingCheckout ? 'Preparing checkout…' : 'Opening secure payment…'}
           </Text>
         </View>
       ) : webViewSource ? (
         <View style={[styles.webWrap, { marginBottom: insets.bottom }]}>
+          {!webViewLoaded ? (
+            <View style={[styles.webLoadingOverlay, styles.webLoading]}>
+              <ActivityIndicator size="large" color={colors.primary} />
+              <Text
+                style={[
+                  styles.loadingHint,
+                  { color: colors.textSecondary, fontFamily: appTypography.regular },
+                ]}
+              >
+                Loading secure payment…
+              </Text>
+            </View>
+          ) : null}
           <WebView
             ref={webRef}
             key={webviewKey}
@@ -694,22 +1016,24 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
             domStorageEnabled
             thirdPartyCookiesEnabled={Platform.OS === 'android'}
             sharedCookiesEnabled
-            startInLoadingState
-            renderLoading={() => (
-              <View style={styles.webLoading}>
-                <ActivityIndicator size="large" color={colors.primary} />
-                <Text
-                  style={[
-                    styles.loadingHint,
-                    { color: colors.textSecondary, fontFamily: appTypography.regular },
-                  ]}
-                >
-                  Loading secure payment…
-                </Text>
-              </View>
-            )}
-            setSupportMultipleWindows={false}
-            originWhitelist={['https://*', 'http://*', 'hungertap://*']}
+            startInLoadingState={false}
+            mixedContentMode="always"
+            javaScriptCanOpenWindowsAutomatically
+            setSupportMultipleWindows
+            onLoadStart={() => {
+              if (!webViewReadyRef.current) setWebViewLoaded(false);
+            }}
+            onLoadEnd={() => {
+              webViewReadyRef.current = true;
+              setWebViewLoaded(true);
+            }}
+            onLoadProgress={({ nativeEvent }) => {
+              if (nativeEvent?.progress >= 0.9) {
+                webViewReadyRef.current = true;
+                setWebViewLoaded(true);
+              }
+            }}
+            originWhitelist={['https://*', 'http://*', 'hungertap://*', 'intent://*', 'upi://*']}
             onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
             onNavigationStateChange={onNavigationStateChange}
           />
@@ -740,6 +1064,10 @@ const styles = StyleSheet.create({
   },
   webWrap: { flex: 1 },
   web: { flex: 1 },
+  webLoadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 2,
+  },
   webLoading: {
     flex: 1,
     justifyContent: 'center',

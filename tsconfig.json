@@ -29,6 +29,8 @@
   "exclude": [
     "node_modules",
     "android",
-    ".expo"
+    ".expo",
+    "supabase_edge_function_*.ts",
+    "supabase/functions/**"
   ]
 }
