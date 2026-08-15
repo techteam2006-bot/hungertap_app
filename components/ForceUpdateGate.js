@@ -3,12 +3,14 @@ import { AppState } from 'react-native';
 import AuthLoadingScreen from '../screens/AuthLoadingScreen';
 import ForceUpdateScreen from '../screens/ForceUpdateScreen';
 import { evaluateForceUpdateRequired } from '../lib/appVersionCheck';
+import { useAuth } from '../lib/AuthContext';
 
 /**
- * Blocks the app before auth/navigation when the installed build is below the
- * server minimum. Re-checks whenever the app returns to the foreground.
+ * Blocks the app when the installed build is below the user's college
+ * `min_app_version`. Re-checks on resume and when the signed-in user changes.
  */
 export default function ForceUpdateGate({ children }) {
+  const { user, loading: authLoading } = useAuth();
   const [phase, setPhase] = useState('checking');
   const [meta, setMeta] = useState({ installed: '', minimumVersion: '' });
   const checkInFlight = useRef(false);
@@ -45,8 +47,9 @@ export default function ForceUpdateGate({ children }) {
   }, []);
 
   useEffect(() => {
+    if (authLoading) return undefined;
     runCheck();
-  }, [runCheck]);
+  }, [runCheck, authLoading, user?.id]);
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (next) => {
@@ -57,7 +60,7 @@ export default function ForceUpdateGate({ children }) {
     return () => sub.remove();
   }, [runCheck]);
 
-  if (phase === 'checking') {
+  if (phase === 'checking' || authLoading) {
     return <AuthLoadingScreen message="Checking for updates..." />;
   }
 

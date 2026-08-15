@@ -24,7 +24,7 @@ import {
   isEmailAlreadyInUseError,
   EMAIL_ALREADY_EXISTS_MESSAGE,
 } from '../lib/authErrorMessages';
-import { lookupCanteenForSignup } from '../lib/canteenLookup';
+import { fetchFixedSignupCanteen } from '../lib/canteenLookup';
 import { openLegalPage } from '../lib/legalLinks';
 
 const BRAND_GOLD = '#D4A017';
@@ -49,6 +49,8 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
   // AsyncStorage (that caused deleted text like "Xyzzz" to snap back).
   const [fullName, setFullName] = useState('');
   const [canteenName, setCanteenName] = useState('');
+  const [canteenRow, setCanteenRow] = useState(null);
+  const [canteenLoading, setCanteenLoading] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -110,6 +112,29 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
     },
     [scrollRef]
   );
+
+  // Fixed canteen: resolve by id, show live name only (never expose the id).
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      setCanteenLoading(true);
+      const result = await fetchFixedSignupCanteen();
+      if (!mounted) return;
+      if (result.ok && result.row) {
+        setCanteenRow(result.row);
+        setCanteenName(String(result.row.name || '').trim());
+        setCanteenError('');
+      } else {
+        setCanteenRow(null);
+        setCanteenName('');
+        setCanteenError('Could not load canteen. Check your internet and try again.');
+      }
+      setCanteenLoading(false);
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   // Resume mid-OTP session only — never copy name/email from cached metadata into inputs.
   useEffect(() => {
@@ -180,6 +205,7 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
   const canSubmit = useMemo(
     () =>
       !!fullName.trim() &&
+      !!canteenRow?.id &&
       !!canteenName.trim() &&
       !!email.trim() &&
       emailVerified &&
@@ -189,6 +215,7 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
       !submitting,
     [
       fullName,
+      canteenRow,
       canteenName,
       email,
       emailVerified,
@@ -199,6 +226,28 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
     ]
   );
 
+  const resolveLockedCanteen = useCallback(async () => {
+    if (canteenRow?.id) {
+      if (canteenRow.is_open === false) {
+        return { ok: false, message: 'This canteen is closed. Please contact admin.' };
+      }
+      return { ok: true, row: canteenRow };
+    }
+    const canteenLookup = await fetchFixedSignupCanteen();
+    if (canteenLookup.reason === 'fetch' && canteenLookup.error) {
+      return { ok: false, message: 'Could not verify your canteen. Check your internet and try again.' };
+    }
+    if (!canteenLookup.ok || !canteenLookup.row) {
+      return { ok: false, message: 'Could not load canteen. Check your internet and try again.' };
+    }
+    if (canteenLookup.row.is_open === false) {
+      return { ok: false, message: 'This canteen is closed. Please contact admin.' };
+    }
+    setCanteenRow(canteenLookup.row);
+    setCanteenName(String(canteenLookup.row.name || '').trim());
+    return { ok: true, row: canteenLookup.row };
+  }, [canteenRow]);
+
   const handleSendOtp = useCallback(
     async (addr) => {
       setGeneralError('');
@@ -208,48 +257,21 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
         return { error: { message: 'Please enter your full name before sending the code.' } };
       }
       setNameError('');
-      if (!canteenName.trim()) {
-        const message = 'Please enter your canteen name before sending the code.';
-        setCanteenError(message);
-        return canteenValidationError(message);
-      }
-      const canteenLookup = await lookupCanteenForSignup(canteenName);
-      if (canteenLookup.reason === 'fetch' && canteenLookup.error) {
-        const message = 'Could not verify your canteen. Check your internet and try again.';
-        setCanteenError(message);
-        return canteenValidationError(message);
-      }
-      if (!canteenLookup.ok) {
-        let message;
-        if (canteenLookup.reason === 'ambiguous' && canteenLookup.rows?.length) {
-          const hint = canteenLookup.rows
-            .slice(0, 4)
-            .map((r) => r.name)
-            .filter(Boolean)
-            .join(', ');
-          message = `More than one canteen matches. Type the full official name. Examples: ${hint}`;
-        } else {
-          message =
-            'Canteen not found. Use the full canteen name or paste the canteen ID from your admin.';
-        }
-        setCanteenError(message);
-        return canteenValidationError(message);
-      }
-      if (canteenLookup.row?.is_open === false) {
-        const message = 'This canteen is closed. Please contact admin.';
-        setCanteenError(message);
-        return canteenValidationError(message);
+      const resolved = await resolveLockedCanteen();
+      if (!resolved.ok) {
+        setCanteenError(resolved.message);
+        return canteenValidationError(resolved.message);
       }
       setCanteenError('');
       // Store canteen on auth metadata at OTP send so public.users can be created right after verify.
       return sendSignupEmailOtp(addr, {
         full_name: fullName.trim(),
-        canteen_id: String(canteenLookup.row.id),
+        canteen_id: String(resolved.row.id),
         college_id:
-          canteenLookup.row.college_id != null ? String(canteenLookup.row.college_id) : undefined,
+          resolved.row.college_id != null ? String(resolved.row.college_id) : undefined,
       });
     },
-    [sendSignupEmailOtp, fullName, canteenName]
+    [sendSignupEmailOtp, fullName, resolveLockedCanteen]
   );
 
   const handleVerifyOtp = useCallback(
@@ -293,44 +315,19 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
 
     setSubmitting(true);
     try {
-      const canteenLookup = await lookupCanteenForSignup(canteenName);
-      if (canteenLookup.reason === 'fetch' && canteenLookup.error) {
-        setCanteenError('Could not verify your canteen. Check your internet and try again.');
-        setGeneralError('Could not verify your canteen. Check your internet and try again.');
-        return;
-      }
-      if (!canteenLookup.ok) {
-        if (canteenLookup.reason === 'ambiguous' && canteenLookup.rows?.length) {
-          const hint = canteenLookup.rows
-            .slice(0, 4)
-            .map((r) => r.name)
-            .filter(Boolean)
-            .join(', ');
-          const message = `More than one canteen matches. Type the full official name. Examples: ${hint}`;
-          setCanteenError(message);
-          setGeneralError(message);
-        } else {
-          const message =
-            'Canteen not found. Use the full canteen name or paste the canteen ID from your admin.';
-          setCanteenError(message);
-          setGeneralError(message);
-        }
-        return;
-      }
-
-      const canteenRow = canteenLookup.row;
-      if (canteenRow.is_open === false) {
-        const message = 'This canteen is closed. Please contact admin.';
-        setCanteenError(message);
-        setGeneralError(message);
+      const resolved = await resolveLockedCanteen();
+      if (!resolved.ok) {
+        setCanteenError(resolved.message);
+        setGeneralError(resolved.message);
         return;
       }
       setCanteenError('');
 
       const { error } = await completeSignupAfterEmailOtp(password, {
         full_name: fullName.trim(),
-        canteen_id: String(canteenRow.id),
-        college_id: canteenRow.college_id != null ? String(canteenRow.college_id) : undefined,
+        canteen_id: String(resolved.row.id),
+        college_id:
+          resolved.row.college_id != null ? String(resolved.row.college_id) : undefined,
       });
 
       if (error) {
@@ -422,7 +419,7 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
           returnKeyType="next"
           blurOnSubmit={false}
           onFocus={() => scrollFocusedIntoView(nameRef)}
-          onSubmitEditing={() => canteenRef.current?.focus()}
+          onSubmitEditing={() => emailRef.current?.focus()}
           accessibilityLabel="User name"
         />
       </View>
@@ -434,6 +431,7 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
           {
             backgroundColor: colors.inputBackground,
             borderColor: canteenError ? colors.error : colors.border,
+            opacity: 0.92,
           },
         ]}
       >
@@ -441,23 +439,13 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
         <TextInput
           ref={canteenRef}
           style={[styles.input, { color: colors.text }]}
-          placeholder="Canteen name"
+          placeholder={canteenLoading ? 'Loading canteen…' : 'Canteen'}
           placeholderTextColor={tertiary}
-          value={canteenName}
-          onChangeText={(t) => {
-            setCanteenName(t);
-            if (canteenError) setCanteenError('');
-          }}
-          autoCapitalize="none"
-          autoCorrect={false}
-          autoComplete="off"
-          textContentType="none"
-          editable={preOtpEditable}
-          returnKeyType="next"
-          blurOnSubmit={false}
-          onFocus={() => scrollFocusedIntoView(canteenRef)}
-          onSubmitEditing={() => emailRef.current?.focus()}
+          value={canteenLoading ? '' : canteenName}
+          editable={false}
+          selectTextOnFocus={false}
           accessibilityLabel="Canteen name"
+          accessibilityHint="Assigned automatically and cannot be changed"
         />
       </View>
       {canteenError ? (
@@ -476,7 +464,14 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
         onEmailSubmitEditing={() => {
           // Stay on email / send OTP — password unlocks only after verify.
         }}
-        sendEnabled={!!fullName.trim() && !!canteenName.trim() && emailLooksValid && !submitting}
+        sendEnabled={
+          !!fullName.trim() &&
+          !!canteenRow?.id &&
+          !!canteenName.trim() &&
+          !canteenLoading &&
+          emailLooksValid &&
+          !submitting
+        }
         onVerifiedChange={(v) => {
           setEmailVerified(v);
           if (v) {

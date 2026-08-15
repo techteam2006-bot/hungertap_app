@@ -1295,6 +1295,45 @@ const HomeScreen = ({ navigation, route }) => {
     return sortedItems;
   }, [menuItems, activeFilter, dietaryFilter, debouncedSearchQuery, priceSort, vegMode]);
 
+  // When false, OOS items are hidden behind "See out of stock items"; when true, menu extends with them.
+  const [showingOutOfStock, setShowingOutOfStock] = useState(false);
+
+  useEffect(() => {
+    setShowingOutOfStock(false);
+  }, [activeFilter, dietaryFilter, debouncedSearchQuery, priceSort, vegMode]);
+
+  const { availableMenuItems, outOfStockMenuItems } = useMemo(() => {
+    const available = [];
+    const outOfStock = [];
+    for (const item of filteredItems) {
+      if (item?.isAvailable === false) outOfStock.push(item);
+      else available.push(item);
+    }
+    return { availableMenuItems: available, outOfStockMenuItems: outOfStock };
+  }, [filteredItems]);
+
+  const menuListData = useMemo(() => {
+    const rows = [...availableMenuItems];
+    if (outOfStockMenuItems.length === 0) return rows;
+
+    rows.push({
+      __rowType: 'oos_header',
+      id: '__oos_header',
+      count: outOfStockMenuItems.length,
+    });
+
+    if (showingOutOfStock) {
+      rows.push(...outOfStockMenuItems);
+    } else {
+      rows.push({ __rowType: 'oos_see_more', id: '__oos_see_more' });
+    }
+    return rows;
+  }, [availableMenuItems, outOfStockMenuItems, showingOutOfStock]);
+
+  const handleSeeOutOfStockItems = useCallback(() => {
+    setShowingOutOfStock(true);
+  }, []);
+
   const handleAddToCart = useCallback((item) => {
     // Block only when the server has confirmed kitchen is closed
     if (kitchenConfirmedClosed) {
@@ -1432,11 +1471,37 @@ const HomeScreen = ({ navigation, route }) => {
   }, [activeFilter, colors, handleQuickActionPress, categoryScales]);
 
   const renderFoodItem = ({ item }) => {
-    // Safety check for item
-    if (!item || !item.id) {
-      return null;
+    if (!item) return null;
+
+    if (item.__rowType === 'oos_header') {
+      return (
+        <View style={styles.oosSectionHeader}>
+          <Text style={styles.oosSectionTitle}>
+            Out of stock{item.count > 0 ? ` (${item.count})` : ''}
+          </Text>
+        </View>
+      );
     }
-    
+
+    if (item.__rowType === 'oos_see_more') {
+      return (
+        <View style={styles.oosSeeMoreFooter}>
+          <TouchableOpacity
+            style={styles.oosSeeMoreButton}
+            onPress={handleSeeOutOfStockItems}
+            activeOpacity={0.65}
+            accessibilityRole="button"
+            accessibilityLabel="See out of stock items"
+          >
+            <Text style={styles.oosSeeMoreText}>See out of stock items</Text>
+            <AppIcon name="chevron-down" size={16} color="#8E8E93" />
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    if (!item.id) return null;
+
     const qty = getItemQuantity(item.id);
     return (
       <AnimatedFoodCard
@@ -1905,19 +1970,23 @@ const HomeScreen = ({ navigation, route }) => {
 
         <AnimatedFlatList
           ref={flatListRef}
-          data={filteredItems}
-          extraData={[cart, loadingMore, filteredItems.length]}
+          data={menuListData}
+          extraData={[cart, loadingMore, menuListData.length, showingOutOfStock]}
           keyExtractor={(item) =>
-            item?.id != null ? String(item.id) : `${item?.name || 'unknown'}-${item?.category || ''}`
+            item?.__rowType
+              ? String(item.id)
+              : item?.id != null
+                ? String(item.id)
+                : `${item?.name || 'unknown'}-${item?.category || ''}`
           }
           renderItem={renderFoodItem}
           showsVerticalScrollIndicator={false}
           contentInsetAdjustmentBehavior={Platform.OS === 'ios' ? 'never' : 'automatic'}
           automaticallyAdjustContentInsets={false}
-          scrollEnabled={filteredItems.length > 0}
-          alwaysBounceVertical={filteredItems.length > 0}
-          bounces={filteredItems.length > 0}
-          overScrollMode={filteredItems.length > 0 ? 'auto' : 'never'}
+          scrollEnabled={menuListData.length > 0}
+          alwaysBounceVertical={menuListData.length > 0}
+          bounces={menuListData.length > 0}
+          overScrollMode={menuListData.length > 0 ? 'auto' : 'never'}
           onEndReached={undefined}
           onEndReachedThreshold={undefined}
           initialNumToRender={16}
@@ -2943,6 +3012,35 @@ const styles = StyleSheet.create({
     paddingVertical: 48,
     paddingHorizontal: 20,
     minHeight: height * 0.28,
+  },
+  oosSectionHeader: {
+    marginTop: 4,
+    marginBottom: 6,
+    paddingHorizontal: width * 0.05,
+    paddingTop: 12,
+  },
+  oosSectionTitle: {
+    fontSize: 18,
+    ...getFontStyle('bold'),
+    color: '#E53935',
+    textAlign: 'left',
+  },
+  oosSeeMoreFooter: {
+    paddingTop: 4,
+    paddingBottom: 12,
+    alignItems: 'center',
+  },
+  oosSeeMoreButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+  },
+  oosSeeMoreText: {
+    fontSize: 14,
+    color: '#8E8E93',
+    marginBottom: 2,
+    ...getFontStyle('regular'),
   },
   emptyStateTitle: {
     fontSize: 20,

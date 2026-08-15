@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   Image,
   Animated,
   ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import AppIcon from '../components/AppIcon';
@@ -56,6 +57,7 @@ import {
   exceedsMaxOrderTotal,
   takeawayChargeForLines,
 } from '../lib/cartRules';
+import { pullRefreshControlProps } from '../lib/pullToRefresh';
 
 const { width, height } = Dimensions.get('window');
 
@@ -124,6 +126,7 @@ const createCartStyles = (colors, height) =>
   },
   scrollContent: {
     paddingBottom: 100,
+    flexGrow: 1,
   },
   emptyScrollContent: {
     flexGrow: 1,
@@ -714,6 +717,7 @@ const CartScreen = ({ navigation }) => {
     replaceCartItems,
     isTakeaway,
     setIsTakeaway,
+    refreshCart,
   } = useCart();
   
   const getTakeawayChargeForLines = (lines) => takeawayChargeForLines(lines, isTakeaway);
@@ -754,38 +758,114 @@ const CartScreen = ({ navigation }) => {
   const [gatewayLoading, setGatewayLoading] = useState(true);
   const [gatewayError, setGatewayError] = useState(false);
   const [selectedGateway, setSelectedGateway] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [allFoodItems, setAllFoodItems] = useState([]);
+  const [recommendationsLoading, setRecommendationsLoading] = useState(true);
+
+  const loadGateways = useCallback(async () => {
+    setGatewayLoading(true);
+    const res = await fetchActivePaymentGateways();
+
+    if (!res.success || !res.data) {
+      setGatewayError(true);
+      setGatewayLoading(false);
+      return;
+    }
+
+    const activeList = res.data;
+    setGateways(activeList);
+    setGatewayLoading(false);
+
+    if (activeList.length === 0) {
+      setGatewayError(true);
+      return;
+    }
+
+    setGatewayError(false);
+    setSelectedGateway((prev) => {
+      if (prev && activeList.some((g) => g.code === prev)) return prev;
+      const defaultGw = activeList.find((g) => g.is_default) || activeList[0];
+      return defaultGw.code;
+    });
+  }, []);
+
+  const transformMenuItem = useCallback(
+    (item) => ({
+      ...item,
+      id: item.id,
+      name: item.name,
+      description: item.description,
+      price: item.price || 0.0,
+      unit_price: item.price || 0.0,
+      total_price: (item.price || 0.0) * (item.quantity || 1),
+      special_instructions: item.special_instructions || '',
+      category: item.categories?.name || 'Other',
+      image: item.image_url,
+      isAvailable: deriveItemIsAvailable(item),
+      isVegetarian: item.is_vegetarian,
+      reviews: item.reviews_count,
+      ingredients: item.ingredients || [],
+      preparation: item.preparation || [],
+      cookingTime: item.cooking_time,
+      spiceLevel: item.spice_level,
+      calories: item.calories,
+    }),
+    []
+  );
+
+  const loadRecommendationMenu = useCallback(
+    async ({ forceRefresh = false } = {}) => {
+      try {
+        setRecommendationsLoading(true);
+        const canteenId = user?.id ? await getUserCanteenId(user.id) : null;
+        let resolvedCanteenId = canteenId;
+        if (!resolvedCanteenId && user?.id) {
+          try {
+            const last = await getLastRememberedCanteen();
+            if (last?.id) resolvedCanteenId = last.id;
+          } catch (_) {}
+        }
+        const { data, error } = await getMenu(resolvedCanteenId, {
+          forceRefresh,
+          onUpdate: (fresh) => {
+            if (!Array.isArray(fresh)) return;
+            setAllFoodItems(fresh.map(transformMenuItem));
+          },
+        });
+        if (error) {
+          console.error('Error fetching food items for recommendations:', error);
+        } else if (Array.isArray(data)) {
+          setAllFoodItems(data.map(transformMenuItem));
+        }
+      } catch (error) {
+        console.error('Error fetching food items:', error);
+      } finally {
+        setRecommendationsLoading(false);
+      }
+    },
+    [user?.id, transformMenuItem]
+  );
 
   useEffect(() => {
-    let isMounted = true;
-    async function loadGateways() {
-      setGatewayLoading(true);
-      const res = await fetchActivePaymentGateways();
-      if (!isMounted) return;
-
-      if (!res.success || !res.data) {
-        setGatewayError(true);
-        setGatewayLoading(false);
-        return;
-      }
-
-      const activeList = res.data;
-      setGateways(activeList);
-      setGatewayLoading(false);
-
-      if (activeList.length === 0) {
-        setGatewayError(true);
-        return;
-      }
-
-      setGatewayError(false);
-      const defaultGw = activeList.find((g) => g.is_default) || activeList[0];
-      setSelectedGateway(defaultGw.code);
-    }
     loadGateways();
-    return () => {
-      isMounted = false;
-    };
-  }, []);
+  }, [loadGateways]);
+
+  useEffect(() => {
+    loadRecommendationMenu();
+  }, [loadRecommendationMenu]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([
+        typeof refreshCart === 'function' ? refreshCart() : Promise.resolve(),
+        loadGateways(),
+        loadRecommendationMenu({ forceRefresh: true }),
+      ]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshCart, loadGateways, loadRecommendationMenu]);
 
   const canProceedCheckout = !gatewayLoading && !gatewayError && selectedGateway != null;
 
@@ -802,90 +882,6 @@ const CartScreen = ({ navigation }) => {
 
   // Get authenticated user ID (required by RLS policies)
   const getUserId = () => user?.id;
-
-  const [allFoodItems, setAllFoodItems] = useState([]);
-  const [recommendationsLoading, setRecommendationsLoading] = useState(true);
-
-  // Fetch food items for recommendations (same canteen as orders / menu)
-  useEffect(() => {
-    let cancelled = false;
-    const fetchFoodItems = async () => {
-      try {
-        setRecommendationsLoading(true);
-        const canteenId = user?.id ? await getUserCanteenId(user.id) : null;
-        if (cancelled) return;
-        // Offline: getUserCanteenId may be null — fall back to last remembered canteen.
-        let resolvedCanteenId = canteenId;
-        if (!resolvedCanteenId && user?.id) {
-          try {
-            const last = await getLastRememberedCanteen();
-            if (last?.id) resolvedCanteenId = last.id;
-          } catch (_) {}
-        }
-        const { data, error } = await getMenu(resolvedCanteenId, {
-          onUpdate: (fresh) => {
-            if (cancelled || !Array.isArray(fresh)) return;
-            const transformedItems = fresh.map((item) => ({
-              ...item,
-              id: item.id,
-              name: item.name,
-              description: item.description,
-              price: item.price || 0.0,
-              unit_price: item.price || 0.0,
-              total_price: (item.price || 0.0) * (item.quantity || 1),
-              special_instructions: item.special_instructions || '',
-              category: item.categories?.name || 'Other',
-              image: item.image_url,
-              isAvailable: deriveItemIsAvailable(item),
-              isVegetarian: item.is_vegetarian,
-              reviews: item.reviews_count,
-              ingredients: item.ingredients || [],
-              preparation: item.preparation || [],
-              cookingTime: item.cooking_time,
-              spiceLevel: item.spice_level,
-              calories: item.calories,
-            }));
-            setAllFoodItems(transformedItems);
-          },
-        });
-        if (cancelled) return;
-        if (error) {
-          console.error('Error fetching food items for recommendations:', error);
-        } else if (Array.isArray(data)) {
-          const transformedItems = data.map((item) => ({
-            ...item,
-            id: item.id,
-            name: item.name,
-            description: item.description,
-            price: item.price || 0.0,
-            unit_price: item.price || 0.0,
-            total_price: (item.price || 0.0) * (item.quantity || 1),
-            special_instructions: item.special_instructions || '',
-            category: item.categories?.name || 'Other',
-            image: item.image_url,
-            isAvailable: deriveItemIsAvailable(item),
-            isVegetarian: item.is_vegetarian,
-            reviews: item.reviews_count,
-            ingredients: item.ingredients || [],
-            preparation: item.preparation || [],
-            cookingTime: item.cooking_time,
-            spiceLevel: item.spice_level,
-            calories: item.calories,
-          }));
-          setAllFoodItems(transformedItems);
-        }
-      } catch (error) {
-        console.error('Error fetching food items:', error);
-      } finally {
-        if (!cancelled) setRecommendationsLoading(false);
-      }
-    };
-
-    fetchFoodItems();
-    return () => {
-      cancelled = true;
-    };
-  }, [user?.id]);
 
   useEffect(() => {
     if (!checkoutErrorToast) return undefined;
@@ -1247,6 +1243,25 @@ const CartScreen = ({ navigation }) => {
     <View style={styles.container}> 
       <BrandYellowStrip />
 
+      <View style={[styles.header, { backgroundColor: colors.elevatedSurface }]}>
+        <TouchableOpacity
+          onPress={() => navigateBackFromCart(navigation)}
+          style={styles.backButton}
+        >
+          <AppIcon name="arrow-back" size={24} color={colors.text} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Cart</Text>
+        <View style={styles.headerClearButton}>
+          {cartItems.length > 0 && (
+            <TouchableOpacity onPress={handleClearCart}>
+              <AppIcon name="trash-outline" size={24} color={isDarkMode ? colors.error : '#FF9999'} />
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+
+      <View style={styles.separator} />
+
       <ScrollView
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}
@@ -1254,30 +1269,18 @@ const CartScreen = ({ navigation }) => {
           styles.scrollContent,
           cartItems.length === 0 && styles.emptyScrollContent
         ]}
+        refreshControl={
+          <RefreshControl
+            {...pullRefreshControlProps({
+              refreshing,
+              onRefresh,
+              tintColor: colors.primary,
+              progressOffset: 0,
+              androidBackgroundColor: colors.elevatedSurface,
+            })}
+          />
+        }
       >
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity
-            onPress={() => navigateBackFromCart(navigation)}
-            style={styles.backButton}
-          >
-            <AppIcon name="arrow-back" size={24} color={colors.text} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Cart</Text>
-          <View style={styles.headerClearButton}>
-            {cartItems.length > 0 && (
-              <TouchableOpacity 
-                onPress={handleClearCart}
-              >
-                <AppIcon name="trash-outline" size={24} color={isDarkMode ? colors.error : '#FF9999'} />
-              </TouchableOpacity>
-            )}
-          </View>
-        </View>
-
-        {/* Separator Line */}
-        <View style={styles.separator} />
-
         {cartItems.length > 0 && orderOverLimit ? (
           <View
             style={[

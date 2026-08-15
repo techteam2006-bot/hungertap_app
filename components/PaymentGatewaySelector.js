@@ -5,24 +5,20 @@ import AppIcon from './AppIcon';
 import { appTypography } from '../lib/darkThemeConfig';
 
 /**
- * Format the gateway title to cleanly display only the gateway name
- * and its environment in brackets as requested:
- * - Cashfree (Production)
- * - Easebuzz (Testing)
+ * Format gateway title for the cart selector (name only — no Production/Testing labels).
  */
 function formatGatewayDisplayName(gw) {
   const code = String(gw?.code || '').toLowerCase();
   const name = String(gw?.display_name || '').trim();
 
   if (code.includes('cashfree') || name.toLowerCase().includes('cashfree')) {
-    return 'Cashfree (Production)';
+    return 'Cashfree';
   }
   if (code.includes('easebuzz') || name.toLowerCase().includes('easebuzz')) {
-    return 'Easebuzz (Testing)';
+    return 'Easebuzz';
   }
 
-  // Generic fallback if new gateway is added
-  return name.replace(/\s*\([^)]*\)/g, '').trim();
+  return name.replace(/\s*\([^)]*\)/g, '').trim() || 'Payment';
 }
 
 export default function PaymentGatewaySelector({ gateways, selectedGateway, onSelectGateway }) {
@@ -117,7 +113,7 @@ export default function PaymentGatewaySelector({ gateways, selectedGateway, onSe
                   ]}
                   numberOfLines={1}
                 >
-                  UPI (GPay, PhonePe, Paytm), Cards & NetBanking
+                  UPI, Cards & NetBanking
                 </Text>
               </View>
             </View>

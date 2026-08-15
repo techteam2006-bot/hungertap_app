@@ -818,7 +818,7 @@ const OrderStatusScreen = ({ navigation, route }) => {
           description:
             status === 'payment_cancelled'
               ? 'Payment was cancelled for this order.'
-              : 'Your order has been cancelled by the vendor.',
+              : 'Your order has been cancelled by the vendor. A refund will be processed to your original payment method.',
           time: cancelledTime,
           completed: true,
           failed: true,
@@ -910,7 +910,7 @@ const OrderStatusScreen = ({ navigation, route }) => {
         {
           id: 4,
           title: 'Not Picked Up',
-          description: 'Not picked up before the canteen closed. No automatic refund.',
+          description: 'Not picked up before the canteen closed. No refund.',
           time: pickupFailedTime,
           completed: true,
           failed: true,
@@ -1075,6 +1075,8 @@ const OrderStatusScreen = ({ navigation, route }) => {
     ) : null;
 
   const isPendingPayment = currentOrder.status === 'pending_payment';
+  const orderIsCancelledByVendor =
+    isCancelledLike(currentOrder.status) && currentOrder.status !== 'payment_cancelled';
   const pendingStripBg = isDarkMode ? 'rgba(245, 158, 11, 0.22)' : '#FFF8E6';
   const failedStripBg = isDarkMode ? 'rgba(239, 68, 68, 0.2)' : '#FFEBEB';
 
@@ -1168,6 +1170,29 @@ const OrderStatusScreen = ({ navigation, route }) => {
                 </View>
               </View>
             </View>
+          ) : orderIsCancelledByVendor ? (
+            <View style={[styles.successStrip, { backgroundColor: failedStripBg }]}>
+              <View style={[styles.successContent, { flexWrap: 'wrap' }]}>
+                <AppIcon name="close-circle" size={20} color={colors.error} style={{ marginTop: 2 }} />
+                <View style={[styles.successTextContainer, { flex: 1, minWidth: 0 }]}>
+                  <Text style={[styles.successTitle, { color: colors.text }]}>Cancelled by vendor</Text>
+                  <Text style={[styles.successInfoLine, { color: colors.textSecondary }]}>
+                    Your order was cancelled by the vendor. A refund will be processed to your original payment method.
+                  </Text>
+                  <Text style={[styles.paymentFailedRefundNote, { color: colors.textSecondary }]}>
+                    Refunds usually complete within a few working days (typically 5–7 business days). For further support,{' '}
+                    <Text
+                      style={[styles.paymentFailedContactLink, { color: colors.warning }]}
+                      onPress={handlePaymentSupportContact}
+                      suppressHighlighting
+                    >
+                      contact us
+                    </Text>
+                    .
+                  </Text>
+                </View>
+              </View>
+            </View>
           ) : orderIsPickupFailed ? (
             <View style={[styles.successStrip, { backgroundColor: failedStripBg }]}>
               <View style={[styles.successContent, { flexWrap: 'wrap' }]}>
@@ -1175,7 +1200,7 @@ const OrderStatusScreen = ({ navigation, route }) => {
                 <View style={[styles.successTextContainer, { flex: 1, minWidth: 0 }]}>
                   <Text style={[styles.successTitle, { color: colors.text }]}>Not picked up</Text>
                   <Text style={[styles.successInfoLine, { color: colors.textSecondary }]}>
-                    Your order was not picked up before the canteen closed. There is no automatic refund for uncollected ready
+                    Your order was not picked up before the canteen closed. There is no refund for uncollected ready
                     items.
                   </Text>
                 </View>

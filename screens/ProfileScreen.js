@@ -438,12 +438,13 @@ const ProfileScreen = ({ navigation }) => {
             styles.nameCard,
             {
               borderColor: colors.brandYellow,
+              borderTopColor: colors.brandYellow,
+              borderTopWidth: 4,
               backgroundColor: colors.elevatedSurface,
               shadowColor: colors.shadow,
             },
           ]}
         >
-          <View style={[styles.nameCardAccent, { backgroundColor: colors.brandYellow }]} />
           <View style={styles.nameCardBody}>
             <LinearGradient
               colors={[colors.brandYellow, '#D4A017']}
@@ -789,16 +790,11 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 1,
     marginBottom: 20,
+    overflow: 'hidden',
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.08,
     shadowRadius: 14,
     elevation: 5,
-  },
-  nameCardAccent: {
-    height: 4,
-    width: '100%',
-    borderTopLeftRadius: 19,
-    borderTopRightRadius: 19,
   },
   nameCardBody: {
     alignItems: 'center',

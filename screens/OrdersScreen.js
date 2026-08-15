@@ -22,7 +22,7 @@ import { useAuth } from '../lib/AuthContext';
 import { useCart } from '../lib/CartContext';
 import { supabase, deriveItemIsAvailable } from '../lib/supabase';
 import { pickLineRowsFromOrderRow } from '../lib/orderQueries';
-import { getOrders } from '../lib/ordersCache';
+import { getOrders, getMoreOrders } from '../lib/ordersCache';
 import { getLineItemIdFromRow, resolveOrderHeaderTotalFromRows } from '../lib/orderLineRowMoney';
 import { pxToPercentX, pxToPercentY } from '../utils/percent';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -51,12 +51,13 @@ const OrdersScreen = ({ navigation }) => {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMoreOrders, setHasMoreOrders] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [activeStatus, setActiveStatus] = useState('all');
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [reorderingOrderId, setReorderingOrderId] = useState(null);
-  const [visibleOrderCount, setVisibleOrderCount] = useState(10);
   const searchInputRef = useRef(null);
   const isFetchingRef = useRef(false);
   const pollingIntervalRef = useRef(null);
@@ -69,11 +70,49 @@ const OrdersScreen = ({ navigation }) => {
     }
   };
 
+  const mapOrdersPayload = useCallback((ordersData) => {
+    const lineName = (oi) => String(oi?.item_name || oi?.items?.name || 'Item').trim();
+    return (ordersData || []).map((order) => {
+      const rows = pickLineRowsFromOrderRow(order);
+      const counts = {};
+      for (const oi of rows) {
+        const name = lineName(oi);
+        if (!name) continue;
+        const quantity = Number(oi?.quantity ?? 1) || 1;
+        counts[name] = (counts[name] || 0) + quantity;
+      }
+      const itemSummaryFromRows = Object.entries(counts)
+        .map(([name, qty]) => `${name} (${qty})`)
+        .join(', ');
+
+      const itemCount =
+        order.item_count ||
+        rows.reduce((sum, oi) => sum + (Number(oi?.quantity ?? 1) || 1), 0);
+
+      const persistedItemName =
+        order.item_name != null && String(order.item_name).trim() !== ''
+          ? String(order.item_name).trim()
+          : null;
+
+      const total_amount = resolveOrderHeaderTotalFromRows(order, rows);
+      const item_name = persistedItemName || itemSummaryFromRows || null;
+
+      return {
+        ...order,
+        item_name,
+        total_amount,
+        item_count: itemCount,
+        user_id: order.placed_by,
+      };
+    });
+  }, []);
+
   const fetchOrders = async (options = { silent: false, updatedOrderId: null }) => {
     try {
       // ✅ crash prevention added — no user ⇒ skip protected calls
       if (!user?.id) {
         setOrders([]);
+        setHasMoreOrders(false);
         if (!options.silent) setLoading(false);
         isFetchingRef.current = false;
         return;
@@ -81,57 +120,24 @@ const OrdersScreen = ({ navigation }) => {
 
       if (!options.silent) setLoading(true);
       isFetchingRef.current = true;
-      
+
       console.log('🔍 Fetching orders for user:', user?.id);
-      
-      const { data: ordersData, error: ordersError } = await getOrders(
-        supabase,
-        user.id,
-        { forceRefresh: Boolean(options.forceRefresh) }
-      );
+
+      const {
+        data: ordersData,
+        error: ordersError,
+        hasMore,
+      } = await getOrders(supabase, user.id, {
+        forceRefresh: Boolean(options.forceRefresh),
+      });
 
       if (ordersError && !(Array.isArray(ordersData) && ordersData.length > 0)) {
         console.error('❌ Error fetching orders:', ordersError);
         if (!options.silent) Alert.alert('Error', 'Failed to load orders');
       } else {
         console.log('✅ Orders fetched successfully:', ordersData?.length || 0);
-        const lineName = (oi) => String(oi?.item_name || oi?.items?.name || 'Item').trim();
-
-        const mapped = (ordersData || []).map((order) => {
-          const rows = pickLineRowsFromOrderRow(order);
-          const counts = {};
-          for (const oi of rows) {
-            const name = lineName(oi);
-            if (!name) continue;
-            const quantity = Number(oi?.quantity ?? 1) || 1;
-            counts[name] = (counts[name] || 0) + quantity;
-          }
-          const itemSummaryFromRows = Object.entries(counts)
-            .map(([name, qty]) => `${name} (${qty})`)
-            .join(', ');
-
-          const itemCount =
-            order.item_count ||
-            rows.reduce((sum, oi) => sum + (Number(oi?.quantity ?? 1) || 1), 0);
-
-          const persistedItemName =
-            order.item_name != null && String(order.item_name).trim() !== ''
-              ? String(order.item_name).trim()
-              : null;
-
-          const total_amount = resolveOrderHeaderTotalFromRows(order, rows);
-          const item_name = persistedItemName || itemSummaryFromRows || null;
-
-          return {
-            ...order,
-            item_name,
-            total_amount,
-            item_count: itemCount,
-            user_id: order.placed_by,
-          };
-        });
-
-        setOrders(mapped);
+        setOrders(mapOrdersPayload(ordersData));
+        setHasMoreOrders(Boolean(hasMore));
       }
     } catch (error) {
       console.error('❌ Error fetching orders:', error);
@@ -496,6 +502,7 @@ const OrdersScreen = ({ navigation }) => {
 
   const statusFilters = useMemo(() => ORDER_STATUS_FILTERS, []);
 
+  // Search/filter applies to loaded pages only (server pages chronologically).
   const filteredOrders = useMemo(() => {
     const q = debouncedQuery;
     return orders.filter((order) => {
@@ -516,24 +523,28 @@ const OrdersScreen = ({ navigation }) => {
     });
   }, [orders, debouncedQuery, activeStatus, parseOrderSummary]);
 
-  // Reset pagination when search/filter changes
-  useEffect(() => {
-    setVisibleOrderCount(10);
-  }, [debouncedQuery, activeStatus]);
+  const visibleOrders = filteredOrders;
 
-  const visibleOrders = useMemo(
-    () => filteredOrders.slice(0, visibleOrderCount),
-    [filteredOrders, visibleOrderCount]
-  );
-
-  const hasMoreOrders = visibleOrderCount < filteredOrders.length;
-
-  const handleSeeMoreOrders = useCallback(() => {
-    setVisibleOrderCount((count) => count + 10);
-  }, []);
+  const handleSeeMoreOrders = useCallback(async () => {
+    if (!user?.id || loadingMore || !hasMoreOrders || isFetchingRef.current) return;
+    setLoadingMore(true);
+    try {
+      const { data, error, hasMore } = await getMoreOrders(supabase, user.id);
+      if (error && !(Array.isArray(data) && data.length > 0)) {
+        Alert.alert('Error', 'Could not load more orders');
+        return;
+      }
+      setOrders(mapOrdersPayload(data));
+      setHasMoreOrders(Boolean(hasMore));
+    } catch (e) {
+      Alert.alert('Error', 'Could not load more orders');
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [user?.id, loadingMore, hasMoreOrders, mapOrdersPayload]);
 
   const renderOrdersFooter = useCallback(() => {
-    if (!hasMoreOrders || filteredOrders.length === 0) return null;
+    if (!hasMoreOrders || orders.length === 0) return null;
     return (
       <View style={styles.seeMoreFooter}>
         <TouchableOpacity
@@ -542,13 +553,14 @@ const OrdersScreen = ({ navigation }) => {
           activeOpacity={0.65}
           accessibilityRole="button"
           accessibilityLabel="See more orders"
+          disabled={loadingMore}
         >
-          <Text style={styles.seeMoreText}>See more</Text>
-          <AppIcon name="chevron-down" size={16} color="#8E8E93" />
+          <Text style={styles.seeMoreText}>{loadingMore ? 'Loading…' : 'See more'}</Text>
+          {!loadingMore ? <AppIcon name="chevron-down" size={16} color="#8E8E93" /> : null}
         </TouchableOpacity>
       </View>
     );
-  }, [hasMoreOrders, filteredOrders.length, handleSeeMoreOrders]);
+  }, [hasMoreOrders, orders.length, handleSeeMoreOrders, loadingMore]);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.pageBackground }]}>

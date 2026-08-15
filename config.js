@@ -86,9 +86,17 @@ if (typeof __DEV__ !== 'undefined' && __DEV__ && (!SUPABASE_URL || !SUPABASE_ANO
   );
 }
 
+/**
+ * Signup locks to this canteen by id (name is loaded from Supabase so renames still work).
+ * Never show this id in the UI.
+ */
+const SIGNUP_FIXED_CANTEEN_ID = '64cc4fb4-1f94-43e1-afce-fd6d0acf1005';
+
 export const CONFIG = {
   SUPABASE_URL,
   SUPABASE_ANON_KEY,
+
+  SIGNUP_FIXED_CANTEEN_ID,
 
   CART_STORAGE,
 

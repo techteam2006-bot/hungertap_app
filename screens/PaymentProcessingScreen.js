@@ -140,7 +140,7 @@ function buildCashfreeWebJsSdkHtml(sessionId, isSandbox) {
   <body>
     <div style="text-align:center;">
       <div class="spinner"></div>
-      <div style="font-size:16px;font-weight:600;color:#1A1A1A;margin-bottom:4px;">HungerTap Checkout</div>
+      <div style="font-size:16px;font-weight:600;color:#1A1A1A;margin-bottom:4px;">Checkout</div>
       <div style="font-size:14px;color:#666666;">Opening secure payment…</div>
     </div>
     <script>
@@ -435,8 +435,29 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
   );
 
   const finalizeFailure = useCallback(() => {
-    leaveCheckout();
-  }, [leaveCheckout]);
+    if (finalizedRef.current) return;
+    finalizedRef.current = true;
+    allowLeaveRef.current = true;
+    blockExitRef.current = false;
+    setBlockExit(false);
+    if (stuckTimerRef.current) {
+      clearTimeout(stuckTimerRef.current);
+      stuckTimerRef.current = null;
+    }
+    Alert.alert(
+      'Payment failed',
+      'Your payment could not be completed. Return to cart to place the order again.',
+      [
+        {
+          text: 'OK',
+          onPress: () => {
+            resetNavigationToCart(navigation);
+          },
+        },
+      ],
+      { cancelable: false }
+    );
+  }, [navigation]);
 
   /**
    * Last resort: abandon the current order and buy a fresh checkout session.
@@ -586,22 +607,10 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
     switchToEasebuzzWebViewFallback,
   });
 
+  /** Hardware / nav back: cancel silently (no confirm dialog) and leave checkout. */
   const promptAbandonCheckout = useCallback(() => {
     if (finalizedRef.current || cancelInFlightRef.current) return true;
-    Alert.alert(
-      'Cancel payment?',
-      'If you go back now, this payment will be cancelled and you will need to place the order again.',
-      [
-        { text: 'Stay', style: 'cancel' },
-        {
-          text: 'OK',
-          style: 'destructive',
-          onPress: () => {
-            finalizeCancel({ fromGateway: false });
-          },
-        },
-      ]
-    );
+    finalizeCancel({ fromGateway: false });
     return true;
   }, [finalizeCancel]);
 
@@ -903,34 +912,21 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
         return;
       }
       e.preventDefault();
-      Alert.alert(
-        'Cancel payment?',
-        'If you go back now, this payment will be cancelled and you will need to place the order again.',
-        [
-          { text: 'Stay', style: 'cancel' },
-          {
-            text: 'OK',
-            style: 'destructive',
-            onPress: () => {
-              cancelInFlightRef.current = true;
-              finalizedRef.current = true;
-              allowLeaveRef.current = true;
-              blockExitRef.current = false;
-              setBlockExit(false);
-              if (stuckTimerRef.current) {
-                clearTimeout(stuckTimerRef.current);
-                stuckTimerRef.current = null;
-              }
-              triggerGatewayCheckoutCancel(webRef);
-              cancelOwnPendingPayment({ supabaseClient: supabase, orderId: checkoutOrderId }).catch(() => {});
-              navigation.dispatch(e.data.action);
-            },
-          },
-        ]
-      );
+      cancelInFlightRef.current = true;
+      finalizedRef.current = true;
+      allowLeaveRef.current = true;
+      blockExitRef.current = false;
+      setBlockExit(false);
+      if (stuckTimerRef.current) {
+        clearTimeout(stuckTimerRef.current);
+        stuckTimerRef.current = null;
+      }
+      triggerGatewayCheckoutCancel(webRef);
+      cancelOwnPendingPayment({ supabaseClient: supabase, orderId: checkoutOrderId }).catch(() => {});
+      navigation.dispatch(e.data.action);
     });
     return unsubscribe;
-  }, [navigation, resolveGatewayCancellation]);
+  }, [navigation, checkoutOrderId]);
 
   useEffect(() => {
     if (!checkoutOrderId || !isValidOrderUuid(checkoutOrderId)) {
@@ -1053,7 +1049,7 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
           style={[styles.headerTitle, { color: colors.text, fontFamily: appTypography.bold }]}
           numberOfLines={1}
         >
-          HungerTap
+          Checkout
         </Text>
       </View>
 
