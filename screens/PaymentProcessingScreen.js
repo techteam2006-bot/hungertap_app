@@ -36,6 +36,7 @@ import {
   describeCashfreeSdkAvailability,
   describeCashfreeSdkError,
   isCashfreeUserCancelError,
+  isCashfreeLaunchFailureError,
   configureCashfreeCallbacks,
   clearCashfreeCallbacks,
   startCashfreeCheckout,
@@ -44,12 +45,25 @@ import {
   isEasebuzzNativeSdkAvailable,
   startEasebuzzCheckout,
 } from '../lib/easebuzzCheckout';
+import {
+  isRazorpayNativeSdkAvailable,
+  describeRazorpaySdkAvailability,
+  isRazorpayLaunchFailureError,
+  startRazorpayCheckout,
+} from '../lib/razorpayCheckout';
+import { postVerifyRazorpayPayment } from '../lib/verifyRazorpayPayment';
+import { CONFIG } from '../config';
 
 const POLL_MS = 2500;
 const STUCK_MS = 180000;
-/** Wait this long for native SDK UI before falling back to hosted checkout WebView. */
+/**
+ * Wait this long for native SDK UI to present before falling back to WebView.
+ * Once the SDK reports that checkout opened (or doPayment returns), the timer
+ * must not fire — otherwise a slow payer gets a second checkout after cancel/pay.
+ */
 const SDK_FALLBACK_MS = 30000;
 const WEBVIEW_OVERLAY_MAX_MS = 5000;
+/** Ignore transient order statuses while checkout is still opening. */
 const CHECKOUT_LAUNCH_GRACE_MS = 35000;
 /**
  * `enforce_order_rate_limits` Guard 1: 5s cooldown between a student's orders
@@ -64,26 +78,53 @@ const CHECKOUT_LAUNCH_GRACE_MS = 35000;
 const ORDER_COOLDOWN_MS = 6000;
 
 /**
- * Both gateways run through their native SDK. Easebuzz additionally keeps the
- * server-issued `payment_url` as a WebView fallback for runtimes without the
- * native module (Expo Go, or a launch failure).
+ * Cashfree, Easebuzz, and Razorpay fall back to WebView when the native module is
+ * missing (Expo Go), launch fails, or Play Store / sideload checks block the SDK.
  */
 const MODE = {
   CASHFREE_SDK: 'cashfree-sdk',
   CASHFREE_WEBVIEW: 'cashfree-webview',
   EASEBUZZ_SDK: 'easebuzz-sdk',
   EASEBUZZ_WEBVIEW: 'easebuzz-webview',
+  RAZORPAY_SDK: 'razorpay-sdk',
+  RAZORPAY_WEBVIEW: 'razorpay-webview',
   UNAVAILABLE: 'unavailable',
 };
 
-const SDK_MODES = [MODE.CASHFREE_SDK, MODE.EASEBUZZ_SDK];
+const SDK_MODES = [MODE.CASHFREE_SDK, MODE.EASEBUZZ_SDK, MODE.RAZORPAY_SDK];
+
+function canUseRazorpayWebViewFallback({
+  activePaymentUrl,
+  razorpayKeyId,
+  razorpayOrderId,
+  razorpayAmountPaise,
+}) {
+  if (isAllowedCheckoutUrl(activePaymentUrl)) return true;
+  return !!(razorpayKeyId && razorpayOrderId && razorpayAmountPaise);
+}
 
 function resolveInitialCheckoutMode({
   isCashfree,
+  isRazorpay,
   cashfreeSessionId,
   activePaymentSessionId,
   activePaymentUrl,
+  razorpayKeyId,
+  razorpayOrderId,
+  razorpayAmountPaise,
 }) {
+  if (isRazorpay) {
+    const webOk = canUseRazorpayWebViewFallback({
+      activePaymentUrl,
+      razorpayKeyId,
+      razorpayOrderId,
+      razorpayAmountPaise,
+    });
+    if (!webOk) return MODE.UNAVAILABLE;
+    if (isRazorpayNativeSdkAvailable()) return MODE.RAZORPAY_SDK;
+    return MODE.RAZORPAY_WEBVIEW;
+  }
+
   if (isCashfree) {
     if (!cashfreeSessionId) return MODE.UNAVAILABLE;
     if (isCashfreeNativeSdkAvailable()) return MODE.CASHFREE_SDK;
@@ -172,6 +213,100 @@ function buildCashfreeWebJsSdkHtml(sessionId, isSandbox) {
 </html>`;
 }
 
+/** Escape values embedded in Razorpay WebView HTML. */
+function escapeWebEmbed(value) {
+  return String(value || '')
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/</g, '\\u003c');
+}
+
+/**
+ * In-app Razorpay checkout.js fallback when the native module is unavailable or
+ * blocked (Expo Go, sideloaded APK Play Store check, init failure).
+ */
+function buildRazorpayWebJsSdkHtml(keyId, razorpayOrderId, amountPaise, orderUuid, paymentId) {
+  const key = escapeWebEmbed(keyId);
+  const orderId = escapeWebEmbed(razorpayOrderId);
+  const amount = escapeWebEmbed(amountPaise);
+  const appOrderId = escapeWebEmbed(orderUuid);
+  const payId = escapeWebEmbed(paymentId);
+
+  return `<!DOCTYPE html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+    <style>
+      body {
+        margin: 0; padding: 0;
+        background-color: #FFFFFF; color: #1A1A1A;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        display: flex; align-items: center; justify-content: center; height: 100vh;
+      }
+      .spinner {
+        width: 40px; height: 40px;
+        border: 4px solid rgba(0,0,0,0.08); border-left-color: #FFB301;
+        border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px auto;
+      }
+      @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+  </head>
+  <body>
+    <div style="text-align:center;">
+      <div class="spinner"></div>
+      <div style="font-size:16px;font-weight:600;color:#1A1A1A;margin-bottom:4px;">Checkout</div>
+      <div style="font-size:14px;color:#666666;">Opening secure payment…</div>
+    </div>
+    <script>
+      (function () {
+        function openCheckout() {
+          if (!window.Razorpay) return;
+          var options = {
+            key: "${key}",
+            amount: "${amount}",
+            currency: "INR",
+            order_id: "${orderId}",
+            name: "HungerTap",
+            description: "HungerTap order",
+            theme: { color: "#FFB301" },
+            notes: { order_id: "${appOrderId}", payment_id: "${payId}" },
+            handler: function () {
+              window.location.href = "hungertap://payment-success";
+            },
+            modal: {
+              ondismiss: function () {
+                window.location.href = "hungertap://payment-cancel";
+              }
+            }
+          };
+          try {
+            var rzp = new Razorpay(options);
+            rzp.on("payment.failed", function () {
+              window.location.href = "hungertap://payment-failure";
+            });
+            rzp.open();
+          } catch (e) {
+            console.error("Razorpay checkout error:", e);
+          }
+        }
+        var sdkScript = document.querySelector('script[src*="checkout.razorpay.com"]');
+        if (window.Razorpay) {
+          openCheckout();
+        } else if (sdkScript) {
+          sdkScript.addEventListener("load", openCheckout);
+          sdkScript.addEventListener("error", function () {
+            console.error("Razorpay SDK script failed to load");
+          });
+        } else {
+          setTimeout(openCheckout, 1500);
+        }
+      })();
+    </script>
+  </body>
+</html>`;
+}
+
 /** UPI / wallet deep links opened from gateway WebViews on Android. */
 const EXTERNAL_PAYMENT_SCHEMES = [
   'upi:',
@@ -190,27 +325,45 @@ function isExternalPaymentAppUrl(url) {
 }
 
 function isWebViewCheckoutMode(mode) {
-  return mode === MODE.CASHFREE_WEBVIEW || mode === MODE.EASEBUZZ_WEBVIEW;
+  return (
+    mode === MODE.CASHFREE_WEBVIEW ||
+    mode === MODE.EASEBUZZ_WEBVIEW ||
+    mode === MODE.RAZORPAY_WEBVIEW
+  );
 }
 
-/** Fall back from native SDK to checkout WebView when SDK UI never appears. */
+/**
+ * Fall back from native SDK to WebView only when the SDK never reported that
+ * checkout UI opened. Paying or cancelling after open must not reopen WebView.
+ */
 function useGatewayLaunchFallback({
   mode,
   isCashfree,
+  isRazorpay,
   activePaymentUrl,
+  sdkUiPresentedRef,
   switchToCashfreeWebViewFallback,
   switchToEasebuzzWebViewFallback,
+  switchToRazorpayWebViewFallback,
+  onSdkLaunchTimeout,
 }) {
   useEffect(() => {
     if (!SDK_MODES.includes(mode)) return undefined;
 
     const timer = setTimeout(() => {
+      if (sdkUiPresentedRef?.current) return;
       if (isCashfree) {
         switchToCashfreeWebViewFallback?.();
         return;
       }
+      if (isRazorpay || mode === MODE.RAZORPAY_SDK) {
+        switchToRazorpayWebViewFallback?.();
+        return;
+      }
       if (isAllowedCheckoutUrl(activePaymentUrl)) {
         switchToEasebuzzWebViewFallback?.();
+      } else {
+        onSdkLaunchTimeout?.();
       }
     }, SDK_FALLBACK_MS);
 
@@ -218,9 +371,13 @@ function useGatewayLaunchFallback({
   }, [
     mode,
     isCashfree,
+    isRazorpay,
     activePaymentUrl,
+    sdkUiPresentedRef,
     switchToCashfreeWebViewFallback,
     switchToEasebuzzWebViewFallback,
+    switchToRazorpayWebViewFallback,
+    onSdkLaunchTimeout,
   ]);
 }
 
@@ -263,7 +420,12 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
     orderItems = [],
     orderTotal = 0,
     isTakeaway = false,
+    razorpayKeyId: initialRazorpayKeyId = '',
+    razorpayOrderId: initialRazorpayOrderId = '',
+    razorpayAmountPaise: initialRazorpayAmountPaise = '',
   } = route.params || {};
+
+  const applyOutcomeRef = useRef(null);
 
   const finalizedRef = useRef(false);
   const stuckTimerRef = useRef(null);
@@ -273,6 +435,8 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
   const allowLeaveRef = useRef(false);
   const blockExitRef = useRef(true);
   const sdkStartedRef = useRef(false);
+  /** True once native checkout UI presented (or launch was accepted). */
+  const sdkUiPresentedRef = useRef(false);
   const checkoutOpenedAtRef = useRef(Date.now());
   const refreshInFlightRef = useRef(false);
   const webViewFallbackRequestedRef = useRef(false);
@@ -310,6 +474,10 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
   }, [blockExit]);
 
   const isCashfree = gateway === 'cashfree';
+  const isRazorpay = gateway === 'razorpay';
+  const razorpayKeyId = String(initialRazorpayKeyId || '').trim();
+  const razorpayOrderId = String(initialRazorpayOrderId || '').trim();
+  const razorpayAmountPaise = String(initialRazorpayAmountPaise || '').trim();
   const cashfreeOrderId = useMemo(
     () => String(initialCashfreeOrderId || checkoutOrderId || '').trim(),
     [initialCashfreeOrderId, checkoutOrderId]
@@ -323,12 +491,16 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
   const [mode, setMode] = useState(() =>
     resolveInitialCheckoutMode({
       isCashfree,
+      isRazorpay,
       cashfreeSessionId: normalizeCashfreeSessionId(
         initialPaymentSessionId != null ? String(initialPaymentSessionId).trim() : ''
       ),
       activePaymentSessionId:
         initialPaymentSessionId != null ? String(initialPaymentSessionId).trim() : '',
       activePaymentUrl: String(initialPaymentUrl || '').trim(),
+      razorpayKeyId: String(initialRazorpayKeyId || '').trim(),
+      razorpayOrderId: String(initialRazorpayOrderId || '').trim(),
+      razorpayAmountPaise: String(initialRazorpayAmountPaise || '').trim(),
     })
   );
 
@@ -341,9 +513,36 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
         baseUrl: isSandbox ? 'https://sandbox.cashfree.com' : 'https://payments.cashfree.com',
       };
     }
+    if (mode === MODE.RAZORPAY_WEBVIEW) {
+      const url = String(activePaymentUrl || '').trim();
+      if (isAllowedCheckoutUrl(url)) return { uri: url };
+      if (razorpayKeyId && razorpayOrderId && razorpayAmountPaise) {
+        return {
+          html: buildRazorpayWebJsSdkHtml(
+            razorpayKeyId,
+            razorpayOrderId,
+            razorpayAmountPaise,
+            checkoutOrderId,
+            activePaymentId
+          ),
+          baseUrl: 'https://api.razorpay.com',
+        };
+      }
+      return null;
+    }
     const url = String(activePaymentUrl || '').trim();
     return isAllowedCheckoutUrl(url) ? { uri: url } : null;
-  }, [mode, cashfreeSessionId, environment, activePaymentUrl]);
+  }, [
+    mode,
+    cashfreeSessionId,
+    environment,
+    activePaymentUrl,
+    razorpayKeyId,
+    razorpayOrderId,
+    razorpayAmountPaise,
+    checkoutOrderId,
+    activePaymentId,
+  ]);
 
   useEffect(() => {
     webViewReadyRef.current = false;
@@ -392,7 +591,7 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
       orderToken,
       totalAmount: total,
       orderItems,
-      paymentMethod: gateway === 'cashfree' ? 'cashfree' : 'easebuzz_v2',
+      paymentMethod: gateway === 'cashfree' ? 'cashfree' : gateway === 'razorpay' ? 'razorpay' : 'easebuzz_v2',
     });
   }, [clearCart, navigation, checkoutOrderId, orderItems, orderTotal, userId, gateway]);
 
@@ -534,6 +733,7 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
       );
       checkoutOpenedAtRef.current = Date.now();
       sdkStartedRef.current = false;
+      sdkUiPresentedRef.current = false;
       clearCashfreeCallbacks();
       bumpWebViewKey();
       setMode(MODE.CASHFREE_WEBVIEW);
@@ -572,6 +772,9 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
    */
   const switchToCashfreeWebViewFallback = useCallback(async () => {
     if (finalizedRef.current || webViewFallbackRequestedRef.current) return;
+    // Never reopen hosted checkout after the native UI already presented —
+    // that path is for Expo / missing module / launch failure only.
+    if (sdkUiPresentedRef.current) return;
     webViewFallbackRequestedRef.current = true;
 
     if (cashfreeSessionId) {
@@ -593,18 +796,48 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
   }, [cashfreeSessionId, bumpWebViewKey, refreshCheckoutSessionForWebView, leaveCheckout]);
 
   const switchToEasebuzzWebViewFallback = useCallback(() => {
-    if (finalizedRef.current) return;
+    if (finalizedRef.current || sdkUiPresentedRef.current) return;
     sdkStartedRef.current = false;
     bumpWebViewKey();
     setMode(isAllowedCheckoutUrl(activePaymentUrl) ? MODE.EASEBUZZ_WEBVIEW : MODE.UNAVAILABLE);
   }, [activePaymentUrl, bumpWebViewKey]);
 
+  const switchToRazorpayWebViewFallback = useCallback(() => {
+    if (finalizedRef.current || webViewFallbackRequestedRef.current) return;
+    if (sdkUiPresentedRef.current) return;
+    if (
+      !canUseRazorpayWebViewFallback({
+        activePaymentUrl,
+        razorpayKeyId,
+        razorpayOrderId,
+        razorpayAmountPaise,
+      })
+    ) {
+      return;
+    }
+    webViewFallbackRequestedRef.current = true;
+    sdkStartedRef.current = false;
+    sdkUiPresentedRef.current = false;
+    bumpWebViewKey();
+    setMode(MODE.RAZORPAY_WEBVIEW);
+  }, [
+    activePaymentUrl,
+    razorpayKeyId,
+    razorpayOrderId,
+    razorpayAmountPaise,
+    bumpWebViewKey,
+  ]);
+
   useGatewayLaunchFallback({
     mode,
     isCashfree,
+    isRazorpay,
     activePaymentUrl,
+    sdkUiPresentedRef,
     switchToCashfreeWebViewFallback,
     switchToEasebuzzWebViewFallback,
+    switchToRazorpayWebViewFallback,
+    onSdkLaunchTimeout: () => applyOutcomeRef.current?.('failure'),
   });
 
   /** Hardware / nav back: cancel silently (no confirm dialog) and leave checkout. */
@@ -673,46 +906,16 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
         return;
       }
 
-      // Falling back only makes sense while the *native SDK* owns the checkout.
-      // In a WebView mode this outcome is the payer's own decision — reloading
-      // the same WebView would reopen a checkout they just dismissed, and the
-      // `hungertap://payment-cancel` that triggerGatewayCheckoutCancel injects
-      // arrives here as exactly this 'cancelled', so the reload would fight the
-      // cancel it was asked to perform.
-      const inLaunchGrace = Date.now() - checkoutOpenedAtRef.current < CHECKOUT_LAUNCH_GRACE_MS;
-      const canStillFallBack = SDK_MODES.includes(mode) && !cancelInFlightRef.current;
-      if (inLaunchGrace && canStillFallBack && (outcome === 'cancelled' || outcome === 'failure')) {
-        // Once the fallback has been used, switchToCashfreeWebViewFallback is a
-        // no-op — returning here would silently drop the outcome instead of
-        // cancelling, leaving the payer stuck on the checkout screen.
-        if (isCashfree && !webViewFallbackRequestedRef.current) {
-          switchToCashfreeWebViewFallback();
-          return;
-        }
-        if (!isCashfree && isAllowedCheckoutUrl(activePaymentUrl)) {
-          sdkStartedRef.current = false;
-          bumpWebViewKey();
-          setMode(MODE.EASEBUZZ_WEBVIEW);
-          return;
-        }
-      }
-
+      // User cancel / post-open failure must never reopen WebView. Fallback is
+      // only for Expo / missing native module / launch failure before UI opens
+      // (handled by onError launch path, launchFailed, and the gated timer).
       if (outcome === 'cancelled') {
         finalizeCancel({ fromGateway: true });
-      } else {
-        finalizeFailure();
+        return;
       }
+      finalizeFailure();
     },
-    [
-      mode,
-      refreshPaymentStatus,
-      finalizeCancel,
-      finalizeFailure,
-      isCashfree,
-      activePaymentUrl,
-      bumpWebViewKey,
-      switchToCashfreeWebViewFallback,
-    ]
+    [refreshPaymentStatus, finalizeCancel, finalizeFailure]
   );
 
   // Active polling loop while verifying === true (runs every 0.5s for up to 30s)
@@ -759,7 +962,6 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
 
   // Held in a ref so the async SDK effects below never re-run (and never drop a
   // pending gateway result) just because a callback identity changed.
-  const applyOutcomeRef = useRef(null);
   applyOutcomeRef.current = applyCheckoutOutcome;
 
   const handlePaymentReturnUrl = useCallback(
@@ -804,9 +1006,25 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
         pollOnceRef.current?.();
 
         if (userCancelled) {
-          // Reopening checkout in a WebView would resurrect a screen the payer
-          // just dismissed. Treat it as the cancellation it is.
           applyOutcomeRef.current?.('cancelled');
+          return;
+        }
+        if (isCashfreeLaunchFailureError(error)) {
+          if (typeof __DEV__ !== 'undefined' && __DEV__) {
+            // eslint-disable-next-line no-console
+            console.warn(
+              '[Cashfree] Native SDK launch blocked — falling back to WebView:',
+              describeCashfreeSdkError(error)
+            );
+          }
+          sdkUiPresentedRef.current = false;
+          sdkStartedRef.current = false;
+          switchToCashfreeWebViewFallback();
+          return;
+        }
+        // Launch/session error before UI presented → WebView. After present → fail.
+        if (sdkUiPresentedRef.current) {
+          applyOutcomeRef.current?.('failure');
           return;
         }
         switchToCashfreeWebViewFallback();
@@ -821,17 +1039,18 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
       }
       try {
         startCashfreeCheckout({
-          // The validated id, matching what the WebView fallback renders — the
-          // raw value may carry whitespace CFSession accepts but Cashfree rejects.
           paymentSessionId: cashfreeSessionId,
           orderId: cashfreeOrderId || checkoutOrderId,
           environment,
         });
+        // doPayment returned — assume launch accepted; launch-failure onError resets this.
+        sdkUiPresentedRef.current = true;
       } catch (e) {
         if (typeof __DEV__ !== 'undefined' && __DEV__) {
           console.warn('[Cashfree] startCashfreeCheckout failed, falling back to WebView:', e?.message || e);
         }
         sdkStartedRef.current = false;
+        sdkUiPresentedRef.current = false;
         switchToCashfreeWebViewFallback();
       }
     }
@@ -858,6 +1077,11 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
         console.log('📱 [Step 5/7] [PaymentProcessingScreen] Launching Easebuzz native SDK. Environment:', environment);
       }
 
+      // Easebuzz awaits until the payer finishes, so mark "presented" as soon as
+      // we invoke native open — otherwise the 30s timer reopens WebView mid-pay.
+      // launchFailed clears this and still falls back to WebView.
+      sdkUiPresentedRef.current = true;
+
       const res = await startEasebuzzCheckout({
         accessKey: activePaymentSessionId,
         environment,
@@ -866,6 +1090,7 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
 
       if (res.launchFailed) {
         sdkStartedRef.current = false;
+        sdkUiPresentedRef.current = false;
         bumpWebViewKey();
         setMode(isAllowedCheckoutUrl(activePaymentUrl) ? MODE.EASEBUZZ_WEBVIEW : MODE.UNAVAILABLE);
         return;
@@ -884,6 +1109,97 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
     };
   }, [mode, activePaymentSessionId, activePaymentUrl, environment, bumpWebViewKey]);
 
+  // --- Native SDK: Razorpay (WebView fallback when native blocked or unavailable) ---
+  useEffect(() => {
+    if (mode !== MODE.RAZORPAY_SDK || sdkStartedRef.current) return;
+    sdkStartedRef.current = true;
+
+    let cancelled = false;
+    (async () => {
+      if (typeof __DEV__ !== 'undefined' && __DEV__) {
+        // eslint-disable-next-line no-console
+        console.log(
+          '📱 [Step 5/7] [PaymentProcessingScreen] Launching Razorpay native SDK.',
+          describeRazorpaySdkAvailability()
+        );
+      }
+
+      sdkUiPresentedRef.current = true;
+
+      const res = await startRazorpayCheckout({
+        keyId: razorpayKeyId,
+        razorpayOrderId,
+        amountPaise: razorpayAmountPaise,
+        currency: 'INR',
+        name: 'HungerTap',
+        description: 'HungerTap order',
+        notes: {
+          order_id: checkoutOrderId,
+          payment_id: activePaymentId || '',
+        },
+      });
+      if (cancelled) return;
+
+      if (res.cancelled) {
+        applyOutcomeRef.current?.('cancelled');
+        return;
+      }
+
+      if (res.launchFailed) {
+        sdkUiPresentedRef.current = false;
+        sdkStartedRef.current = false;
+        webViewFallbackRequestedRef.current = false;
+        if (typeof __DEV__ !== 'undefined' && __DEV__) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            '[Razorpay] Native SDK launch failed — falling back to WebView:',
+            res.error || describeRazorpaySdkAvailability()
+          );
+        }
+        switchToRazorpayWebViewFallback();
+        return;
+      }
+
+      const payload = res.payload || {};
+      if (!payload.razorpay_payment_id || !payload.razorpay_signature) {
+        applyOutcomeRef.current?.('failure');
+        return;
+      }
+
+      setVerifying(true);
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (session?.access_token && CONFIG.VERIFY_RAZORPAY_PAYMENT_URL) {
+          await postVerifyRazorpayPayment({
+            accessToken: session.access_token,
+            orderId: checkoutOrderId,
+            paymentId: activePaymentId || null,
+            razorpayOrderId: payload.razorpay_order_id || razorpayOrderId,
+            razorpayPaymentId: payload.razorpay_payment_id,
+            razorpaySignature: payload.razorpay_signature,
+          });
+        }
+      } catch (_) {
+        /* webhook still authoritative — keep polling */
+      }
+      applyOutcomeRef.current?.('success');
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    mode,
+    razorpayKeyId,
+    razorpayOrderId,
+    razorpayAmountPaise,
+    checkoutOrderId,
+    activePaymentId,
+    switchToRazorpayWebViewFallback,
+  ]);
+
   useEffect(() => {
     if (typeof __DEV__ === 'undefined' || !__DEV__) return;
     if (mode === MODE.EASEBUZZ_WEBVIEW) {
@@ -897,8 +1213,22 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
         '| Reason:',
         describeCashfreeSdkAvailability()
       );
+    } else if (mode === MODE.RAZORPAY_WEBVIEW) {
+      // eslint-disable-next-line no-console
+      console.log(
+        '📱 [Step 5/7] [PaymentProcessingScreen] Razorpay native SDK unavailable — using WebView fallback.',
+        isAllowedCheckoutUrl(activePaymentUrl) ? activePaymentUrl : '(inline checkout.js)',
+        '| Reason:',
+        describeRazorpaySdkAvailability()
+      );
+    } else if (mode === MODE.UNAVAILABLE && isRazorpay) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        '📱 [PaymentProcessingScreen] Razorpay unavailable:',
+        describeRazorpaySdkAvailability()
+      );
     }
-  }, [mode, activePaymentUrl, environment]);
+  }, [mode, activePaymentUrl, environment, isRazorpay]);
 
   useEffect(() => {
     const onHardwareBack = () => promptAbandonCheckout();
@@ -1068,7 +1398,11 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
       ) : mode === MODE.UNAVAILABLE ? (
         <View style={[styles.fallback, { paddingBottom: insets.bottom }]}>
           <Text style={{ color: colors.textSecondary, textAlign: 'center', padding: 24 }}>
-            Could not start checkout. Go back and try Place Order again.
+            {isRazorpay
+              ? 'Razorpay checkout could not start — payment details were missing from the server. Go back and try Place Order again.'
+              : isCashfree
+                ? 'Cashfree checkout could not start — no payment session was returned. Go back and try Place Order again.'
+                : 'Could not start checkout. Go back and try Place Order again.'}
           </Text>
         </View>
       ) : SDK_MODES.includes(mode) || refreshingCheckout ? (

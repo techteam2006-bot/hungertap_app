@@ -1,0 +1,296 @@
+/// @ts-nocheck
+// Supabase Edge Function (Deno runtime): retry-refund
+// Multi-gateway background refund processor (Cashfree, Easebuzz, Razorpay)
+
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { crypto } from "https://deno.land/std@0.168.0/crypto/mod.ts";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
+/** Convert rupees to integer paise strictly. */
+function toPaise(amount: number | string): number {
+  const str = String(amount).trim();
+  const [rupeesStr, paiseStr = "00"] = str.split(".");
+  const rupees = parseInt(rupeesStr, 10);
+  const paise = parseInt(paiseStr.padEnd(2, "0").slice(0, 2), 10);
+  return rupees * 100 + paise;
+}
+
+/** SHA-512 for Easebuzz */
+async function sha512(str: string): Promise<string> {
+  const buf = new TextEncoder().encode(str);
+  const hashBuf = await crypto.subtle.digest("SHA-512", buf);
+  return Array.from(new Uint8Array(hashBuf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+serve(async (req: Request) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
+  try {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Atomically claim scheduled / initiated refunds using claim_due_refunds RPC
+    const { data: claimedRefunds, error: claimErr } = await supabase.rpc("claim_due_refunds", {
+      p_limit: 10,
+    });
+
+    let dueRefunds = claimedRefunds;
+    if (claimErr || !dueRefunds || dueRefunds.length === 0) {
+      // Fallback query if RPC is missing
+      const { data: rows } = await supabase
+        .from("refunds")
+        .select(`
+          id, order_id, payment_id, amount, status, gateway_name, gateway_refund_id, customer_email,
+          payments!inner(id, gateway_name, gateway_payment_id, gateway_order_id)
+        `)
+        .in("status", ["scheduled", "initiated"])
+        .lte("process_after", new Date().toISOString())
+        .limit(10);
+      dueRefunds = rows || [];
+    }
+
+    if (!dueRefunds || dueRefunds.length === 0) {
+      return new Response(JSON.stringify({ message: "No due refunds to process" }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const results = [];
+
+    for (const refund of dueRefunds) {
+      const gatewayName = String(refund.gateway_name || refund.payments?.gateway_name || "").toLowerCase();
+      const payment = refund.payments || {};
+
+      try {
+        // =====================================================================
+        // 1. RAZORPAY REFUND FLOW
+        // =====================================================================
+        if (gatewayName === "razorpay") {
+          const razorpayPaymentId = payment.gateway_payment_id;
+          if (!razorpayPaymentId) {
+            console.warn(`[retry-refund] Razorpay refund ${refund.id} missing gateway_payment_id`);
+            continue;
+          }
+
+          const keyId = Deno.env.get("RAZORPAY_KEY_ID") || "";
+          const keySecret = Deno.env.get("RAZORPAY_KEY_SECRET") || "";
+          const authString = btoa(`${keyId}:${keySecret}`);
+          const refundAmountPaise = toPaise(refund.amount);
+
+          // 1A. Pre-reconciliation check before issuing new refund
+          let existingRzRefund: any = null;
+          try {
+            const listRes = await fetch(`https://api.razorpay.com/v1/payments/${razorpayPaymentId}/refunds`, {
+              headers: { "Authorization": `Basic ${authString}` },
+            });
+            if (listRes.ok) {
+              const listData = await listRes.json();
+              existingRzRefund = listData?.items?.find(
+                (r: any) => r.notes?.refund_id === refund.id || r.id === refund.gateway_refund_id
+              );
+            }
+          } catch (chkErr) {
+            console.warn("[retry-refund] Razorpay refund check exception:", chkErr);
+          }
+
+          if (existingRzRefund) {
+            if (existingRzRefund.status === "processed") {
+              await supabase.rpc("apply_refund_success", {
+                p_gateway_name: "razorpay",
+                p_gateway_refund_id: existingRzRefund.id,
+                p_gateway_response: existingRzRefund,
+                p_verify_amount: Number(refund.amount),
+              });
+              results.push({ refund_id: refund.id, status: "reconciled_processed", id: existingRzRefund.id });
+              continue;
+            }
+          }
+
+          // 1B. POST fresh refund request
+          const rzpRes = await fetch(`https://api.razorpay.com/v1/payments/${razorpayPaymentId}/refund`, {
+            method: "POST",
+            headers: {
+              "Authorization": `Basic ${authString}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              amount: refundAmountPaise,
+              speed: "normal",
+              notes: { refund_id: refund.id, payment_id: refund.payment_id },
+            }),
+          });
+
+          const rzpData = await rzpRes.json();
+
+          if (!rzpRes.ok) {
+            console.error(`[retry-refund] Razorpay refund API failed for ${refund.id}:`, rzpData);
+            await supabase
+              .from("refunds")
+              .update({
+                status: "failed",
+                failure_reason: rzpData?.error?.description || "Razorpay refund API failed",
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", refund.id);
+            continue;
+          }
+
+          // Update refund row to processing with returned provider ID
+          await supabase
+            .from("refunds")
+            .update({
+              gateway_refund_id: rzpData.id,
+              gateway_response: rzpData,
+              status: rzpData.status === "processed" ? "success" : "processing",
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", refund.id);
+
+          if (rzpData.status === "processed") {
+            await supabase.rpc("apply_refund_success", {
+              p_gateway_name: "razorpay",
+              p_gateway_refund_id: rzpData.id,
+              p_gateway_response: rzpData,
+              p_verify_amount: Number(refund.amount),
+            });
+          }
+
+          results.push({ refund_id: refund.id, status: rzpData.status, gateway_refund_id: rzpData.id });
+        }
+
+        // =====================================================================
+        // 2. CASHFREE REFUND FLOW
+        // =====================================================================
+        else if (gatewayName === "cashfree") {
+          const clientId = Deno.env.get("CASHFREE_CLIENT_ID") || Deno.env.get("CASHFREE_APP_ID");
+          const clientSecret = Deno.env.get("CASHFREE_CLIENT_SECRET") || Deno.env.get("CASHFREE_SECRET_KEY");
+          const env = (Deno.env.get("CASHFREE_ENV") || "sandbox").toLowerCase();
+          const baseUrl = env === "production" || env === "prod"
+            ? "https://api.cashfree.com/pg"
+            : "https://sandbox.cashfree.com/pg";
+
+          const cfRefundId = refund.gateway_refund_id || `htrfnd${String(refund.id).replace(/[^a-zA-Z0-9]/g, "").slice(0, 20)}`;
+          const gatewayOrderId = payment.gateway_order_id || refund.order_id;
+
+          const cfRes = await fetch(`${baseUrl}/orders/${gatewayOrderId}/refunds`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-client-id": clientId,
+              "x-client-secret": clientSecret,
+              "x-api-version": "2025-01-01",
+            },
+            body: JSON.stringify({
+              refund_id: cfRefundId,
+              refund_amount: Number(refund.amount),
+              refund_note: "HungerTap refund",
+            }),
+          });
+
+          const cfData = await cfRes.json();
+          if (cfRes.ok && cfData.refund_status === "SUCCESS") {
+            await supabase.rpc("apply_refund_success", {
+              p_gateway_name: "cashfree",
+              p_gateway_refund_id: cfRefundId,
+              p_gateway_response: cfData,
+              p_verify_amount: Number(refund.amount),
+            });
+            results.push({ refund_id: refund.id, status: "success", gateway_refund_id: cfRefundId });
+          } else {
+            await supabase
+              .from("refunds")
+              .update({
+                status: "processing",
+                gateway_refund_id: cfRefundId,
+                gateway_response: cfData,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", refund.id);
+            results.push({ refund_id: refund.id, status: "processing", gateway_refund_id: cfRefundId });
+          }
+        }
+
+        // =====================================================================
+        // 3. EASEBUZZ REFUND FLOW
+        // =====================================================================
+        else if (gatewayName === "easebuzz") {
+          const txnid = payment.gateway_payment_id || refund.payment_id;
+          const key = Deno.env.get("EASEBUZZ_KEY") || Deno.env.get("EASEBUZZ_MERCHANT_KEY") || "";
+          const salt = Deno.env.get("EASEBUZZ_SALT") || "";
+          const env = (Deno.env.get("EASEBUZZ_ENV") || "test").toLowerCase();
+          const baseUrl = env === "prod" || env === "production"
+            ? "https://dashboard.easebuzz.in"
+            : "https://testdashboard.easebuzz.in";
+
+          const amountStr = Number(refund.amount).toFixed(2);
+          const email = refund.customer_email || "customer@hungertap.com";
+          const phone = "9999999999";
+          const hashStr = `${key}|${txnid}|${amountStr}|${amountStr}|${email}|${phone}|${salt}`;
+          const hash = await sha512(hashStr);
+
+          const formData = new URLSearchParams();
+          formData.append("key", key);
+          formData.append("txnid", txnid);
+          formData.append("amount", amountStr);
+          formData.append("refund_amount", amountStr);
+          formData.append("email", email);
+          formData.append("phone", phone);
+          formData.append("hash", hash);
+
+          const ebRes = await fetch(`${baseUrl}/transaction/v1/refund`, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: formData.toString(),
+          });
+
+          const ebData = await ebRes.json();
+          if (ebRes.ok && ebData.status === true) {
+            const easebuzzRefundId = ebData.easebuzz_refund_id || ebData.refund_id || `eb_ref_${txnid}`;
+            await supabase.rpc("apply_refund_success", {
+              p_gateway_name: "easebuzz",
+              p_gateway_refund_id: easebuzzRefundId,
+              p_gateway_response: ebData,
+              p_verify_amount: Number(refund.amount),
+            });
+            results.push({ refund_id: refund.id, status: "success", gateway_refund_id: easebuzzRefundId });
+          } else {
+            await supabase
+              .from("refunds")
+              .update({
+                status: "failed",
+                failure_reason: ebData?.data || ebData?.error_desc || "Easebuzz refund failed",
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", refund.id);
+            results.push({ refund_id: refund.id, status: "failed", error: ebData });
+          }
+        }
+      } catch (refundErr) {
+        console.error(`[retry-refund] Exception processing refund ${refund.id}:`, refundErr);
+      }
+    }
+
+    return new Response(JSON.stringify({ success: true, processed: results }), {
+      status: 200,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Internal server error";
+    console.error("[retry-refund] Server exception:", err);
+    return new Response(JSON.stringify({ error: message }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+});

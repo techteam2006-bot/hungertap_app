@@ -1,6 +1,6 @@
 {
   "name": "canteen-app",
-  "version": "1.0.2",
+  "version": "1.0.4",
   "type": "commonjs",
   "main": "index.js",
   "scripts": {
@@ -53,6 +53,7 @@
     "react-native-easebuzz-sdk": "^0.9.0",
     "react-native-gesture-handler": "~2.28.0",
     "react-native-qrcode-svg": "^6.3.15",
+    "react-native-razorpay": "^3.0.0",
     "react-native-safe-area-context": "~5.6.0",
     "react-native-screens": "~4.16.0",
     "react-native-svg": "15.12.1",

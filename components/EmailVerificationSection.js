@@ -234,7 +234,11 @@ export default function EmailVerificationSection({
         />
         <TextInput
           ref={emailInputRef}
-          style={[styles.emailInput, { color: colors.text }, emailLocked && styles.emailInputLocked]}
+          style={[
+            styles.emailInput,
+            { color: colors.text, backgroundColor: colors.inputBackground },
+            emailLocked && styles.emailInputLocked,
+          ]}
           placeholder="Email"
           placeholderTextColor={tertiary}
           value={email}
@@ -247,6 +251,7 @@ export default function EmailVerificationSection({
           autoCorrect={false}
           autoComplete="email"
           textContentType="emailAddress"
+          underlineColorAndroid="transparent"
           editable={!emailLocked && !disabled && !sending}
           returnKeyType="next"
           blurOnSubmit={false}

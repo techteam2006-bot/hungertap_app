@@ -17,6 +17,9 @@ function formatGatewayDisplayName(gw) {
   if (code.includes('easebuzz') || name.toLowerCase().includes('easebuzz')) {
     return 'Easebuzz';
   }
+  if (code.includes('razorpay') || name.toLowerCase().includes('razorpay')) {
+    return 'Razorpay';
+  }
 
   return name.replace(/\s*\([^)]*\)/g, '').trim() || 'Payment';
 }

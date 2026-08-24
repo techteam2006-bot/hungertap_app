@@ -43,11 +43,14 @@ const SOCIAL_LINKS = {
   instagram: 'https://www.instagram.com/hungertap.iare/',
 };
 
-/** Play Store listing for this app (`app.json` → android.package). */
-const APP_STORE_URL =
-  'https://play.google.com/store/apps/details?id=com.hungertap.app';
+/** Invite landing — Play Store + App Store ([scanme.hungertap.online](https://scanme.hungertap.online)). */
+const APP_SHARE_URL = 'https://scanme.hungertap.online';
 const APP_SHARE_MESSAGE =
-  `Check out the HungerTap App!\n\nDownload here:\n${APP_STORE_URL}`;
+  `HungerTap — Campus Food, Made Easy!\n` +
+  `Exclusive to colleges, Hungertap makes ordering food faster and simpler.\n` +
+  `Skip the crowds, avoid long queues, and enjoy a smoother campus experience.\n` +
+  `Tap, order, and eat — Hungertap keeps your campus cravings hassle-free!\n\n` +
+  `Get the app:\n${APP_SHARE_URL}`;
 
 async function openExternalUrl(url) {
   try {
@@ -351,12 +354,12 @@ const ProfileScreen = ({ navigation }) => {
         Platform.select({
           ios: {
             message: APP_SHARE_MESSAGE,
-            url: APP_STORE_URL,
-            title: 'HungerTap App',
+            url: APP_SHARE_URL,
+            title: 'HungerTap',
           },
           default: {
             message: APP_SHARE_MESSAGE,
-            title: 'HungerTap App',
+            title: 'HungerTap',
           },
         })
       );

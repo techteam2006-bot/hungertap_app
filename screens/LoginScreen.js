@@ -175,6 +175,7 @@ const createLoginStyles = (colors) =>
       fontSize: width * 0.04,
       fontFamily: appTypography.regular,
       color: colors.text,
+      backgroundColor: colors.inputBackground,
       height: '100%',
       paddingVertical: 0,
       textAlignVertical: 'center',
@@ -550,6 +551,7 @@ export default function LoginScreen({ navigation }) {
                         autoComplete="email"
                         textContentType="username"
                         importantForAutofill="auto"
+                        underlineColorAndroid="transparent"
                         editable={!loading}
                         returnKeyType="next"
                         blurOnSubmit={false}
@@ -576,6 +578,7 @@ export default function LoginScreen({ navigation }) {
                         autoComplete="password"
                         textContentType="password"
                         importantForAutofill="auto"
+                        underlineColorAndroid="transparent"
                         editable={!loading}
                         returnKeyType="done"
                         blurOnSubmit

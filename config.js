@@ -61,6 +61,17 @@ const CANCEL_PAYMENT_URL = (
 ).trim().replace(/\/$/, '');
 
 /**
+ * Razorpay client verify fast-path (HMAC of order|payment). Defaults to
+ * `{SUPABASE_URL}/functions/v1/verify-razorpay-payment`.
+ */
+const VERIFY_RAZORPAY_PAYMENT_URL = (
+  process.env.EXPO_PUBLIC_VERIFY_RAZORPAY_PAYMENT_URL ||
+  (SUPABASE_URL
+    ? `${String(SUPABASE_URL).replace(/\/$/, '')}/functions/v1/verify-razorpay-payment`
+    : '')
+).replace(/\/$/, '');
+
+/**
  * Signup OTP workaround (bypasses broken Confirm-signup mailer).
  * Defaults to `{SUPABASE_URL}/functions/v1/send-signup-otp`.
  * Local: EXPO_PUBLIC_SEND_SIGNUP_OTP_URL=http://192.168.1.4:8787/send-signup-otp
@@ -110,6 +121,9 @@ export const CONFIG = {
 
   /** POST with user JWT — cancel pending Easebuzz checkout for an order. */
   CANCEL_PAYMENT_URL,
+
+  /** POST with user JWT — Razorpay Standard Checkout signature verify (fast path). */
+  VERIFY_RAZORPAY_PAYMENT_URL,
 
   /** POST (anon) — signup email OTP via Edge/local workaround. */
   SEND_SIGNUP_OTP_URL,

@@ -1855,27 +1855,41 @@ const HomeScreen = ({ navigation, route }) => {
                   {String(collegeName || 'College').trim().toUpperCase()}
                 </Text>
                 {currentCanteenName ? (
-                  <TouchableOpacity
-                    onPress={() => (collegeCanteens.length > 1 ? setShowCanteenPicker(true) : undefined)}
-                    style={[styles.canteenSmallSelector, { backgroundColor: '#F5B041', borderWidth: 0 }]}
-                    activeOpacity={collegeCanteens.length > 1 ? 0.72 : 1}
-                    disabled={collegeCanteens.length <= 1}
-                    accessibilityRole="button"
-                    accessibilityLabel="Switch canteen"
-                    accessibilityHint={
-                      collegeCanteens.length > 1
-                        ? 'Opens a list of canteens at your college'
-                        : 'Only one canteen is available'
-                    }
-                  >
-                    <AppIcon name="storefront-outline" size={11} color="#FFFFFF" />
-                    <Text style={styles.canteenSmallText} numberOfLines={1}>
-                      {currentCanteenName}
+                  <>
+                    <Text
+                      style={[styles.locationCanteenSep, { color: isDarkMode ? '#FFFFFF' : '#000000' }]}
+                      accessible={false}
+                    >
+                      ·
                     </Text>
-                    {collegeCanteens.length > 1 ? (
-                      <AppIcon name="chevron-down" size={11} color="#FFFFFF" />
-                    ) : null}
-                  </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => (collegeCanteens.length > 1 ? setShowCanteenPicker(true) : undefined)}
+                      style={styles.canteenNameHit}
+                      activeOpacity={collegeCanteens.length > 1 ? 0.72 : 1}
+                      disabled={collegeCanteens.length <= 1}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Canteen ${currentCanteenName}`}
+                      accessibilityHint={
+                        collegeCanteens.length > 1
+                          ? 'Opens a list of canteens at your college'
+                          : 'Only one canteen is available'
+                      }
+                    >
+                      <Text
+                        style={[styles.canteenNameText, { color: isDarkMode ? '#FFFFFF' : '#000000' }]}
+                        numberOfLines={1}
+                      >
+                        {currentCanteenName}
+                      </Text>
+                      {collegeCanteens.length > 1 ? (
+                        <AppIcon
+                          name="chevron-down"
+                          size={12}
+                          color={isDarkMode ? '#FFFFFF' : '#000000'}
+                        />
+                      ) : null}
+                    </TouchableOpacity>
+                  </>
                 ) : null}
               </View>
             <TouchableOpacity
@@ -2356,7 +2370,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     flexWrap: 'nowrap',
-    maxWidth: width * 0.62,
+    flex: 1,
+    marginRight: 8,
+    minWidth: 0,
   },
   locationText: {
     fontSize: Platform.OS === 'ios' ? 14 : 13,
@@ -2364,6 +2380,26 @@ const styles = StyleSheet.create({
     color: '#D4A017',
     letterSpacing: 0.4,
     textTransform: 'uppercase',
+    flexShrink: 1,
+    maxWidth: width * 0.42,
+  },
+  locationCanteenSep: {
+    fontSize: Platform.OS === 'ios' ? 14 : 13,
+    ...getFontStyle('bold'),
+    opacity: 0.55,
+    flexShrink: 0,
+  },
+  canteenNameHit: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    flexShrink: 1,
+    minWidth: 0,
+    maxWidth: width * 0.34,
+  },
+  canteenNameText: {
+    fontSize: Platform.OS === 'ios' ? 13 : 12,
+    ...getFontStyle('semiBold'),
     flexShrink: 1,
   },
   canteenSmallSelector: {

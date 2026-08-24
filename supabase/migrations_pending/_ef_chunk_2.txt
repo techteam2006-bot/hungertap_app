@@ -1,0 +1,200 @@
+ngify({ error: "Payment record not found" }), {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // Hard financial check in Edge Function
+      const dbAmount = Number(paymentRow.amount);
+      if (!Number.isFinite(dbAmount) || Math.abs(receivedRupees - dbAmount) > 0.01) {
+        const errStr = `Financial mismatch: Received=${receivedRupees}, Expected=${dbAmount}`;
+        console.error(`[Razorpay Webhook] ${errStr}`);
+        await safeCompleteWebhook(supabase, dbEventId, "failed", errStr, "business_permanent");
+        return new Response(JSON.stringify({ error: "Payment amount mismatch" }), {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // Execute Shared apply_payment_success RPC (Database Financial Boundary)
+      const { data: apsRes, error: apsErr } = await supabase.rpc("apply_payment_success", {
+        p_payment_id: paymentRow.id,
+        p_order_id: paymentRow.order_id,
+        p_gateway_payment_id: gatewayPaymentId || null,
+        p_gateway_response: payload,
+        p_gateway_name: "razorpay",
+        p_verify_amount: receivedRupees,
+        p_verify_currency: "INR",
+      });
+
+      if (apsErr || !apsRes?.success) {
+        const err = apsErr?.message || apsRes?.error || "apply_payment_success failed";
+        console.error(`[Razorpay Webhook] apply_payment_success failed: ${err}`);
+        await safeCompleteWebhook(supabase, dbEventId, "failed", err, "infrastructure_retryable");
+        return new Response(JSON.stringify({ error: "Failed to apply payment success" }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      await safeCompleteWebhook(supabase, dbEventId, "processed");
+      return new Response(
+        JSON.stringify({ status: "success", action: apsRes?.action, order_id: paymentRow.order_id }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // =========================================================================
+    // 5. HANDLE PAYMENT FAILED
+    // =========================================================================
+    if (eventType === "payment.failed") {
+      const normalized = normalizePaymentFailed(payload);
+      const { gatewayOrderId, notes } = normalized;
+
+      let paymentRow: any = null;
+      if (gatewayOrderId) {
+        const { data: pData } = await supabase
+          .from("payments")
+          .select("id, order_id")
+          .eq("gateway_name", "razorpay")
+          .eq("gateway_order_id", gatewayOrderId)
+          .maybeSingle();
+        paymentRow = pData;
+      }
+      if (!paymentRow && notes?.payment_id && notes?.order_id) {
+        const { data: pData } = await supabase
+          .from("payments")
+          .select("id, order_id")
+          .eq("id", notes.payment_id)
+          .eq("order_id", notes.order_id)
+          .maybeSingle();
+        paymentRow = pData;
+      }
+
+      if (paymentRow) {
+        // Monotonic state guard inside void_failed_checkout_order handles locks
+        await supabase.rpc("void_failed_checkout_order", {
+          p_order_id: paymentRow.order_id,
+          p_payment_id: paymentRow.id,
+          p_reason: "Razorpay payment.failed webhook event",
+        });
+      }
+
+      await safeCompleteWebhook(supabase, dbEventId, "processed", "Handled failure event", "business_permanent");
+      return new Response(
+        JSON.stringify({ status: "processed_failure_event" }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // =========================================================================
+    // 6. HANDLE REFUND EVENTS
+    // =========================================================================
+    if (eventType === "refund.created") {
+      // Transition refund row to 'processing'
+      const normalized = normalizeRefundEvent(payload);
+      const { gatewayRefundId, gatewayPaymentId } = normalized;
+
+      if (gatewayPaymentId) {
+        const { data: payRow } = await supabase
+          .from("payments")
+          .select("id")
+          .eq("gateway_name", "razorpay")
+          .eq("gateway_payment_id", gatewayPaymentId)
+          .maybeSingle();
+
+        if (payRow) {
+          await supabase
+            .from("refunds")
+            .update({
+              status: "processing",
+              gateway_refund_id: gatewayRefundId || undefined,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("payment_id", payRow.id)
+            .in("status", ["scheduled", "initiated"]);
+        }
+      }
+
+      await safeCompleteWebhook(supabase, dbEventId, "processed", "Handled refund.created");
+      return new Response(JSON.stringify({ status: "refund_processing" }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (eventType === "refund.processed") {
+      // Authoritative refund success event
+      const normalized = normalizeRefundEvent(payload);
+      const { gatewayRefundId, amountPaise } = normalized;
+      const refundAmount = paiseToRupees(amountPaise);
+
+      if (gatewayRefundId && refundAmount > 0) {
+        const { data: arRes, error: arErr } = await supabase.rpc("apply_refund_success", {
+          p_gateway_name: "razorpay",
+          p_gateway_refund_id: gatewayRefundId,
+          p_gateway_response: payload,
+          p_verify_amount: refundAmount,
+        });
+
+        if (arErr || !arRes?.success) {
+          const err = arErr?.message || arRes?.error || "apply_refund_success failed";
+          console.error(`[Razorpay Webhook] apply_refund_success failed: ${err}`);
+          await safeCompleteWebhook(supabase, dbEventId, "failed", err, "infrastructure_retryable");
+          return new Response(JSON.stringify({ error: "Failed to apply refund success" }), {
+            status: 500,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      }
+
+      await safeCompleteWebhook(supabase, dbEventId, "processed");
+      return new Response(JSON.stringify({ status: "processed_refund_event" }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (eventType === "refund.failed") {
+      const normalized = normalizeRefundEvent(payload);
+      const { gatewayRefundId, gatewayPaymentId } = normalized;
+
+      if (gatewayRefundId) {
+        await supabase
+          .from("refunds")
+          .update({ status: "failed", updated_at: new Date().toISOString() })
+          .eq("gateway_refund_id", gatewayRefundId);
+      } else if (gatewayPaymentId) {
+        const { data: payRow } = await supabase
+          .from("payments")
+          .select("id")
+          .eq("gateway_name", "razorpay")
+          .eq("gateway_payment_id", gatewayPaymentId)
+          .maybeSingle();
+        if (payRow) {
+          await supabase
+            .from("refunds")
+            .update({ status: "failed", updated_at: new Date().toISOString() })
+            .eq("payment_id", payRow.id);
+        }
+      }
+
+      await safeCompleteWebhook(supabase, dbEventId, "processed", "Handled refund.failed");
+      return new Response(JSON.stringify({ status: "refund_failed_recorded" }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Default: acknowledge unsupported events
+    await safeCompleteWebhook(supabase, dbEventId, "processed", `Ignored event: ${eventType}`);
+    return new Response(JSON.stringify({ status: "ignored_event" }), {
+      status: 200,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Internal server error";
+    console.error("[Razorpay Webhook] Unhandled exception:", err);
+    await safeCompleteWebhook(supabase, dbEventId, "failed", message, "infrastructure_retryable");
+    return new Response(JSON.stringify({ error: message }), {
+      status: 

@@ -1,0 +1,290 @@
+/// @ts-nocheck
+// Supabase Edge Function (Deno runtime): create-order-v2
+
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { crypto } from "https://deno.land/std@0.168.0/crypto/mod.ts";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
+/** Strict monetary amount validation and conversion to integer paise. */
+function toPaise(amount: number | string): number {
+  const str = String(amount).trim();
+  if (!/^\d+(\.\d{1,2})?$/.test(str)) {
+    throw new Error(`Invalid monetary amount format: "${str}"`);
+  }
+  const [rupeesStr, paiseStr = "00"] = str.split(".");
+  const rupees = parseInt(rupeesStr, 10);
+  const paise = parseInt(paiseStr.padEnd(2, "0").slice(0, 2), 10);
+  if (!Number.isSafeInteger(rupees) || rupees < 0) {
+    throw new Error(`Invalid rupees value: "${rupeesStr}"`);
+  }
+  const totalPaise = rupees * 100 + paise;
+  if (!Number.isSafeInteger(totalPaise) || totalPaise <= 0) {
+    throw new Error(`Invalid calculated total paise value: "${totalPaise}"`);
+  }
+  return totalPaise;
+}
+
+/** SHA-512 Hash helper for Easebuzz */
+async function sha512(str: string): Promise<string> {
+  const buf = new TextEncoder().encode(str);
+  const hashBuf = await crypto.subtle.digest("SHA-512", buf);
+  return Array.from(new Uint8Array(hashBuf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+/** Sanitize RPC database errors for user display */
+function sanitizeRpcError(rawMsg?: string): string {
+  if (!rawMsg) return "Failed to process cart items";
+  const lower = rawMsg.toLowerCase();
+  if (lower.includes("out of stock") || lower.includes("insufficient_stock")) {
+    return "Some items in your cart are out of stock";
+  }
+  if (lower.includes("item_unavailable")) {
+    return "Some items in your cart are currently unavailable";
+  }
+  if (lower.includes("mixed_canteen")) {
+    return "Cart items must belong to a single canteen";
+  }
+  if (lower.includes("invalid_item_quantity")) {
+    return "Invalid quantity specified for cart items";
+  }
+  if (lower.includes("selected_gateway_unavailable")) {
+    return "The selected payment gateway is currently unavailable";
+  }
+  if (lower.includes("no_active_default_gateway_configured")) {
+    return "No active payment gateway is currently configured";
+  }
+  return rawMsg;
+}
+
+/** Roll back a pending checkout when the payment gateway session cannot be created. */
+async function voidFailedCheckout(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  orderId: string,
+  paymentId: string | null | undefined,
+  reason: string
+): Promise<void> {
+  try {
+    const { error } = await supabaseAdmin.rpc("void_failed_checkout_order", {
+      p_order_id: orderId,
+      p_payment_id: paymentId || null,
+      p_reason: reason,
+    });
+    if (error) {
+      console.error("[create-order-v2] void_failed_checkout_order failed:", error, { orderId, paymentId, reason });
+    }
+  } catch (err) {
+    console.error("[create-order-v2] void_failed_checkout_order exception:", err, { orderId, paymentId, reason });
+  }
+}
+
+serve(async (req: Request) => {
+  // Handle CORS preflight
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
+  try {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") || "";
+
+    // 1. Authenticate user from Auth Header
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Missing authorization header" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const supabaseUserClient = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: { user }, error: userErr } = await supabaseUserClient.auth.getUser();
+
+    if (userErr || !user) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Unauthorized user session" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // 2. Parse request body
+    const body = await req.json();
+    const { items, is_takeaway = false, gateway_code = null } = body;
+
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Cart is empty" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+
+    // 3. Resolve Target Gateway before RPC to preflight credentials and fail closed without mutating stock
+    let targetGatewayCode: string | null = null;
+    if (gateway_code && String(gateway_code).trim() !== "") {
+      const requested = String(gateway_code).trim().toLowerCase();
+      const { data: gwRow } = await supabaseAdmin
+        .from("payment_gateways")
+        .select("code, enabled, user_selectable")
+        .eq("code", requested)
+        .maybeSingle();
+
+      if (!gwRow || !gwRow.enabled || !gwRow.user_selectable) {
+        return new Response(
+          JSON.stringify({ success: false, error: "The selected payment gateway is currently unavailable" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      targetGatewayCode = gwRow.code;
+    } else {
+      // Fail-closed default gateway resolution
+      const { data: defRow } = await supabaseAdmin
+        .from("payment_gateways")
+        .select("code, enabled, is_default")
+        .eq("enabled", true)
+        .eq("is_default", true)
+        .maybeSingle();
+
+      if (!defRow || !defRow.code) {
+        return new Response(
+          JSON.stringify({ success: false, error: "No active payment gateway is currently configured" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      targetGatewayCode = defRow.code;
+    }
+
+    // 4. Preflight Gateway Server Credentials (fail early before calling DB order RPC & stock deduction)
+    if (targetGatewayCode === "razorpay") {
+      const keyId = Deno.env.get("RAZORPAY_KEY_ID");
+      const keySecret = Deno.env.get("RAZORPAY_KEY_SECRET");
+      if (!keyId || !keySecret) {
+        return new Response(
+          JSON.stringify({ success: false, error: "Gateway 'razorpay' is not configured (missing server keys)" }),
+          { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    } else if (targetGatewayCode === "cashfree") {
+      const clientId = Deno.env.get("CASHFREE_CLIENT_ID") || Deno.env.get("CASHFREE_APP_ID");
+      const clientSecret = Deno.env.get("CASHFREE_CLIENT_SECRET") || Deno.env.get("CASHFREE_SECRET_KEY");
+      if (!clientId || !clientSecret) {
+        return new Response(
+          JSON.stringify({ success: false, error: "Gateway 'cashfree' is not configured (missing server keys)" }),
+          { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    } else if (targetGatewayCode === "easebuzz") {
+      const key = Deno.env.get("EASEBUZZ_KEY") || Deno.env.get("EASEBUZZ_MERCHANT_KEY");
+      const salt = Deno.env.get("EASEBUZZ_SALT");
+      if (!key || !salt) {
+        return new Response(
+          JSON.stringify({ success: false, error: "Gateway 'easebuzz' is not configured (missing server keys)" }),
+          { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    }
+
+    // 5. Call Database RPC create_order_v2_app (passes validated targetGatewayCode)
+    const { data: rpcRes, error: rpcErr } = await supabaseAdmin.rpc("create_order_v2_app", {
+      p_gateway_code: targetGatewayCode,
+      p_is_takeaway: Boolean(is_takeaway),
+      p_items: items,
+      p_placed_by: user.id,
+    });
+
+    if (rpcErr) {
+      console.error("[create-order-v2] RPC Error:", rpcErr);
+      return new Response(
+        JSON.stringify({ success: false, error: sanitizeRpcError(rpcErr.message) }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (!rpcRes || !rpcRes.success) {
+      return new Response(
+        JSON.stringify({ success: false, error: sanitizeRpcError(rpcRes?.error || "Order creation failed") }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const { order_id, total_amount, payment_id, gateway_code: resolvedGatewayCode } = rpcRes;
+    const finalGateway = String(resolvedGatewayCode || "").toLowerCase();
+
+    if (!payment_id) {
+      console.error("[create-order-v2] RPC returned no payment_id for order", order_id);
+      await voidFailedCheckout(supabaseAdmin, order_id, null, "Missing payment_id after order creation");
+      return new Response(
+        JSON.stringify({ success: false, error: "internal_order_error" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // =========================================================================
+    // 5A. RAZORPAY GATEWAY FLOW
+    // =========================================================================
+    if (finalGateway === "razorpay") {
+      const keyId = Deno.env.get("RAZORPAY_KEY_ID");
+      const keySecret = Deno.env.get("RAZORPAY_KEY_SECRET");
+      if (!keyId || !keySecret) {
+        await voidFailedCheckout(supabaseAdmin, order_id, payment_id, "Razorpay keys not configured on server");
+        return new Response(
+          JSON.stringify({ success: false, error: "Gateway 'razorpay' is not configured" }),
+          { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      let amountInPaise: number;
+      try {
+        amountInPaise = toPaise(total_amount);
+      } catch (err) {
+        console.error("[create-order-v2] toPaise calculation error:", err);
+        await voidFailedCheckout(supabaseAdmin, order_id, payment_id, "Invalid monetary amount");
+        return new Response(
+          JSON.stringify({ success: false, error: "Invalid order amount" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const authHeaderRz = "Basic " + btoa(`${keyId}:${keySecret}`);
+      const rzRequestBody = {
+        amount: amountInPaise,
+        currency: "INR",
+        receipt: String(order_id),
+        notes: {
+          order_id: String(order_id),
+          payment_id: String(payment_id),
+          customer_id: user.id,
+        },
+      };
+
+      let rzRes: Response;
+      let rzData: any = null;
+      try {
+        rzRes = await fetch("https://api.razorpay.com/v1/orders", {
+          method: "POST",
+          headers: {
+            "Authorization": authHeaderRz,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(rzRequestBody),
+        });
+        rzData = await rzRes.json();
+      } catch (fetchErr) {
+        // Network timeout / exception reaching Razorpay — Reconcile by receipt before voiding
+        console.warn("[create-order-v2] Network exception on Razorpay POST order. Reconciling...", fetchErr);
+        try {
+          const recRes = await fetch(`https://api.razorpay.com/v1/orders?receipt=${encodeURIComponent(String(order_id))}`, {
+            headers: { "Authorization": authHeaderRz },
+          });
+          if (recRes.ok) {
+            const recData = await recRes.

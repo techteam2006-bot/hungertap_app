@@ -26,6 +26,10 @@
 # Expo modules
 -keep class expo.modules.** { *; }
 
+# react-native-reanimated
+-keep class com.swmansion.reanimated.** { *; }
+-keep class com.facebook.react.turbomodule.** { *; }
+
 # Payment gateway native SDKs — reached reflectively / via WebView JS bridges,
 # so R8 must not rename or strip them in release builds.
 -keep class com.reactnativecashfreepgsdk.** { *; }
@@ -61,5 +65,9 @@
 -keep class datamodels.** { *; }
 -dontwarn in.easebuzz.**
 
-# Add any project specific keep options here:
+# Razorpay SDK
+-keep class com.razorpay.** { *; }
+-keep class com.reactnative.razorpay.** { *; }
+-dontwarn com.razorpay.**
 
+# Add any project specific keep options here:

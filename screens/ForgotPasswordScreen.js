@@ -135,6 +135,7 @@ const createForgotPasswordStyles = (colors) =>
       fontSize: width * 0.04,
       fontFamily: appTypography.regular,
       color: colors.text,
+      backgroundColor: colors.inputBackground,
       height: '100%',
       paddingVertical: 0,
       textAlignVertical: 'center',
@@ -521,6 +522,9 @@ const ForgotPasswordScreen = ({ navigation, route }) => {
                     keyboardType="email-address"
                     autoCapitalize="none"
                     autoCorrect={false}
+                    autoComplete="email"
+                    textContentType="emailAddress"
+                    underlineColorAndroid="transparent"
                     returnKeyType="done"
                     blurOnSubmit
                     onSubmitEditing={handleSendCode}
@@ -624,6 +628,9 @@ const ForgotPasswordScreen = ({ navigation, route }) => {
                         onChangeText={setNewPassword}
                         secureTextEntry={!newPasswordVisible}
                         autoCapitalize="none"
+                        autoComplete="new-password"
+                        textContentType="newPassword"
+                        underlineColorAndroid="transparent"
                         returnKeyType="next"
                         blurOnSubmit={false}
                         onSubmitEditing={() => confirmPasswordInputRef.current?.focus()}
@@ -665,6 +672,9 @@ const ForgotPasswordScreen = ({ navigation, route }) => {
                         onChangeText={setConfirmPassword}
                         secureTextEntry={!confirmPasswordVisible}
                         autoCapitalize="none"
+                        autoComplete="new-password"
+                        textContentType="newPassword"
+                        underlineColorAndroid="transparent"
                         returnKeyType="done"
                         blurOnSubmit
                         onSubmitEditing={handleResetPassword}

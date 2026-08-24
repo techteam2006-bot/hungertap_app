@@ -39,7 +39,6 @@ import {
   getOrderActionButtonText,
   isDeliveredLike,
   isReorderEligibleStatus,
-  orderMatchesStatusFilter,
 } from '../lib/orderStatus';
 
 const OrdersScreen = ({ navigation }) => {
@@ -121,7 +120,8 @@ const OrdersScreen = ({ navigation }) => {
       if (!options.silent) setLoading(true);
       isFetchingRef.current = true;
 
-      console.log('🔍 Fetching orders for user:', user?.id);
+      const statusFilter = options.status != null ? options.status : activeStatus;
+      console.log('🔍 Fetching orders for user:', user?.id, 'status:', statusFilter);
 
       const {
         data: ordersData,
@@ -129,6 +129,7 @@ const OrdersScreen = ({ navigation }) => {
         hasMore,
       } = await getOrders(supabase, user.id, {
         forceRefresh: Boolean(options.forceRefresh),
+        status: statusFilter,
       });
 
       if (ordersError && !(Array.isArray(ordersData) && ordersData.length > 0)) {
@@ -150,9 +151,6 @@ const OrdersScreen = ({ navigation }) => {
 
 
   useEffect(() => {
-    if (user?.id) {
-      fetchOrders();
-    }
     return () => {
       if (pollingIntervalRef.current) {
         clearInterval(pollingIntervalRef.current);
@@ -161,13 +159,12 @@ const OrdersScreen = ({ navigation }) => {
     };
   }, [user?.id]);
 
-  // Live list while Orders tab/screen is focused. Unique channel + removeChannel
-  // avoids "cannot add postgres_changes callbacks after subscribe()" from reuse.
+  // Fetch first page of 10 (for active status / all) on open and when status filter changes.
   useFocusEffect(
     useCallback(() => {
       if (!user?.id) return undefined;
 
-      fetchOrders({ silent: true, forceRefresh: true });
+      fetchOrders({ silent: false, forceRefresh: true, status: activeStatus });
 
       const topic = `orders_list_${user.id}`;
       let debounceTimer = null;
@@ -175,7 +172,7 @@ const OrdersScreen = ({ navigation }) => {
         if (debounceTimer) clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => {
           if (!isFetchingRef.current) {
-            fetchOrders({ silent: true, forceRefresh: true });
+            fetchOrders({ silent: true, forceRefresh: true, status: activeStatus });
           }
         }, 250);
       };
@@ -204,18 +201,18 @@ const OrdersScreen = ({ navigation }) => {
           } catch (__) {}
         }
       };
-    }, [user?.id])
+    }, [user?.id, activeStatus])
   );
 
   const onRefresh = useCallback(async () => {
     if (!user?.id) return;
     setRefreshing(true);
     try {
-      await fetchOrders({ silent: true, forceRefresh: true });
+      await fetchOrders({ silent: true, forceRefresh: true, status: activeStatus });
     } finally {
       setRefreshing(false);
     }
-  }, [user?.id]);
+  }, [user?.id, activeStatus]);
 
   // Debounce search input
   useEffect(() => {
@@ -502,13 +499,11 @@ const OrdersScreen = ({ navigation }) => {
 
   const statusFilters = useMemo(() => ORDER_STATUS_FILTERS, []);
 
-  // Search/filter applies to loaded pages only (server pages chronologically).
+  // Search applies to the loaded status page; status itself is server-filtered.
   const filteredOrders = useMemo(() => {
     const q = debouncedQuery;
     return orders.filter((order) => {
       if (order.status === 'pending_payment') return false;
-
-      if (!orderMatchesStatusFilter(order.status, activeStatus)) return false;
       if (!q) return true;
       const token = String(order.order_token || '').toLowerCase();
       const itemsText = parseOrderSummary(order.item_name)
@@ -521,7 +516,7 @@ const OrdersScreen = ({ navigation }) => {
         getOrderStatusLabel(order.status).toLowerCase().includes(q)
       );
     });
-  }, [orders, debouncedQuery, activeStatus, parseOrderSummary]);
+  }, [orders, debouncedQuery, parseOrderSummary]);
 
   const visibleOrders = filteredOrders;
 
@@ -529,7 +524,9 @@ const OrdersScreen = ({ navigation }) => {
     if (!user?.id || loadingMore || !hasMoreOrders || isFetchingRef.current) return;
     setLoadingMore(true);
     try {
-      const { data, error, hasMore } = await getMoreOrders(supabase, user.id);
+      const { data, error, hasMore } = await getMoreOrders(supabase, user.id, {
+        status: activeStatus,
+      });
       if (error && !(Array.isArray(data) && data.length > 0)) {
         Alert.alert('Error', 'Could not load more orders');
         return;
@@ -541,7 +538,14 @@ const OrdersScreen = ({ navigation }) => {
     } finally {
       setLoadingMore(false);
     }
-  }, [user?.id, loadingMore, hasMoreOrders, mapOrdersPayload]);
+  }, [user?.id, loadingMore, hasMoreOrders, mapOrdersPayload, activeStatus]);
+
+  const onSelectStatusFilter = useCallback((statusId) => {
+    if (statusId === activeStatus) return;
+    setOrders([]);
+    setHasMoreOrders(false);
+    setActiveStatus(statusId);
+  }, [activeStatus]);
 
   const renderOrdersFooter = useCallback(() => {
     if (!hasMoreOrders || orders.length === 0) return null;
@@ -668,7 +672,7 @@ const OrdersScreen = ({ navigation }) => {
           renderItem={({ item }) => (
             <TouchableOpacity
               key={item.id}
-              onPress={() => setActiveStatus(item.id)}
+              onPress={() => onSelectStatusFilter(item.id)}
               style={[
                 styles.filterButton,
                 { backgroundColor: colors.mutedRowBackground, borderColor: colors.border },

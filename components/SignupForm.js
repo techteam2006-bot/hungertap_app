@@ -405,7 +405,7 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
         <AppIcon name="person-outline" size={18} color={tertiary} style={styles.icon} />
         <TextInput
           ref={nameRef}
-          style={[styles.input, { color: colors.text }]}
+          style={[styles.input, { color: colors.text, backgroundColor: colors.inputBackground }]}
           placeholder="User Name"
           placeholderTextColor={tertiary}
           value={fullName}
@@ -415,6 +415,7 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
           autoComplete="off"
           textContentType="none"
           importantForAutofill="no"
+          underlineColorAndroid="transparent"
           editable={preOtpEditable}
           returnKeyType="next"
           blurOnSubmit={false}
@@ -438,12 +439,13 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
         <AppIcon name="business-outline" size={18} color={tertiary} style={styles.icon} />
         <TextInput
           ref={canteenRef}
-          style={[styles.input, { color: colors.text }]}
+          style={[styles.input, { color: colors.text, backgroundColor: colors.inputBackground }]}
           placeholder={canteenLoading ? 'Loading canteen…' : 'Canteen'}
           placeholderTextColor={tertiary}
           value={canteenLoading ? '' : canteenName}
           editable={false}
           selectTextOnFocus={false}
+          underlineColorAndroid="transparent"
           accessibilityLabel="Canteen name"
           accessibilityHint="Assigned automatically and cannot be changed"
         />
@@ -534,7 +536,7 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
           <AppIcon name="lock-closed-outline" size={18} color={tertiary} style={styles.icon} />
           <TextInput
             ref={passwordRef}
-            style={[styles.input, { color: colors.text }]}
+            style={[styles.input, { color: colors.text, backgroundColor: colors.inputBackground }]}
             placeholder={passwordLocked ? 'Password (verify email first)' : 'Password'}
             placeholderTextColor={tertiary}
             value={password}
@@ -548,6 +550,7 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
             autoComplete={passwordLocked ? 'off' : 'new-password'}
             textContentType={passwordLocked ? 'none' : 'newPassword'}
             importantForAutofill={passwordLocked ? 'no' : 'yes'}
+            underlineColorAndroid="transparent"
             showSoftInputOnFocus={!passwordLocked}
             editable={postOtpUnlocked}
             returnKeyType="next"
@@ -611,7 +614,7 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
           <AppIcon name="lock-closed-outline" size={18} color={tertiary} style={styles.icon} />
           <TextInput
             ref={confirmRef}
-            style={[styles.input, { color: colors.text }]}
+            style={[styles.input, { color: colors.text, backgroundColor: colors.inputBackground }]}
             placeholder={
               passwordLocked ? 'Confirm Password (verify email first)' : 'Confirm Password'
             }
@@ -627,6 +630,7 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
             autoComplete={passwordLocked ? 'off' : 'new-password'}
             textContentType={passwordLocked ? 'none' : 'newPassword'}
             importantForAutofill={passwordLocked ? 'no' : 'yes'}
+            underlineColorAndroid="transparent"
             showSoftInputOnFocus={!passwordLocked}
             editable={postOtpUnlocked}
             returnKeyType="done"

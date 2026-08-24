@@ -1,0 +1,189 @@
+n.rpc("create_order_v2_app", {
+      p_gateway_code: targetGatewayCode,
+      p_is_takeaway: Boolean(is_takeaway),
+      p_items: items,
+      p_placed_by: user.id,
+    });
+
+    if (rpcErr) {
+      console.error("[create-order-v2] RPC Error:", rpcErr);
+      return new Response(
+        JSON.stringify({ success: false, error: sanitizeRpcError(rpcErr.message) }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (!rpcRes || !rpcRes.success) {
+      return new Response(
+        JSON.stringify({ success: false, error: sanitizeRpcError(rpcRes?.error || "Order creation failed") }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const { order_id, total_amount, payment_id, gateway_code: resolvedGatewayCode } = rpcRes;
+    const finalGateway = String(resolvedGatewayCode || "").toLowerCase();
+
+    if (!payment_id) {
+      console.error("[create-order-v2] RPC returned no payment_id for order", order_id);
+      await voidFailedCheckout(supabaseAdmin, order_id, null, "Missing payment_id after order creation");
+      return new Response(
+        JSON.stringify({ success: false, error: "internal_order_error" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // =========================================================================
+    // 5A. RAZORPAY GATEWAY FLOW
+    // =========================================================================
+    if (finalGateway === "razorpay") {
+      const keyId = Deno.env.get("RAZORPAY_KEY_ID");
+      const keySecret = Deno.env.get("RAZORPAY_KEY_SECRET");
+      if (!keyId || !keySecret) {
+        await voidFailedCheckout(supabaseAdmin, order_id, payment_id, "Razorpay keys not configured on server");
+        return new Response(
+          JSON.stringify({ success: false, error: "Gateway 'razorpay' is not configured" }),
+          { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      let amountInPaise: number;
+      try {
+        amountInPaise = toPaise(total_amount);
+      } catch (err) {
+        console.error("[create-order-v2] toPaise calculation error:", err);
+        await voidFailedCheckout(supabaseAdmin, order_id, payment_id, "Invalid monetary amount");
+        return new Response(
+          JSON.stringify({ success: false, error: "Invalid order amount" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const authHeaderRz = "Basic " + btoa(`${keyId}:${keySecret}`);
+      const rzRequestBody = {
+        amount: amountInPaise,
+        currency: "INR",
+        receipt: String(order_id),
+        notes: {
+          order_id: String(order_id),
+          payment_id: String(payment_id),
+          customer_id: user.id,
+        },
+      };
+
+      let rzRes: Response;
+      let rzData: any = null;
+      try {
+        rzRes = await fetch("https://api.razorpay.com/v1/orders", {
+          method: "POST",
+          headers: {
+            "Authorization": authHeaderRz,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(rzRequestBody),
+        });
+        rzData = await rzRes.json();
+      } catch (fetchErr) {
+        // Network timeout / exception reaching Razorpay — Reconcile by receipt before voiding
+        console.warn("[create-order-v2] Network exception on Razorpay POST order. Reconciling...", fetchErr);
+        try {
+          const recRes = await fetch(`https://api.razorpay.com/v1/orders?receipt=${encodeURIComponent(String(order_id))}`, {
+            headers: { "Authorization": authHeaderRz },
+          });
+          if (recRes.ok) {
+            const recData = await recRes.json();
+            const existingOrder = recData?.items?.find((o: any) => o.receipt === String(order_id));
+            if (existingOrder) {
+              rzData = existingOrder;
+              rzRes = { ok: true, status: 200 } as any;
+            }
+          }
+        } catch (recErr) {
+          console.error("[create-order-v2] Razorpay reconciliation also timed out:", recErr);
+        }
+      }
+
+      if (!rzRes?.ok || !rzData?.id) {
+        // Definite 4xx or verified failure
+        console.error("[create-order-v2] Razorpay PG creation failed:", rzData);
+        await voidFailedCheckout(supabaseAdmin, order_id, payment_id, "Razorpay session creation failed");
+        return new Response(
+          JSON.stringify({ success: false, error: rzData?.error?.description || "Failed to initiate Razorpay payment" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Stamp payments.gateway_order_id with Razorpay order ID (e.g. 'order_xxxx')
+      const { error: stampErr } = await supabaseAdmin
+        .from("payments")
+        .update({ gateway_order_id: rzData.id })
+        .eq("id", payment_id);
+
+      if (stampErr) {
+        console.error("[create-order-v2] Failed to stamp gateway_order_id for Razorpay:", stampErr);
+        await voidFailedCheckout(supabaseAdmin, order_id, payment_id, "Failed to stamp gateway_order_id");
+        return new Response(
+          JSON.stringify({ success: false, error: "internal_order_error" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          order_id,
+          payment_id,
+          gateway: "razorpay",
+          key_id: keyId,
+          razorpay_order_id: rzData.id,
+          amount: rzData.amount,
+          currency: "INR",
+          gateway_response: {
+            id: rzData.id,
+            amount: rzData.amount,
+            currency: rzData.currency,
+          },
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // =========================================================================
+    // 5B. CASHFREE GATEWAY FLOW
+    // =========================================================================
+    if (finalGateway === "cashfree") {
+      const clientId = Deno.env.get("CASHFREE_CLIENT_ID") || Deno.env.get("CASHFREE_APP_ID");
+      const clientSecret = Deno.env.get("CASHFREE_CLIENT_SECRET") || Deno.env.get("CASHFREE_SECRET_KEY");
+      const env = (Deno.env.get("CASHFREE_ENV") || "sandbox").toLowerCase();
+
+      if (!clientId || !clientSecret) {
+        await voidFailedCheckout(supabaseAdmin, order_id, payment_id, "Cashfree keys not configured");
+        return new Response(
+          JSON.stringify({ success: false, error: "Gateway 'cashfree' is not configured (missing keys)" }),
+          { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      const isProduction = env === "production" || env === "prod";
+      const cashfreeUrl = isProduction
+        ? "https://api.cashfree.com/pg/orders"
+        : "https://sandbox.cashfree.com/pg/orders";
+
+      // Stamp payments.gateway_order_id with order_id upfront for Cashfree
+      const { error: stampErr } = await supabaseAdmin
+        .from("payments")
+        .update({ gateway_order_id: String(order_id) })
+        .eq("id", payment_id);
+
+      if (stampErr) {
+        console.error("[create-order-v2] Failed to stamp gateway_order_id:", stampErr);
+        await voidFailedCheckout(supabaseAdmin, order_id, payment_id, "Failed to stamp gateway_order_id");
+        return new Response(
+          JSON.stringify({ success: false, error: "internal_order_error" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const orderTtlMin = Math.max(15, Number(Deno.env.get("CASHFREE_ORDER_TTL_MIN") || "20") || 20);
+      const orderExpiryTime = new Date(Date.now() + orderTtlMin * 60 * 1000).toISOString();
+
+      const rawPhone = String(
+        user.ph

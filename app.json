@@ -3,7 +3,7 @@
     "name": "HungerTap",
     "slug": "canteen-app",
     "scheme": "hungertap",
-    "version": "1.0.2",
+    "version": "1.0.4",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "owner": "24951a66p9",
@@ -45,7 +45,7 @@
       "package": "com.hungertap.app",
       "googleServicesFile": "./google-services.json",
       "icon": "./assets/splash_icon.png",
-      "versionCode": 3,
+      "versionCode": 6,
       "softwareKeyboardLayoutMode": "pan",
       "permissions": [
         "INTERNET",
@@ -82,6 +82,7 @@
       "expo-secure-store",
       "expo-notifications",
       "expo-background-fetch",
+      "./plugins/withEasebuzzManifestMergerFix.js",
       [
         "expo-build-properties",
         {

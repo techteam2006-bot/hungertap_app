@@ -6,16 +6,21 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
-  Dimensions,
+  useWindowDimensions,
   Image,
   Animated,
   ActivityIndicator,
   RefreshControl,
+  Modal,
+  TextInput,
+  Pressable,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import AppIcon from '../components/AppIcon';
 import { LinearGradient } from 'expo-linear-gradient';
-import { CommonActions } from '@react-navigation/native';
+import { CommonActions, useFocusEffect } from '@react-navigation/native';
 import { useCart } from '../lib/CartContext';
 import { useTheme } from '../lib/ThemeContext';
 import { shouldShowRecommendations } from '../lib/utils/recommendations';
@@ -56,12 +61,24 @@ import {
   CART_MAX_ORDER_TOTAL_MESSAGE,
   exceedsMaxOrderTotal,
   takeawayChargeForLines,
+  getLowStockWarningItems,
+  formatLowStockWarningMessages,
 } from '../lib/cartRules';
 import { pullRefreshControlProps } from '../lib/pullToRefresh';
+import {
+  getPushReadinessForOrdering,
+  registerForPushNotificationsAsync,
+} from '../lib/services/notifications';
+import { setNotificationsEnabled } from '../lib/settingsCache';
+import NotificationService from '../lib/NotificationService';
+import {
+  formatPhoneDisplay,
+  getPhoneFromUser,
+  isValidIndianMobile,
+  normalizePhoneDigits,
+} from '../lib/userPhone';
 
-const { width, height } = Dimensions.get('window');
-
-const createCartStyles = (colors, height) =>
+const createCartStyles = (colors, windowHeight) =>
   StyleSheet.create({
   container: {
     flex: 1,
@@ -125,12 +142,13 @@ const createCartStyles = (colors, height) =>
     flex: 1,
   },
   scrollContent: {
-    paddingBottom: 100,
+    paddingBottom: 120,
     flexGrow: 1,
   },
   emptyScrollContent: {
     flexGrow: 1,
-    paddingBottom: 50,
+    justifyContent: 'center',
+    paddingBottom: 24,
   },
   cartItemsSection: {
     paddingHorizontal: 16,
@@ -504,7 +522,7 @@ const createCartStyles = (colors, height) =>
     backgroundColor: colors.elevatedSurface,
     borderTopLeftRadius: 15,
     borderTopRightRadius: 15,
-    paddingTop: 12,
+    paddingTop: 10,
     paddingBottom: 12,
     paddingHorizontal: 20,
     shadowColor: colors.shadow,
@@ -512,6 +530,22 @@ const createCartStyles = (colors, height) =>
     shadowOpacity: 0.25,
     shadowRadius: 2,
     elevation: 4,
+  },
+  phonePlaceOrderLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+    gap: 8,
+  },
+  phonePlaceOrderText: {
+    flex: 1,
+    fontSize: 12,
+    fontFamily: appTypography.regular,
+  },
+  phonePlaceOrderChange: {
+    fontSize: 12,
+    fontFamily: appTypography.semiBold,
   },
   placeOrderButton: {
     backgroundColor: colors.success,
@@ -530,17 +564,24 @@ const createCartStyles = (colors, height) =>
     color: '#FFFFFF',
   },
   emptyCartContainer: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 40,
+    paddingVertical: 24,
+    minHeight: Math.max(320, Math.round(windowHeight * 0.55)),
+  },
+  emptyCartBody: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 40,
-    paddingVertical: 60,
-    minHeight: height * 0.6,
+    paddingBottom: 24,
   },
   emptyCartCard: {
     alignItems: 'center',
-    paddingVertical: 40,
-    paddingHorizontal: 40,
+    paddingVertical: 24,
+    paddingHorizontal: 24,
   },
   emptyCartTitle: {
     fontSize: 24,
@@ -701,12 +742,79 @@ const createCartStyles = (colors, height) =>
     marginTop: 8,
     marginLeft: 30,
   },
+  phoneModalOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  phoneModalCard: {
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 28,
+    borderTopWidth: 1,
+  },
+  phoneModalTitle: {
+    fontSize: 18,
+    fontFamily: appTypography.bold,
+    marginBottom: 6,
+  },
+  phoneModalBody: {
+    fontSize: 13,
+    fontFamily: appTypography.regular,
+    lineHeight: 18,
+    marginBottom: 14,
+  },
+  phoneModalInput: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 16,
+    fontFamily: appTypography.regular,
+    marginBottom: 8,
+  },
+  phoneModalError: {
+    fontSize: 12,
+    fontFamily: appTypography.regular,
+    marginBottom: 10,
+  },
+  phoneModalActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 8,
+  },
+  phoneModalBtn: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  phoneModalBtnText: {
+    fontSize: 15,
+    fontFamily: appTypography.semiBold,
+  },
 });
 
 const CartScreen = ({ navigation }) => {
   const { colors, isDarkMode } = useTheme();
-  const styles = useMemo(() => createCartStyles(colors, height), [colors]);
+  const { height: windowHeight } = useWindowDimensions();
+  const styles = useMemo(
+    () => createCartStyles(colors, windowHeight),
+    [colors, windowHeight]
+  );
   const insets = useSafeAreaInsets(); // Get safe area insets for proper spacing
+  // Remount body after returning from payment SDK/WebView — Android often leaves
+  // ScrollView layout stuck with content pinned under the header.
+  const [layoutEpoch, setLayoutEpoch] = useState(0);
+  useFocusEffect(
+    useCallback(() => {
+      setLayoutEpoch((n) => n + 1);
+      return undefined;
+    }, [])
+  );
   const { 
     cartItems, 
     increaseQuantity, 
@@ -747,8 +855,14 @@ const CartScreen = ({ navigation }) => {
     return `₹${safeUnit} × ${qty}`;
   };
 
-  const { user } = useAuth();
+  const { user, updateUserPhone } = useAuth();
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
+  const [phoneModalVisible, setPhoneModalVisible] = useState(false);
+  const [phoneDraft, setPhoneDraft] = useState('');
+  const [phoneModalError, setPhoneModalError] = useState('');
+  const [phoneSaving, setPhoneSaving] = useState(false);
+  const [phoneRequiredForCheckout, setPhoneRequiredForCheckout] = useState(false);
+  const phoneSavedResumeRef = useRef(null);
   const placeOrderInFlightRef = useRef(false);
   const [checkoutErrorToast, setCheckoutErrorToast] = useState('');
   const [isOrderSummaryExpanded, setIsOrderSummaryExpanded] = useState(false); // State for Order Summary dropdown
@@ -872,6 +986,11 @@ const CartScreen = ({ navigation }) => {
   const subtotalAmount = getTotalPrice();
   const orderOverLimit = exceedsMaxOrderTotal(subtotalAmount);
 
+  const lowStockBannerMessages = useMemo(
+    () => formatLowStockWarningMessages(getLowStockWarningItems(cartItems)),
+    [cartItems]
+  );
+
   const handleTakeawayToggle = () => {
     if (isTakeaway) {
       setIsTakeaway(false);
@@ -882,6 +1001,50 @@ const CartScreen = ({ navigation }) => {
 
   // Get authenticated user ID (required by RLS policies)
   const getUserId = () => user?.id;
+
+  const savedPhone = useMemo(() => getPhoneFromUser(user), [user]);
+
+  const openPhoneModal = useCallback(
+    (opts = {}) => {
+      setPhoneDraft(savedPhone || '');
+      setPhoneModalError('');
+      setPhoneRequiredForCheckout(Boolean(opts.required));
+      setPhoneModalVisible(true);
+    },
+    [savedPhone]
+  );
+
+  const closePhoneModal = useCallback(() => {
+    if (phoneSaving) return;
+    setPhoneModalVisible(false);
+    setPhoneRequiredForCheckout(false);
+    phoneSavedResumeRef.current = null;
+  }, [phoneSaving]);
+
+  const savePhoneFromModal = useCallback(async () => {
+    if (!isValidIndianMobile(phoneDraft)) {
+      setPhoneModalError('Enter a valid 10-digit mobile number (starts with 6–9).');
+      return;
+    }
+    setPhoneSaving(true);
+    setPhoneModalError('');
+    try {
+      const result = await updateUserPhone(phoneDraft);
+      if (!result?.ok) {
+        setPhoneModalError(result?.error || 'Could not save phone number.');
+        return;
+      }
+      setPhoneModalVisible(false);
+      setPhoneRequiredForCheckout(false);
+      const resume = phoneSavedResumeRef.current;
+      phoneSavedResumeRef.current = null;
+      if (typeof resume === 'function') {
+        resume();
+      }
+    } finally {
+      setPhoneSaving(false);
+    }
+  }, [phoneDraft, updateUserPhone]);
 
   useEffect(() => {
     if (!checkoutErrorToast) return undefined;
@@ -962,6 +1125,17 @@ const CartScreen = ({ navigation }) => {
         return;
       }
 
+      // Gateways need a phone; store on auth metadata (edge reads it later).
+      if (!isValidIndianMobile(getPhoneFromUser(user))) {
+        placeOrderInFlightRef.current = false;
+        setIsCreatingOrder(false);
+        phoneSavedResumeRef.current = () => {
+          handlePayment();
+        };
+        openPhoneModal({ required: true });
+        return;
+      }
+
       const prep = await prepareCheckoutCart(userId, cartItems);
       if (prep.stockErrors.length > 0) {
         Alert.alert('Cannot place order', prep.stockErrors.join('\n'));
@@ -974,41 +1148,157 @@ const CartScreen = ({ navigation }) => {
         return;
       }
 
-      const args = prepareCheckoutOrderArgs(linesForOrder, isTakeaway);
-      if (!args.ok) {
-        Alert.alert('Cannot place order', toAlertMessage(args.error, 'Invalid cart.'));
+      const continueCheckout = async () => {
+        const args = prepareCheckoutOrderArgs(linesForOrder, isTakeaway);
+        if (!args.ok) {
+          Alert.alert('Cannot place order', toAlertMessage(args.error, 'Invalid cart.'));
+          return;
+        }
+
+        const check = await validateCartItemsForUserCanteen(userId, linesForOrder, args.p_items);
+        if (!check.ok) {
+          Alert.alert('Cannot place order', toAlertMessage(check.error, 'Cart validation failed.'));
+          return;
+        }
+
+        const v2 = await postCreateOrderV2({
+          accessToken: session.access_token,
+          items: args.p_items,
+          is_takeaway: args.p_is_takeaway,
+          gateway_code: selectedGateway || 'cashfree',
+        });
+
+        if (!v2.ok) {
+          const detail = formatCreateOrderV2Error(v2.data, v2.status);
+          setCheckoutErrorToast(toAlertMessage(v2.error, detail));
+          return;
+        }
+
+        const orderTotal = getFinalTotalForLines(linesForOrder);
+        const nav = await navigateToPaymentProcessingAfterV2(navigation, supabase, v2, {
+          userId,
+          orderItems: [...linesForOrder],
+          orderTotal,
+          isTakeaway: args.p_is_takeaway,
+        });
+        if (!nav.ok) {
+          setCheckoutErrorToast(toAlertMessage(nav.error, 'Checkout incomplete.'));
+        }
+      };
+
+      const runWithOptionalStockWarning = async () => {
+        if (prep.stockWarnings.length > 0) {
+          placeOrderInFlightRef.current = false;
+          setIsCreatingOrder(false);
+          Alert.alert(
+            'Low stock warning',
+            `${prep.stockWarnings.join('\n')}\n\nIf stock runs out after payment, that item may be cancelled and refunded.`,
+            [
+              { text: 'Go back', style: 'cancel' },
+              {
+                text: 'Continue',
+                onPress: () => {
+                  placeOrderInFlightRef.current = true;
+                  setIsCreatingOrder(true);
+                  continueCheckout()
+                    .catch((error) => {
+                      const m = typeof error?.message === 'string' ? error.message.trim() : '';
+                      if (m === MSG_POOR_NETWORK || isNetworkConnectivityFailure(error)) {
+                        setCheckoutErrorToast(MSG_POOR_NETWORK);
+                      } else if (m === MSG_COULD_NOT_FETCH_DATA) {
+                        setCheckoutErrorToast(MSG_COULD_NOT_FETCH_DATA);
+                      } else {
+                        console.warn('handlePayment:', error?.message || error);
+                        setCheckoutErrorToast(toAlertMessage(error, MSG_PAYMENT_FAILED));
+                      }
+                    })
+                    .finally(() => {
+                      placeOrderInFlightRef.current = false;
+                      setIsCreatingOrder(false);
+                    });
+                },
+              },
+            ]
+          );
+          return;
+        }
+        await continueCheckout();
+      };
+
+      const pushReady = await getPushReadinessForOrdering(userId);
+      if (!pushReady.ready && pushReady.canRegister) {
+        placeOrderInFlightRef.current = false;
+        setIsCreatingOrder(false);
+        Alert.alert(
+          'Enable order notifications?',
+          'Turn on notifications so you get updates when your order is placed, ready, or refunded.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Not now',
+              onPress: () => {
+                placeOrderInFlightRef.current = true;
+                setIsCreatingOrder(true);
+                runWithOptionalStockWarning()
+                  .catch((error) => {
+                    const m = typeof error?.message === 'string' ? error.message.trim() : '';
+                    if (m === MSG_POOR_NETWORK || isNetworkConnectivityFailure(error)) {
+                      setCheckoutErrorToast(MSG_POOR_NETWORK);
+                    } else if (m === MSG_COULD_NOT_FETCH_DATA) {
+                      setCheckoutErrorToast(MSG_COULD_NOT_FETCH_DATA);
+                    } else {
+                      console.warn('handlePayment:', error?.message || error);
+                      setCheckoutErrorToast(toAlertMessage(error, MSG_PAYMENT_FAILED));
+                    }
+                  })
+                  .finally(() => {
+                    placeOrderInFlightRef.current = false;
+                    setIsCreatingOrder(false);
+                  });
+              },
+            },
+            {
+              text: 'Enable',
+              onPress: () => {
+                (async () => {
+                  placeOrderInFlightRef.current = true;
+                  setIsCreatingOrder(true);
+                  try {
+                    const result = await registerForPushNotificationsAsync(userId);
+                    if (result.token || result.localOnly) {
+                      await setNotificationsEnabled(true);
+                      NotificationService.isInitialized = false;
+                      await NotificationService.initialize();
+                    } else if (result.reason === 'permission_denied') {
+                      Alert.alert(
+                        'Permission needed',
+                        'Allow notifications in system settings to get order updates. You can continue checkout without them.'
+                      );
+                    }
+                    await runWithOptionalStockWarning();
+                  } catch (error) {
+                    const m = typeof error?.message === 'string' ? error.message.trim() : '';
+                    if (m === MSG_POOR_NETWORK || isNetworkConnectivityFailure(error)) {
+                      setCheckoutErrorToast(MSG_POOR_NETWORK);
+                    } else if (m === MSG_COULD_NOT_FETCH_DATA) {
+                      setCheckoutErrorToast(MSG_COULD_NOT_FETCH_DATA);
+                    } else {
+                      console.warn('handlePayment:', error?.message || error);
+                      setCheckoutErrorToast(toAlertMessage(error, MSG_PAYMENT_FAILED));
+                    }
+                  } finally {
+                    placeOrderInFlightRef.current = false;
+                    setIsCreatingOrder(false);
+                  }
+                })();
+              },
+            },
+          ]
+        );
         return;
       }
 
-      const check = await validateCartItemsForUserCanteen(userId, linesForOrder, args.p_items);
-      if (!check.ok) {
-        Alert.alert('Cannot place order', toAlertMessage(check.error, 'Cart validation failed.'));
-        return;
-      }
-
-      const v2 = await postCreateOrderV2({
-        accessToken: session.access_token,
-        items: args.p_items,
-        is_takeaway: args.p_is_takeaway,
-        gateway_code: selectedGateway || 'cashfree',
-      });
-
-      if (!v2.ok) {
-        const detail = formatCreateOrderV2Error(v2.data, v2.status);
-        setCheckoutErrorToast(toAlertMessage(v2.error, detail));
-        return;
-      }
-
-      const orderTotal = getFinalTotalForLines(linesForOrder);
-      const nav = await navigateToPaymentProcessingAfterV2(navigation, supabase, v2, {
-        userId,
-        orderItems: [...linesForOrder],
-        orderTotal,
-        isTakeaway: args.p_is_takeaway,
-      });
-      if (!nav.ok) {
-        setCheckoutErrorToast(toAlertMessage(nav.error, 'Checkout incomplete.'));
-      }
+      await runWithOptionalStockWarning();
     } catch (error) {
       const m = typeof error?.message === 'string' ? error.message.trim() : '';
       if (m === MSG_POOR_NETWORK || isNetworkConnectivityFailure(error)) {
@@ -1217,7 +1507,7 @@ const CartScreen = ({ navigation }) => {
   );
 
   const renderEmptyCart = () => (
-    <View style={styles.emptyCartContainer}>
+    <View style={styles.emptyCartBody} accessibilityRole="summary">
       <View style={styles.emptyCartCard}>
         <AppIcon name="cart-outline" size={80} color="#999" />
         <Text style={styles.emptyCartTitle}>
@@ -1262,13 +1552,16 @@ const CartScreen = ({ navigation }) => {
 
       <View style={styles.separator} />
 
+      {cartItems.length === 0 ? (
+        <View key={`empty-cart-${layoutEpoch}`} style={{ flex: 1 }}>
+          {renderEmptyCart()}
+        </View>
+      ) : (
       <ScrollView
+        key={`cart-scroll-${layoutEpoch}`}
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={[
-          styles.scrollContent,
-          cartItems.length === 0 && styles.emptyScrollContent
-        ]}
+        contentContainerStyle={styles.scrollContent}
         refreshControl={
           <RefreshControl
             {...pullRefreshControlProps({
@@ -1281,7 +1574,7 @@ const CartScreen = ({ navigation }) => {
           />
         }
       >
-        {cartItems.length > 0 && orderOverLimit ? (
+        {orderOverLimit ? (
           <View
             style={[
               styles.orderLimitBanner,
@@ -1298,10 +1591,23 @@ const CartScreen = ({ navigation }) => {
           </View>
         ) : null}
 
-        {cartItems.length === 0 ? (
-          renderEmptyCart()
-        ) : (
-          <>
+        {!orderOverLimit && lowStockBannerMessages.length > 0 ? (
+          <View
+            style={[
+              styles.orderLimitBanner,
+              {
+                backgroundColor: isDarkMode ? 'rgba(245,158,11,0.15)' : '#FFF8E8',
+                borderColor: isDarkMode ? 'rgba(245,158,11,0.45)' : '#F5D48A',
+              },
+            ]}
+          >
+            <AppIcon name="alert-circle-outline" size={20} color="#D97706" />
+            <Text style={[styles.orderLimitBannerText, { color: isDarkMode ? '#FBBF24' : '#92400E' }]}>
+              {`Low stock: ${lowStockBannerMessages.join(' ')}`}
+            </Text>
+          </View>
+        ) : null}
+
             {/* Cart Items - Single Card Container */}
             <View style={styles.cartItemsSection}>
               <View style={styles.singleCartCard}>
@@ -1435,15 +1741,33 @@ const CartScreen = ({ navigation }) => {
               <Text style={styles.policyTitle}>Cancellation Policy:</Text>
               <Text style={styles.policyText}>
                 Orders once placed cannot be cancelled by the customer. In rare cases, the counter may cancel an order.
+                Stock is confirmed when payment succeeds. Items with low stock may be cancelled after payment if inventory
+                runs out; a refund is issued for those items.
               </Text>
             </View>
-          </>
-        )}
       </ScrollView>
+      )}
 
       {/* Bottom Action Bar */}
       {cartItems.length > 0 && (
         <View style={styles.bottomBar}>
+          <View style={styles.phonePlaceOrderLine}>
+            <Text style={[styles.phonePlaceOrderText, { color: colors.textSecondary }]} numberOfLines={1}>
+              {savedPhone
+                ? `Mobile ${formatPhoneDisplay(savedPhone)} for payments`
+                : 'Mobile number required for payments'}
+            </Text>
+            <TouchableOpacity
+              onPress={() => openPhoneModal({ required: false })}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityRole="button"
+              accessibilityLabel={savedPhone ? 'Change phone number' : 'Add phone number'}
+            >
+              <Text style={[styles.phonePlaceOrderChange, { color: colors.brandYellow || '#E5A93B' }]}>
+                {savedPhone ? 'Change' : 'Add'}
+              </Text>
+            </TouchableOpacity>
+          </View>
           <LoadingButton
             title={
               orderOverLimit
@@ -1467,7 +1791,7 @@ const CartScreen = ({ navigation }) => {
             position: 'absolute',
             left: 16,
             right: 16,
-            bottom: (cartItems.length > 0 ? 72 : 24) + 8,
+            bottom: (cartItems.length > 0 ? 96 : 24) + 8,
           }}
         >
           <View
@@ -1482,6 +1806,90 @@ const CartScreen = ({ navigation }) => {
           </View>
         </View>
       ) : null}
+
+      <Modal
+        visible={phoneModalVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={closePhoneModal}
+      >
+        <KeyboardAvoidingView
+          style={styles.phoneModalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <Pressable style={StyleSheet.absoluteFill} onPress={closePhoneModal} />
+          <View
+            style={[
+              styles.phoneModalCard,
+              {
+                backgroundColor: colors.elevatedSurface,
+                borderColor: colors.border,
+                paddingBottom: 28 + (insets?.bottom || 0),
+              },
+            ]}
+          >
+            <Text style={[styles.phoneModalTitle, { color: colors.text }]}>
+              {phoneRequiredForCheckout ? 'Mobile number required' : 'Mobile for payments'}
+            </Text>
+            <Text style={[styles.phoneModalBody, { color: colors.textSecondary }]}>
+              Payment gateways need your 10-digit mobile number. It is saved to your account so you
+              can change it later from the cart.
+            </Text>
+            <TextInput
+              style={[
+                styles.phoneModalInput,
+                {
+                  color: colors.text,
+                  backgroundColor: colors.inputBackground,
+                  borderColor: phoneModalError ? colors.error : colors.border,
+                },
+              ]}
+              value={phoneDraft}
+              onChangeText={(t) => {
+                setPhoneDraft(normalizePhoneDigits(t).slice(0, 10));
+                if (phoneModalError) setPhoneModalError('');
+              }}
+              placeholder="10-digit mobile number"
+              placeholderTextColor={colors.inputPlaceholder || colors.textTertiary}
+              keyboardType="phone-pad"
+              maxLength={10}
+              autoFocus
+              underlineColorAndroid="transparent"
+              editable={!phoneSaving}
+            />
+            {phoneModalError ? (
+              <Text style={[styles.phoneModalError, { color: colors.error }]}>{phoneModalError}</Text>
+            ) : null}
+            <View style={styles.phoneModalActions}>
+              {!phoneRequiredForCheckout ? (
+                <TouchableOpacity
+                  style={[styles.phoneModalBtn, { backgroundColor: colors.mutedRowBackground }]}
+                  onPress={closePhoneModal}
+                  disabled={phoneSaving}
+                >
+                  <Text style={[styles.phoneModalBtnText, { color: colors.text }]}>Cancel</Text>
+                </TouchableOpacity>
+              ) : null}
+              <TouchableOpacity
+                style={[
+                  styles.phoneModalBtn,
+                  { backgroundColor: colors.brandYellow || '#E5A93B', opacity: phoneSaving ? 0.7 : 1 },
+                ]}
+                onPress={savePhoneFromModal}
+                disabled={phoneSaving}
+              >
+                {phoneSaving ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={[styles.phoneModalBtnText, { color: '#FFFFFF' }]}>
+                    {phoneRequiredForCheckout ? 'Save & continue' : 'Save'}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 };
