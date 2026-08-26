@@ -1,5 +1,5 @@
 import React, { useRef, useCallback, useEffect } from 'react';
-import { View, TextInput, StyleSheet, Text, Pressable } from 'react-native';
+import { View, TextInput, StyleSheet, Text, Pressable, Platform, Keyboard } from 'react-native';
 
 const DEFAULT_LENGTH = 6;
 
@@ -24,18 +24,56 @@ export default function OTPInput({
   textColor = '#111827',
 }) {
   const inputRef = useRef(null);
+  const keyboardVisibleRef = useRef(false);
   const digits = String(value || '')
     .replace(/\D/g, '')
     .slice(0, length);
 
   useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, () => {
+      keyboardVisibleRef.current = true;
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      keyboardVisibleRef.current = false;
+    });
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  const focusInput = useCallback(() => {
+    if (disabled) return;
+    const input = inputRef.current;
+    if (!input) return;
+
+    const alreadyFocused = typeof input.isFocused === 'function' ? input.isFocused() : false;
+
+    // Android often dismisses the keyboard without blurring. Calling focus()
+    // is then a no-op — blur first, then focus again to reopen the keyboard.
+    if (alreadyFocused && !keyboardVisibleRef.current) {
+      input.blur();
+      requestAnimationFrame(() => {
+        setTimeout(() => inputRef.current?.focus(), Platform.OS === 'android' ? 40 : 0);
+      });
+      return;
+    }
+
+    if (!alreadyFocused) {
+      input.focus();
+    }
+  }, [disabled]);
+
+  useEffect(() => {
     if (autoFocus && !disabled) {
       // Delay past signup reveal animation / stray field focus so OTP keeps the keyboard.
-      const t = setTimeout(() => inputRef.current?.focus(), 380);
+      const t = setTimeout(() => focusInput(), 380);
       return () => clearTimeout(t);
     }
     return undefined;
-  }, [autoFocus, disabled, focusKey]);
+  }, [autoFocus, disabled, focusKey, focusInput]);
 
   const handleChange = useCallback(
     (text) => {
@@ -47,24 +85,22 @@ export default function OTPInput({
     [length, onChange]
   );
 
-  const focusHidden = () => {
-    if (!disabled) inputRef.current?.focus();
-  };
-
   return (
     <Pressable
-      onPress={focusHidden}
+      onPress={focusInput}
+      disabled={disabled}
       accessibilityRole="text"
       accessibilityLabel={accessibilityLabel}
       accessibilityState={{ disabled }}
     >
-      <View style={styles.row}>
+      <View style={styles.row} pointerEvents="box-none">
         {Array.from({ length }).map((_, i) => {
           const digit = digits[i] || '';
           const isActive = !disabled && i === Math.min(digits.length, length - 1);
           return (
             <View
               key={i}
+              pointerEvents="none"
               style={[
                 styles.box,
                 {
@@ -78,21 +114,23 @@ export default function OTPInput({
             </View>
           );
         })}
+        <TextInput
+          ref={inputRef}
+          value={digits}
+          onChangeText={handleChange}
+          onPressIn={focusInput}
+          keyboardType="number-pad"
+          textContentType="oneTimeCode"
+          autoComplete="sms-otp"
+          maxLength={length}
+          editable={!disabled}
+          showSoftInputOnFocus
+          caretHidden
+          importantForAutofill="yes"
+          style={styles.hiddenOverlay}
+          accessibilityLabel={accessibilityLabel}
+        />
       </View>
-      <TextInput
-        ref={inputRef}
-        value={digits}
-        onChangeText={handleChange}
-        keyboardType="number-pad"
-        textContentType="oneTimeCode"
-        autoComplete="sms-otp"
-        maxLength={length}
-        editable={!disabled}
-        caretHidden
-        importantForAutofill="yes"
-        style={styles.hidden}
-        accessibilityLabel={accessibilityLabel}
-      />
     </Pressable>
   );
 }
@@ -102,6 +140,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     gap: 8,
+    position: 'relative',
   },
   box: {
     flex: 1,
@@ -117,10 +156,10 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
   },
-  hidden: {
-    position: 'absolute',
-    opacity: 0,
-    height: 1,
-    width: 1,
+  // Covers the digit boxes so taps always hit a real TextInput.
+  hiddenOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    opacity: 0.02,
+    color: 'transparent',
   },
 });

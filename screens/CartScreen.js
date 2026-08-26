@@ -40,7 +40,8 @@ import {
 import { fetchActivePaymentGateways } from '../lib/paymentGatewaysApi';
 import PaymentGatewaySelector from '../components/PaymentGatewaySelector';
 import { toAlertMessage } from '../lib/toAlertMessage';
-import { getMenu, getLastRememberedCanteen } from '../lib/menuCache';
+import { getMenu, getLastRememberedCanteen, rememberLastCanteen } from '../lib/menuCache';
+import { VIEWS } from '../lib/supabaseViews';
 import { useAuth } from '../lib/AuthContext';
 import { pxToPercentX, pxToPercentY } from '../utils/percent';
 import { appTypography } from '../lib/darkThemeConfig';
@@ -60,6 +61,7 @@ import {
   CART_MAX_ORDER_TOTAL,
   CART_MAX_ORDER_TOTAL_MESSAGE,
   exceedsMaxOrderTotal,
+  resolveTakeawayFeePerItem,
   takeawayChargeForLines,
   getLowStockWarningItems,
   formatLowStockWarningMessages,
@@ -825,10 +827,15 @@ const CartScreen = ({ navigation }) => {
     replaceCartItems,
     isTakeaway,
     setIsTakeaway,
+    takeawayFeePerItem,
+    setTakeawayFeePerItem,
     refreshCart,
   } = useCart();
+
+  const { user, updateUserPhone } = useAuth();
   
-  const getTakeawayChargeForLines = (lines) => takeawayChargeForLines(lines, isTakeaway);
+  const getTakeawayChargeForLines = (lines) =>
+    takeawayChargeForLines(lines, isTakeaway, takeawayFeePerItem);
 
   const getTakeawayCharge = () => getTakeawayChargeForLines(cartItems);
 
@@ -855,7 +862,6 @@ const CartScreen = ({ navigation }) => {
     return `₹${safeUnit} × ${qty}`;
   };
 
-  const { user, updateUserPhone } = useAuth();
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
   const [phoneModalVisible, setPhoneModalVisible] = useState(false);
   const [phoneDraft, setPhoneDraft] = useState('');
@@ -863,9 +869,62 @@ const CartScreen = ({ navigation }) => {
   const [phoneSaving, setPhoneSaving] = useState(false);
   const [phoneRequiredForCheckout, setPhoneRequiredForCheckout] = useState(false);
   const phoneSavedResumeRef = useRef(null);
+  const checkoutPhoneRef = useRef('');
   const placeOrderInFlightRef = useRef(false);
   const [checkoutErrorToast, setCheckoutErrorToast] = useState('');
   const [isOrderSummaryExpanded, setIsOrderSummaryExpanded] = useState(false); // State for Order Summary dropdown
+
+  // Sync takeaway fee from AsyncStorage + live canteens.takeaway_charge (matches create_order).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const last = await getLastRememberedCanteen();
+        if (!cancelled && last?.takeawayCharge != null) {
+          setTakeawayFeePerItem(last.takeawayCharge);
+        }
+        const canteenId = user?.id
+          ? await getUserCanteenId(user.id)
+          : last?.id || null;
+        if (!canteenId || cancelled) return;
+        let feeRaw = null;
+        let name = last?.name || '';
+        const viewRes = await supabase
+          .from(VIEWS.ACTIVE_OPEN_CANTEENS)
+          .select('takeaway_charge, name')
+          .eq('id', canteenId)
+          .maybeSingle();
+        if (!viewRes.error && viewRes.data?.takeaway_charge != null) {
+          feeRaw = viewRes.data.takeaway_charge;
+          name = viewRes.data.name || name;
+        } else {
+          const { data } = await supabase
+            .from('canteens')
+            .select('takeaway_charge, name')
+            .eq('id', canteenId)
+            .maybeSingle();
+          if (data?.takeaway_charge != null) {
+            feeRaw = data.takeaway_charge;
+            name = data.name || name;
+          }
+        }
+        if (cancelled || feeRaw == null) return;
+        const fee = resolveTakeawayFeePerItem(feeRaw);
+        setTakeawayFeePerItem(fee);
+        rememberLastCanteen(canteenId, name, {
+          takeawayCharge: fee,
+        }).catch(() => {});
+      } catch (_) {}
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, setTakeawayFeePerItem]);
+
+  // Keep a ref so checkout resume after saving phone does not see a stale user.
+  useEffect(() => {
+    checkoutPhoneRef.current = getPhoneFromUser(user);
+  }, [user]);
 
   // Payment Gateway State Ownership
   const [gateways, setGateways] = useState([]);
@@ -1034,12 +1093,15 @@ const CartScreen = ({ navigation }) => {
         setPhoneModalError(result?.error || 'Could not save phone number.');
         return;
       }
+      checkoutPhoneRef.current =
+        result.phone || normalizePhoneDigits(phoneDraft);
       setPhoneModalVisible(false);
       setPhoneRequiredForCheckout(false);
       const resume = phoneSavedResumeRef.current;
       phoneSavedResumeRef.current = null;
       if (typeof resume === 'function') {
-        resume();
+        // Defer so modal unmount + setUser settle before checkout re-runs.
+        setTimeout(() => resume(), 0);
       }
     } finally {
       setPhoneSaving(false);
@@ -1126,7 +1188,9 @@ const CartScreen = ({ navigation }) => {
       }
 
       // Gateways need a phone; store on auth metadata (edge reads it later).
-      if (!isValidIndianMobile(getPhoneFromUser(user))) {
+      const checkoutPhone =
+        checkoutPhoneRef.current || getPhoneFromUser(user);
+      if (!isValidIndianMobile(checkoutPhone)) {
         placeOrderInFlightRef.current = false;
         setIsCreatingOrder(false);
         phoneSavedResumeRef.current = () => {
@@ -1643,7 +1707,9 @@ const CartScreen = ({ navigation }) => {
                   {isTakeaway && <AppIcon name="checkmark" size={14} color="white" />}
                 </View>
                 <Text style={styles.globalTakeawayText}>Takeaway</Text>
-                <Text style={styles.globalTakeawayPriceHint}>(+₹10)</Text>
+                <Text style={styles.globalTakeawayPriceHint}>
+                  (+₹{takeawayFeePerItem})
+                </Text>
                 <AppIcon name="basket-outline" size={18} color="#D99367" style={{ marginLeft: 6 }} />
               </TouchableOpacity>
               <Text style={styles.globalTakeawayDescription}>Pick up your order at Canteen Counter</Text>

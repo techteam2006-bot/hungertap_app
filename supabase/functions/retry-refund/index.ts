@@ -6,10 +6,443 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+// =========================================================================
+// INLINED SHARED LOGGER
+// =========================================================================
+
+export type LogLevel = "DEBUG" | "INFO" | "WARN" | "ERROR" | "FATAL";
+
+export type FailureType = "business_failure" | "system_failure";
+
+export interface LogContext {
+  orderId?: string;
+  paymentId?: string;
+  userId?: string;
+  canteenId?: string;
+  gateway?: string;
+  gatewayOrderId?: string;
+  gatewayPaymentId?: string;
+  gatewayRefundId?: string;
+  webhookEventId?: string;
+  failureType?: FailureType;
+  [key: string]: unknown;
+}
+
+export interface ErrorDetails {
+  name?: string;
+  message?: string;
+  code?: string | number;
+  stack?: string;
+  raw?: unknown;
+}
+
+export interface LoggerOptions {
+  req?: Request;
+  requestId?: string;
+  context?: LogContext;
+  supabaseAdmin?: any;
+}
+
+const SENSITIVE_KEY_REGEX =
+  /^(password|secret|key_secret|token|authorization|salt|otp|card|cvv|pan|account_number|service_role_key|api_key|cookie|session_id)$/i;
+
+const REQUEST_ID_REGEX = /^[A-Za-z0-9._:-]{1,100}$/;
+
+const LIMITS = {
+  MAX_DEPTH: 6,
+  MAX_STRING_LENGTH: 2048,
+  MAX_ARRAY_ITEMS: 50,
+  MAX_OBJECT_KEYS: 100,
+  MAX_SERIALIZED_BYTES: 8192,
+};
+
+/**
+ * Extracts and strictly validates incoming request ID or generates a fresh one.
+ */
+export function resolveRequestId(req?: Request, explicitId?: string): string {
+  if (explicitId && REQUEST_ID_REGEX.test(explicitId)) {
+    return explicitId;
+  }
+  if (req) {
+    const headerId =
+      req.headers.get("x-request-id") ||
+      req.headers.get("cf-ray") ||
+      req.headers.get("x-sb-request-id");
+    if (headerId && REQUEST_ID_REGEX.test(headerId.trim())) {
+      return headerId.trim();
+    }
+  }
+  return `req_${crypto.randomUUID()}`;
+}
+
+/**
+ * Recursively redacts sensitive keys and applies strict depth, string, array, and key limits.
+ */
+export function sanitizeData(
+  val: unknown,
+  depth = 0,
+  seen: WeakSet<object> = new WeakSet()
+): unknown {
+  if (val === null || val === undefined) return val;
+
+  if (typeof val === "string") {
+    if (val.length > LIMITS.MAX_STRING_LENGTH) {
+      return `${val.slice(0, LIMITS.MAX_STRING_LENGTH)}... [Truncated ${val.length - LIMITS.MAX_STRING_LENGTH} chars]`;
+    }
+    return val;
+  }
+
+  if (typeof val === "number" || typeof val === "boolean") {
+    return val;
+  }
+
+  if (typeof val === "bigint") {
+    return val.toString();
+  }
+
+  if (depth >= LIMITS.MAX_DEPTH) {
+    return "[Max Depth Reached]";
+  }
+
+  if (val instanceof Error) {
+    return {
+      name: val.name,
+      message: val.message ? String(val.message).slice(0, LIMITS.MAX_STRING_LENGTH) : "",
+      stack: val.stack ? String(val.stack).slice(0, LIMITS.MAX_STRING_LENGTH) : undefined,
+      ...(val as any).code ? { code: (val as any).code } : {},
+    };
+  }
+
+  if (typeof val === "object") {
+    if (seen.has(val)) {
+      return "[Circular]";
+    }
+    seen.add(val);
+
+    if (Array.isArray(val)) {
+      const sliced = val.slice(0, LIMITS.MAX_ARRAY_ITEMS);
+      const res = sliced.map((item) => sanitizeData(item, depth + 1, seen));
+      if (val.length > LIMITS.MAX_ARRAY_ITEMS) {
+        res.push(`[+${val.length - LIMITS.MAX_ARRAY_ITEMS} items truncated]`);
+      }
+      return res;
+    }
+
+    const out: Record<string, unknown> = {};
+    const entries = Object.entries(val as Record<string, unknown>);
+    const limitedEntries = entries.slice(0, LIMITS.MAX_OBJECT_KEYS);
+
+    for (const [k, v] of limitedEntries) {
+      if (SENSITIVE_KEY_REGEX.test(k)) {
+        out[k] = "[REDACTED]";
+      } else {
+        out[k] = sanitizeData(v, depth + 1, seen);
+      }
+    }
+
+    if (entries.length > LIMITS.MAX_OBJECT_KEYS) {
+      out["_keys_truncated"] = entries.length - LIMITS.MAX_OBJECT_KEYS;
+    }
+    return out;
+  }
+
+  return String(val);
+}
+
+/**
+ * Formats data to valid JSON while guaranteeing the serialized output stays within byte limits.
+ */
+function safeJsonSerialize(payload: Record<string, unknown>): string {
+  try {
+    const jsonStr = JSON.stringify(payload);
+    if (jsonStr.length <= LIMITS.MAX_SERIALIZED_BYTES) {
+      return jsonStr;
+    }
+    return JSON.stringify({
+      timestamp: payload.timestamp,
+      level: payload.level,
+      service: payload.service,
+      request_id: payload.request_id,
+      message: payload.message,
+      truncated: true,
+      original_bytes: jsonStr.length,
+      preview: typeof payload.message === "string" ? payload.message.slice(0, 500) : "Payload exceeded 8KB",
+    });
+  } catch (err) {
+    return JSON.stringify({
+      timestamp: new Date().toISOString(),
+      level: "ERROR",
+      service: String(payload.service || "unknown"),
+      message: "safeJsonSerialize failed",
+      error: String(err),
+    });
+  }
+}
+
+/**
+ * Standard Scoped Logger
+ */
+export class EdgeLogger {
+  readonly service: string;
+  readonly requestId: string;
+  private context: LogContext;
+  private supabaseAdmin?: any;
+  private httpMeta?: { method?: string; path?: string; userAgent?: string };
+
+  constructor(service: string, options: LoggerOptions = {}) {
+    this.service = service;
+    this.requestId = resolveRequestId(options.req, options.requestId);
+    this.context = options.context ? (sanitizeData(options.context) as LogContext) : {};
+    this.supabaseAdmin = options.supabaseAdmin;
+
+    if (options.req) {
+      try {
+        const url = new URL(options.req.url);
+        this.httpMeta = {
+          method: options.req.method,
+          path: url.pathname,
+          userAgent: options.req.headers.get("user-agent") || undefined,
+        };
+      } catch {
+        // Safe fallback
+      }
+    }
+  }
+
+  /**
+   * Creates a child logger inheriting current trace identifiers.
+   */
+  withContext(childContext: LogContext): EdgeLogger {
+    const merged: LogContext = {
+      ...this.context,
+      ...childContext,
+    };
+    const child = new EdgeLogger(this.service, {
+      requestId: this.requestId,
+      context: merged,
+      supabaseAdmin: this.supabaseAdmin,
+    });
+    child.httpMeta = this.httpMeta;
+    return child;
+  }
+
+  /**
+   * Injects correlation headers (X-Request-Id) into an outgoing headers object or response.
+   */
+  injectResponseHeaders(headers: HeadersInit = {}): Headers {
+    const h = new Headers(headers);
+    h.set("X-Request-Id", this.requestId);
+    return h;
+  }
+
+  /**
+   * Measures the duration of a boundary operation (RPC, Payment Gateway API, etc.)
+   */
+  startTimer(boundaryName: string) {
+    const startTime = performance.now();
+    return {
+      done: (metadata?: Record<string, unknown>, level: LogLevel = "INFO") => {
+        const durationMs = Math.round(performance.now() - startTime);
+        this.log(level, `[Boundary] ${boundaryName} completed in ${durationMs}ms`, {
+          boundary: boundaryName,
+          duration_ms: durationMs,
+          ...metadata,
+        });
+        return durationMs;
+      },
+    };
+  }
+
+  /**
+   * Logs an explicit idempotency decision.
+   */
+  idempotency(decision: string, details?: Record<string, unknown>) {
+    this.info(`[Idempotency] ${decision}`, {
+      idempotency_decision: decision,
+      ...details,
+    });
+  }
+
+  debug(message: string, context?: Record<string, unknown>) {
+    this.log("DEBUG", message, context);
+  }
+
+  info(message: string, context?: Record<string, unknown>) {
+    this.log("INFO", message, context);
+  }
+
+  warn(message: string, context?: Record<string, unknown>) {
+    this.log("WARN", message, context);
+  }
+
+  /**
+   * Log an operational/system error.
+   * If isSystemFailure = true, this is marked as an unexpected operational failure.
+   */
+  error(message: string, error?: unknown, context?: Record<string, unknown>, isSystemFailure = true) {
+    this.log("ERROR", message, context, error, isSystemFailure);
+  }
+
+  fatal(message: string, error?: unknown, context?: Record<string, unknown>) {
+    this.log("FATAL", message, context, error, true);
+  }
+
+  /**
+   * Main dispatch method. Guaranteed to never throw.
+   */
+  private log(
+    level: LogLevel,
+    message: string,
+    extraContext?: Record<string, unknown>,
+    error?: unknown,
+    isSystemFailure = false
+  ) {
+    try {
+      const now = new Date().toISOString();
+      const sanitizedContext = sanitizeData({
+        ...this.context,
+        ...extraContext,
+      }) as Record<string, unknown>;
+
+      let errorObj: ErrorDetails | undefined;
+      if (error) {
+        if (error instanceof Error) {
+          errorObj = {
+            name: error.name,
+            message: error.message,
+            stack: error.stack,
+            code: (error as any).code,
+          };
+        } else if (typeof error === "object") {
+          errorObj = sanitizeData(error) as ErrorDetails;
+        } else {
+          errorObj = { message: String(error) };
+        }
+      }
+
+      const payload: Record<string, unknown> = {
+        timestamp: now,
+        level,
+        service: this.service,
+        request_id: this.requestId,
+        message,
+      };
+
+      if (this.context.orderId || sanitizedContext.orderId) {
+        payload.order_id = sanitizedContext.orderId || this.context.orderId;
+      }
+      if (this.context.paymentId || sanitizedContext.paymentId) {
+        payload.payment_id = sanitizedContext.paymentId || this.context.paymentId;
+      }
+      if (this.context.userId || sanitizedContext.userId) {
+        payload.user_id = sanitizedContext.userId || this.context.userId;
+      }
+      if (this.context.gateway || sanitizedContext.gateway) {
+        payload.gateway = sanitizedContext.gateway || this.context.gateway;
+      }
+      if (sanitizedContext.duration_ms !== undefined) {
+        payload.duration_ms = sanitizedContext.duration_ms;
+      }
+
+      payload.context = sanitizedContext;
+      if (errorObj) payload.error = errorObj;
+      if (this.httpMeta) payload.http = this.httpMeta;
+
+      const serialized = safeJsonSerialize(payload);
+
+      // Stdout stream (primary source of truth for Supabase Logflare)
+      if (level === "ERROR" || level === "FATAL") {
+        console.error(serialized);
+      } else if (level === "WARN") {
+        console.warn(serialized);
+      } else {
+        console.log(serialized);
+      }
+
+      // Optional DB persistence for unexpected operational/system failures only
+      if (isSystemFailure && (level === "ERROR" || level === "FATAL")) {
+        this.persistSystemError(level, message, errorObj, sanitizedContext);
+      }
+    } catch (fallbackErr) {
+      // Zero-exception guarantee: never disrupt business execution
+      try {
+        console.error(
+          `[LOGGER_FALLBACK_FAILSAFE] ${level} ${this.service} [${this.requestId}] ${message}`,
+          fallbackErr
+        );
+      } catch {
+        // Ignore
+      }
+    }
+  }
+
+  /**
+   * Non-blocking, safe insertion into system_error_logs table.
+   * Only executes if ENABLE_DB_ERROR_LOGGING === "true".
+   */
+  private persistSystemError(
+    level: LogLevel,
+    message: string,
+    errorObj?: ErrorDetails,
+    context?: Record<string, unknown>
+  ) {
+    try {
+      const isDbLoggingEnabled =
+        typeof Deno !== "undefined" &&
+        Deno.env.get("ENABLE_DB_ERROR_LOGGING") === "true";
+
+      if (!isDbLoggingEnabled || !this.supabaseAdmin) {
+        return;
+      }
+
+      const orderId =
+        typeof context?.orderId === "string" && context.orderId.length === 36
+          ? context.orderId
+          : null;
+      const userId =
+        typeof context?.userId === "string" && context.userId.length === 36
+          ? context.userId
+          : null;
+
+      // Fire-and-forget: never await, never catch into caller
+      this.supabaseAdmin
+        .from("system_error_logs")
+        .insert({
+          service: this.service,
+          level: level.toLowerCase(),
+          request_id: this.requestId,
+          order_id: orderId,
+          user_id: userId,
+          message: message.slice(0, 1000),
+          error_code: errorObj?.code ? String(errorObj.code).slice(0, 100) : null,
+          error_details: errorObj || null,
+          context: context || null,
+          http_metadata: this.httpMeta || null,
+        })
+        .then(() => {})
+        .catch((dbErr: unknown) => {
+          // Log locally without re-throwing
+          console.warn("[Logger DB persist failed safely]", String(dbErr));
+        });
+    } catch {
+      // Ignore
+    }
+  }
+}
+
+/**
+ * Factory function to create an EdgeLogger instance.
+ */
+export function createLogger(service: string, options: LoggerOptions = {}): EdgeLogger {
+  return new EdgeLogger(service, options);
+}
+
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-hungertap-webhook-secret",
+    "authorization, x-client-info, apikey, content-type, x-hungertap-webhook-secret, x-request-id",
+  "Access-Control-Expose-Headers": "x-request-id",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -36,12 +469,6 @@ type RefundRow = {
   gateway_refund_id?: string | null;
 };
 
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
-}
 
 async function sha512(input: string) {
   const bytes = new TextEncoder().encode(input);
@@ -89,16 +516,30 @@ function resolveGateway(refund: RefundRow, payment: PaymentRow): string {
 }
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  const logger = createLogger("retry-refund", { req });
+
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: logger.injectResponseHeaders(corsHeaders) });
+  }
+
+  const json = (body: unknown, status = 200) => {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: logger.injectResponseHeaders({ ...corsHeaders, "Content-Type": "application/json" }),
+    });
+  };
 
   try {
     const expectedSecret = Deno.env.get("HUNGERTAP_WEBHOOK_SECRET");
     if (!expectedSecret) {
-      console.error("HUNGERTAP_WEBHOOK_SECRET is not configured");
+      logger.error("HUNGERTAP_WEBHOOK_SECRET is not configured", null, { failure_type: "system_failure" }, true);
       return json({ success: false, error: "server_misconfigured" }, 500);
     }
     const got = req.headers.get("x-hungertap-webhook-secret") || "";
-    if (got !== expectedSecret) return json({ success: false, error: "unauthorized" }, 401);
+    if (got !== expectedSecret) {
+      logger.warn("Unauthorized webhook secret on retry-refund", { failure_type: "business_failure" });
+      return json({ success: false, error: "unauthorized" }, 401);
+    }
 
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
@@ -107,7 +548,12 @@ serve(async (req) => {
 
     const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
     const refundId = extractRefundId(body);
-    if (!refundId) throw new Error("Missing refund_id");
+    if (!refundId) {
+      logger.warn("Missing refund_id in request body", { failure_type: "business_failure" });
+      throw new Error("Missing refund_id");
+    }
+
+    const refundLogger = logger.withContext({ refundId });
 
     let refundSource: "live" | "archived" = "live";
     let { data: refund, error: refundError } = await supabase
@@ -118,7 +564,7 @@ serve(async (req) => {
 
     if (refundError) throw new Error(refundError.message);
     if (!refund) {
-      const archived = await supabase.from("archieved_refunds").select("*").eq("id", refundId).maybeSingle();
+      const archived = await supabase.from("archived_refunds").select("*").eq("id", refundId).maybeSingle();
       if (archived.error) throw new Error(archived.error.message);
       refund = archived.data;
       refundSource = "archived";
@@ -128,9 +574,11 @@ serve(async (req) => {
     const refundRow = refund as RefundRow;
 
     if (refundRow.status === "success") {
+      refundLogger.idempotency("refund_already_completed", { refundId });
       return json({ success: true, message: "Already refunded", refund_id: refundId });
     }
     if (refundRow.status === "processing") {
+      refundLogger.idempotency("refund_already_processing", { refundId });
       return json({ success: true, message: "Already in processing", refund_id: refundId });
     }
 
@@ -149,7 +597,7 @@ serve(async (req) => {
       });
     }
 
-    const refundTable = refundSource === "live" ? "refunds" : "archieved_refunds";
+    const refundTable = refundSource === "live" ? "refunds" : "archived_refunds";
 
     const { data: claimed, error: claimError } = await supabase
       .from(refundTable)
@@ -174,7 +622,7 @@ serve(async (req) => {
     if (paymentError) throw new Error(paymentError.message);
     if (!payment) {
       const archivedPay = await supabase
-        .from("archieved_payments")
+        .from("archived_payments")
         .select("*")
         .eq("id", refundRow.payment_id)
         .maybeSingle();
@@ -193,6 +641,11 @@ serve(async (req) => {
 
     const paymentRow = payment as PaymentRow;
     const gateway = resolveGateway(refundRow, paymentRow);
+    const ctxLogger = refundLogger.withContext({
+      orderId: refundRow.order_id,
+      paymentId: refundRow.payment_id,
+      gateway,
+    });
 
     let email: string | null = refundRow.customer_email ?? null;
     let placedBy: string | null = null;
@@ -207,7 +660,7 @@ serve(async (req) => {
     }
     if (!email && !placedBy) {
       const { data: archived } = await supabase
-        .from("archieved_orders")
+        .from("archived_orders")
         .select("placed_by")
         .eq("id", refundRow.order_id)
         .maybeSingle();
@@ -450,58 +903,85 @@ serve(async (req) => {
         ? "https://dashboard.easebuzz.in"
         : "https://testdashboard.easebuzz.in";
 
-      const key = Deno.env.get("EASEBUZZ_KEY")!;
-      const salt = Deno.env.get("EASEBUZZ_SALT")!;
-      const merchantRefundId = refundRow.id;
+      const merchantKey =
+        Deno.env.get("EASEBUZZ_KEY") || Deno.env.get("EASEBUZZ_MERCHANT_KEY") || "";
+      const salt = Deno.env.get("EASEBUZZ_SALT") || "";
+      if (!merchantKey || !salt) {
+        await supabase
+          .from(refundTable)
+          .update({
+            status: "failed",
+            retry_count: retryCount + 1,
+            failure_reason: "easebuzz_keys_missing",
+          })
+          .eq("id", refundId);
+        throw new Error("Easebuzz keys not configured");
+      }
+
       const refundAmount = formatEasebuzzAmount(refundRow.amount);
-      const hashString = `${key}|${merchantRefundId}|${easebuzzId}|${refundAmount}|${salt}`;
-      const hash = await sha512(hashString);
-      apiUsed = "transaction/v2/refund";
+      const refundReason = "HungerTap refund";
+      const hashStr = `${merchantKey}|${easebuzzId}|${refundAmount}|${refundReason}|${salt}`;
+      const hash = await sha512(hashStr);
+
+      const form = new URLSearchParams();
+      form.set("merchant_key", merchantKey);
+      form.set("easepayid", easebuzzId);
+      form.set("refund_amount", refundAmount);
+      form.set("refund_reason", refundReason);
+      form.set("hash", hash);
+
+      apiUsed = "easebuzz/transaction/v2/refund";
 
       try {
-        const form = new URLSearchParams({
-          key,
-          easebuzz_id: easebuzzId,
-          refund_amount: refundAmount,
-          merchant_refund_id: merchantRefundId,
-          hash,
-        });
-        const refundRes = await fetch(`${DASHBOARD_URL}/transaction/v2/refund`, {
+        const ebTimer = ctxLogger.startTimer("easebuzz_refund_api") ?? {
+          done: () => {},
+        };
+        const ebRes = await fetch(`${DASHBOARD_URL}/transaction/v2/refund`, {
           method: "POST",
           headers: {
-            Accept: "application/json",
             "Content-Type": "application/x-www-form-urlencoded",
+            Accept: "application/json",
           },
           body: form.toString(),
         });
-        const raw = await refundRes.text();
+        ebTimer.done({ status_code: ebRes.status });
+
+        const raw = await ebRes.text();
         try {
           refundData = JSON.parse(raw);
         } catch {
           refundData = { raw };
         }
-        gatewayOk =
-          refundData?.status === 1 || refundData?.status === "1" || refundData?.status === true;
+
+        gatewayOk = ebRes.ok && Boolean(refundData.status);
         if (!gatewayOk) {
-          const nested = refundData?.data as Record<string, unknown> | undefined;
           failureReason = String(
-            refundData?.error ||
-              refundData?.msg ||
-              refundData?.message ||
-              nested?.error ||
-              nested?.msg ||
-              `easebuzz_status_${refundData?.status ?? refundRes.status}`,
+            refundData.data ||
+              refundData.error_desc ||
+              refundData.reason ||
+              `easebuzz_status_${ebRes.status}`,
           ).slice(0, 500);
+          ctxLogger.error(
+            "Easebuzz refund API call failed",
+            null,
+            { failure_reason: failureReason, failure_type: "system_failure" },
+            true,
+          );
         }
         gatewayRefundId =
-          (refundData?.refund_id as string) ||
-          (refundData?.refund_txn_id as string) ||
-          ((refundData?.data as Record<string, unknown> | undefined)?.refund_id as string) ||
+          (typeof refundData.data === "string" && refundData.data) ||
+          (refundData.refund_id as string) ||
           null;
       } catch (e) {
         refundData = { error: e instanceof Error ? e.message : String(e) };
         failureReason = `easebuzz_request_error: ${e instanceof Error ? e.message : String(e)}`.slice(0, 500);
         gatewayOk = false;
+        ctxLogger.error(
+          "Easebuzz refund network exception",
+          e,
+          { failure_type: "system_failure" },
+          true,
+        );
       }
     } else {
       await supabase
@@ -530,7 +1010,7 @@ serve(async (req) => {
 
     await supabase.from(refundTable).update(refundUpdate).eq("id", refundId);
 
-    const paymentTable = paymentSource === "live" ? "payments" : "archieved_payments";
+    const paymentTable = paymentSource === "live" ? "payments" : "archived_payments";
     const payAmt = Number(paymentRow.amount);
     const refAmt = Number(refundRow.amount);
     const fullyRefunded =
@@ -556,7 +1036,8 @@ serve(async (req) => {
       api: apiUsed,
     });
   } catch (e) {
-    console.error("[retry-refund]", e);
-    return json({ success: false, error: e instanceof Error ? e.message : String(e) }, 500);
+    const errorMsg = e instanceof Error ? e.message : String(e);
+    logger.error("Refund retry exception", e, { failure_type: "system_failure" }, true);
+    return json({ success: false, error: errorMsg }, 500);
   }
 });

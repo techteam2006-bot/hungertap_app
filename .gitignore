@@ -49,3 +49,19 @@ yarn-error.log
 # Supabase temp
 .temp/
 supabase/.temp/
+
+# Local agent / deploy scratch (never commit)
+.tmp_*
+.b64_*
+.mcp_*
+.deploy_*
+.split_*
+tmp_*
+*_chunk*.txt
+*_content_only*
+*_content_escaped*
+*_deploy_payload*.json
+.mcp_args_*.json
+.mcp_split_*.json
+.deploy_payload*.json
+**/_deploy_payloads/

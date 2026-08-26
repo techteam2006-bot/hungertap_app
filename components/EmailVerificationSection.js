@@ -121,6 +121,10 @@ export default function EmailVerificationSection({
       animateReveal(true);
       showSentBanner();
       onOtpSent?.();
+      Alert.alert(
+        'Code sent',
+        `We sent a verification code to ${email.trim()}.\n\nPlease check your inbox. If you do not see it, check your Spam or Junk folder.`
+      );
     } catch (e) {
       setEmailError(describeError(e, 'send'));
     } finally {
@@ -145,6 +149,10 @@ export default function EmailVerificationSection({
       setTimerRunning(true);
       setRestartKey((k) => k + 1);
       showSentBanner();
+      Alert.alert(
+        'Code sent',
+        `We sent a new verification code to ${email.trim()}.\n\nPlease check your inbox. If you do not see it, check your Spam or Junk folder.`
+      );
     } catch (e) {
       setOtpError(describeError(e, 'send'));
     } finally {
@@ -275,7 +283,7 @@ export default function EmailVerificationSection({
             disabled={sending || disabled || !sendEnabled}
             accessibilityRole="button"
             accessibilityState={{ disabled: sending || disabled || !sendEnabled, busy: sending }}
-            accessibilityLabel={sending ? 'Sending code' : 'Send OTP'}
+            accessibilityLabel={sending ? 'Sending code' : 'Send Code'}
           >
             {sending ? (
               <View style={styles.sendBusy}>
@@ -283,7 +291,7 @@ export default function EmailVerificationSection({
                 <Text style={styles.sendBtnText}>Sending...</Text>
               </View>
             ) : (
-              <Text style={styles.sendBtnText}>Send OTP</Text>
+              <Text style={styles.sendBtnText}>Send Code</Text>
             )}
           </TouchableOpacity>
         ) : null}
@@ -376,8 +384,8 @@ export default function EmailVerificationSection({
                     seconds={resendSeconds}
                     restartKey={restartKey}
                     running={timerRunning && !verified}
-                    readyLabel="Resend OTP"
-                    countingLabel={(t) => `Resend OTP in ${t}`}
+                    readyLabel="Resend Code"
+                    countingLabel={(t) => `Resend Code in ${t}`}
                     onPressReady={handleResend}
                     disabled={sending || verifying || disabled}
                     readyTextStyle={{ color: BRAND_GOLD }}

@@ -324,10 +324,10 @@ const OrderStatusScreen = ({ navigation, route }) => {
         let total_amount = resolveOrderHeaderTotalFromRows(data, orderItemsRows);
 
         // Live delivered still uses order_items until canteen close; history rows
-        // already carry item_name / totals from archieved_* / failed_*.
+        // already carry item_name / totals from archived_* / failed_*.
         if (
           deliveredLike &&
-          data._historySource === 'archieved' &&
+          data._historySource === 'archived' &&
           (!item_name || !(Number.isFinite(total_amount) && total_amount > 0))
         ) {
           // Keep whatever the archive header already provided via `data`

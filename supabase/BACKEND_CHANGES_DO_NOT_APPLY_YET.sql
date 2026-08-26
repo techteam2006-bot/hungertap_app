@@ -1,0 +1,17 @@
+-- =============================================================================
+-- HungerTap BACKEND CHANGES — HISTORICAL / REFERENCE (do not re-apply blindly)
+-- =============================================================================
+-- Lunch-peak + reliability notes. Most items are ALREADY LIVE (2026-08-25).
+-- Keep this file for history. Frontend apps already match live behavior
+-- (token via create-order edge, order history RPC, stock checks in cart + DB).
+--
+-- STATUS vs project mgyfyutxtapgggcwkknw:
+--   A FK indexes ................ APPLIED
+--   B revoke trigger RPCs ....... APPLIED
+--   C token counter ............. APPLIED
+--   D harden push (2s+catch) .... APPLIED
+--   E pg_net cleanup (7 days) ... APPLIED (cron hungertap-cleanup-pg-net)
+--   F Pro / leaked-password ..... USER (dashboard after Pro)
+--
+-- Next workstreams: table-by-table RLS (colleges done), Edge review.
+-- =============================================================================

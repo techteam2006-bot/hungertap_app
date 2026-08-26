@@ -638,7 +638,9 @@ const HomeScreen = ({ navigation, route }) => {
         setCurrentCanteenId(canteen.id);
         setCurrentCanteenName(canteen.name);
         setShowCanteenPicker(false);
-        rememberLastCanteen(canteen.id, canteen.name || '').catch(() => {});
+        rememberLastCanteen(canteen.id, canteen.name || '', {
+          takeawayCharge: canteen.takeaway_charge,
+        }).catch(() => {});
         invalidateCanteenMenuEdgeCache(canteen.id);
         if (menuFromHttpEnabled()) invalidateHttpMenuCache();
         invalidateMenu(canteen.id).catch(() => {});
@@ -937,16 +939,33 @@ const HomeScreen = ({ navigation, route }) => {
           }
         }
 
-        const { data: canteens, error: cErr } = await supabase
-          .from('canteens')
-          .select('id, name, is_open')
-          .eq('college_id', collegeId)
-          .order('name');
-        if (!mounted) return;
-        if (cErr) {
-          console.error('Canteen switcher canteens:', cErr.message || cErr);
-          return;
+        let canteens = null;
+        {
+          const viewRes = await supabase
+            .from('z_active_open_canteens')
+            .select('id, name, is_open, accepting_app_orders, takeaway_charge')
+            .eq('college_id', collegeId)
+            .order('name');
+          if (!viewRes.error && Array.isArray(viewRes.data)) {
+            canteens = viewRes.data;
+          } else {
+            if (viewRes.error) {
+              console.error('Canteen switcher canteens:', viewRes.error.message || viewRes.error);
+            }
+            const fb = await supabase
+              .from('canteens')
+              .select('id, name, is_open, takeaway_charge')
+              .eq('college_id', collegeId)
+              .order('name');
+            if (fb.error) {
+              console.error('Canteen switcher canteens:', fb.error.message || fb.error);
+              return;
+            }
+            if (!Array.isArray(fb.data)) return;
+            canteens = fb.data;
+          }
         }
+        if (!mounted) return;
         if (Array.isArray(canteens)) {
           // Picker: only open (active) canteens; closed canteens are not shown or switchable
           const openForSwitcher = canteens.filter((c) => c.is_open !== false);
@@ -957,23 +976,29 @@ const HomeScreen = ({ navigation, route }) => {
             if (current) {
               setCurrentCanteenName(current.name);
               setCurrentCanteenId(userCanteenId);
-              rememberLastCanteen(userCanteenId, current.name).catch(() => {});
+              rememberLastCanteen(userCanteenId, current.name, {
+                takeawayCharge: current.takeaway_charge,
+              }).catch(() => {});
             } else {
               const { data: canteenRow } = await supabase
                 .from('canteens')
-                .select('name')
+                .select('name, takeaway_charge')
                 .eq('id', userCanteenId)
                 .maybeSingle();
               if (canteenRow) {
                 setCurrentCanteenName(canteenRow.name);
                 setCurrentCanteenId(userCanteenId);
-                rememberLastCanteen(userCanteenId, canteenRow.name).catch(() => {});
+                rememberLastCanteen(userCanteenId, canteenRow.name, {
+                  takeawayCharge: canteenRow.takeaway_charge,
+                }).catch(() => {});
               }
             }
           } else if (openForSwitcher.length > 0) {
             setCurrentCanteenName(openForSwitcher[0].name);
             setCurrentCanteenId(openForSwitcher[0].id);
-            rememberLastCanteen(openForSwitcher[0].id, openForSwitcher[0].name).catch(() => {});
+            rememberLastCanteen(openForSwitcher[0].id, openForSwitcher[0].name, {
+              takeawayCharge: openForSwitcher[0].takeaway_charge,
+            }).catch(() => {});
           }
         }
       } catch (e) {
