@@ -1876,17 +1876,21 @@ const HomeScreen = ({ navigation, route }) => {
           <View style={styles.fixedHeaderContent}>
               <View style={styles.locationRow}>
                 <AppIcon name="location" size={14} color={colors.text} />
-                <Text style={[styles.locationText, { color: isDarkMode ? '#FFFFFF' : '#000000' }]} numberOfLines={1}>
-                  {String(collegeName || 'College').trim().toUpperCase()}
-                </Text>
+                {collegeName ? (
+                  <Text style={[styles.locationText, { color: isDarkMode ? '#FFFFFF' : '#000000' }]} numberOfLines={1}>
+                    {String(collegeName).trim().toUpperCase()}
+                  </Text>
+                ) : null}
                 {currentCanteenName ? (
                   <>
-                    <Text
-                      style={[styles.locationCanteenSep, { color: isDarkMode ? '#FFFFFF' : '#000000' }]}
-                      accessible={false}
-                    >
-                      ·
-                    </Text>
+                    {collegeName ? (
+                      <Text
+                        style={[styles.locationCanteenSep, { color: isDarkMode ? '#FFFFFF' : '#000000' }]}
+                        accessible={false}
+                      >
+                        ·
+                      </Text>
+                    ) : null}
                     <TouchableOpacity
                       onPress={() => (collegeCanteens.length > 1 ? setShowCanteenPicker(true) : undefined)}
                       style={styles.canteenNameHit}

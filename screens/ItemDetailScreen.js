@@ -179,6 +179,9 @@ const ItemDetailScreen = ({ route, navigation }) => {
               </View>
             ))}
           </View>
+          <Text style={[styles.quantityImageNote, { color: colors.textTertiary }]}>
+            NOTE: The quantity in the image may differ from the original item quantity
+          </Text>
         </View>
       </ScrollView>
 
@@ -392,6 +395,12 @@ const styles = StyleSheet.create({
   ingredientText: {
     fontSize: 13,
     fontFamily: appTypography.regular,
+  },
+  quantityImageNote: {
+    fontSize: 12,
+    fontFamily: appTypography.regular,
+    lineHeight: 18,
+    marginTop: 14,
   },
   footer: {
     flexDirection: 'row',

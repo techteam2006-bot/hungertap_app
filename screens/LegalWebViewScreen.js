@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -13,13 +13,43 @@ import BrandYellowStrip from '../components/BrandYellowStrip';
 import { useTheme } from '../lib/ThemeContext';
 import { appTypography } from '../lib/darkThemeConfig';
 
+const QUANTITY_IMAGE_NOTE =
+  'NOTE: The quantity in the image may differ from the original item quantity';
+
+/** Inserts the quantity note as the second-last point in the Order Collection section. */
+const INSERT_ORDER_COLLECTION_NOTE = `(function() {
+  try {
+    var marker = 'quantity in the image may differ from the original item quantity';
+    if (document.body && (document.body.innerText || '').toLowerCase().indexOf(marker) !== -1) return;
+    var headings = document.querySelectorAll('h3.section-title, .section-title');
+    for (var i = 0; i < headings.length; i++) {
+      if ((headings[i].textContent || '').indexOf('Order Collection') === -1) continue;
+      var last = null;
+      var el = headings[i].nextElementSibling;
+      while (el && el.tagName !== 'H2' && el.tagName !== 'H3') {
+        last = el;
+        el = el.nextElementSibling;
+      }
+      if (!last || !last.parentNode) break;
+      var p = document.createElement('p');
+      p.textContent = ${JSON.stringify(QUANTITY_IMAGE_NOTE)};
+      last.parentNode.insertBefore(p, last);
+      break;
+    }
+  } catch (e) {}
+})();
+true;`;
+
 const LegalWebViewScreen = ({ navigation, route }) => {
   const { colors, isDarkMode } = useTheme();
   const insets = useSafeAreaInsets();
+  const webRef = useRef(null);
   const title = route?.params?.title || 'Legal';
   const url = route?.params?.url || '';
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const isTermsOfService =
+    typeof url === 'string' && url.toLowerCase().includes('termsofservice.hungertap.online');
 
   return (
     <View style={[styles.root, { backgroundColor: colors.contentBackground }]}>
@@ -69,6 +99,7 @@ const LegalWebViewScreen = ({ navigation, route }) => {
       ) : (
         <View style={[styles.webWrap, { marginBottom: insets.bottom }]}>
           <WebView
+            ref={webRef}
             style={styles.web}
             source={{ uri: url }}
             javaScriptEnabled
@@ -76,8 +107,14 @@ const LegalWebViewScreen = ({ navigation, route }) => {
             startInLoadingState
             setSupportMultipleWindows={false}
             originWhitelist={['https://*', 'http://*']}
+            injectedJavaScript={isTermsOfService ? INSERT_ORDER_COLLECTION_NOTE : undefined}
             onLoadStart={() => setLoading(true)}
-            onLoadEnd={() => setLoading(false)}
+            onLoadEnd={() => {
+              setLoading(false);
+              if (isTermsOfService) {
+                webRef.current?.injectJavaScript(INSERT_ORDER_COLLECTION_NOTE);
+              }
+            }}
             onError={() => {
               setLoading(false);
               setError(true);

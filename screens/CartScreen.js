@@ -159,6 +159,14 @@ const createCartStyles = (colors, windowHeight) =>
     marginBottom: 0,
     marginTop: 20,
   },
+  quantityImageNote: {
+    fontSize: 12,
+    fontFamily: appTypography.regular,
+    color: colors.textTertiary,
+    lineHeight: 18,
+    marginTop: 10,
+    paddingHorizontal: 2,
+  },
   singleCartCard: {
     width: '100%',
     borderRadius: 10,
@@ -1682,6 +1690,9 @@ const CartScreen = ({ navigation }) => {
                   {cartItems.map((item, index) => renderCartItem(item, index))}
                 </LinearGradient>
               </View>
+              <Text style={styles.quantityImageNote}>
+                NOTE: The quantity in the image may differ from the original item quantity
+              </Text>
             </View>
 
             {/* Add More Items Text */}
