@@ -6,6 +6,8 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
+  Image,
+  Dimensions,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -14,6 +16,11 @@ import { useAuth } from '../lib/AuthContext';
 import { useTheme } from '../lib/ThemeContext';
 import AppIcon from '../components/AppIcon';
 import { appTypography } from '../lib/darkThemeConfig';
+
+const { width: WINDOW_WIDTH } = Dimensions.get('window');
+const LOGO_SIZE = Math.round(WINDOW_WIDTH * 0.28);
+/** Static require — same asset ContactUs / AuthHelp use successfully. */
+const HUNGERTAP_LOGO = require('../assets/logo.png');
 
 function formatDeletedOn(deletedAt) {
   if (!deletedAt) return null;
@@ -93,8 +100,13 @@ export default function RestoreAccountScreen() {
       <StatusBar style={isDarkMode ? 'light' : 'dark'} />
 
       <View style={styles.hero}>
-        <View style={[styles.iconWrap, { backgroundColor: colors.mutedRowBackground }]}>
-          <AppIcon name="warning-outline" size={36} color={colors.warning || '#F59E0B'} />
+        <View style={styles.logoWrap}>
+          <Image
+            source={HUNGERTAP_LOGO}
+            style={styles.brandLogo}
+            resizeMode="contain"
+            accessibilityLabel="HungerTap"
+          />
         </View>
         <Text style={[styles.title, { color: colors.text }]}>Account scheduled for deletion</Text>
         <Text style={[styles.body, { color: colors.textSecondary }]}>
@@ -161,13 +173,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  iconWrap: {
-    width: 72,
-    height: 72,
-    borderRadius: 20,
+  logoWrap: {
+    width: LOGO_SIZE,
+    height: LOGO_SIZE,
+    marginBottom: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 20,
+    backgroundColor: 'transparent',
+  },
+  brandLogo: {
+    width: LOGO_SIZE,
+    height: LOGO_SIZE,
   },
   title: {
     fontFamily: appTypography.bold || appTypography.semiBold || appTypography.regular,

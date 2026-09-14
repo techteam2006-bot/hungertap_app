@@ -15,7 +15,8 @@
     },
     "assetBundlePatterns": [
       "assets/logo.png",
-      "assets/splash_icon.png",
+      "assets/logo-transparent.png",
+      "assets/icon.png",
       "assets/splash_icon.png",
       "assets/home-banner.webp",
       "assets/fonts/*.ttf"

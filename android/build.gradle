@@ -22,4 +22,13 @@ allprojects {
 }
 
 apply plugin: "expo-root-project"
+rootProject.ext.ndkVersion = "27.2.12479018"
 apply plugin: "com.facebook.react.rootproject"
+
+project(':sentry_react-native') {
+  plugins.withId('com.android.library') {
+    android {
+      ndkVersion rootProject.ext.ndkVersion
+    }
+  }
+}
