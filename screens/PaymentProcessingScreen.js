@@ -1101,7 +1101,11 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
         // eslint-disable-next-line no-console
         console.log('🎉 [Step 7/7] Easebuzz SDK result:', res.payload?.result, 'Outcome:', outcome);
       }
-      applyOutcomeRef.current?.(outcome);
+      // Easebuzz's SDK result is advisory: timeouts, empty payloads, and other
+      // non-success results can arrive before the payment settles. The webhook
+      // and resulting order status are authoritative, so always verify by
+      // polling instead of finalizing failure from the SDK payload.
+      applyOutcomeRef.current?.('return_to_app');
     })();
 
     return () => {

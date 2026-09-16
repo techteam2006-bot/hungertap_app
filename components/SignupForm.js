@@ -20,9 +20,10 @@ import { useTheme } from '../lib/ThemeContext';
 import { appTypography } from '../lib/darkThemeConfig';
 import {
   describeOtpFailure,
-  describeSignUpFailure,
+  mapSignupError,
   isEmailAlreadyInUseError,
   EMAIL_ALREADY_EXISTS_MESSAGE,
+  SIGNUP_ERROR_MESSAGES,
 } from '../lib/authErrorMessages';
 import { fetchFixedSignupCanteen } from '../lib/canteenLookup';
 import { openLegalPage } from '../lib/legalLinks';
@@ -335,8 +336,11 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
           setGeneralError(EMAIL_ALREADY_EXISTS_MESSAGE);
           return;
         }
-        const { message } = describeSignUpFailure(error);
+        const { type, message } = mapSignupError(error);
         setGeneralError(message);
+        if (type === 'password_rejected' || type === 'invalid_password') {
+          setPasswordError(message);
+        }
         return;
       }
 
@@ -349,7 +353,7 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
       Alert.alert('Account created', 'Your email and password are filled in. Tap Sign In to continue.');
     } catch (e) {
       console.warn('SignupForm handleSignUp:', e?.message || e);
-      setGeneralError('Network error. Please check your connection and try again.');
+      setGeneralError(SIGNUP_ERROR_MESSAGES.network_error);
     } finally {
       setSubmitting(false);
     }
