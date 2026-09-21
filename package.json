@@ -14,6 +14,7 @@
     "check-abis": "node scripts/checkApkAbis.mjs",
     "optimize-assets": "node scripts/optimizeAssets.mjs",
     "generate-icons": "node scripts/generateAppIcon.mjs",
+    "generate-adaptive-icon": "node scripts/generateAdaptiveIcon.mjs",
     "prebuild:android": "npx expo prebuild --platform android --clean",
     "build:apk": "powershell -ExecutionPolicy Bypass -File scripts/eas-build-android.ps1 apk",
     "build:apk:local": "powershell -ExecutionPolicy Bypass -File scripts/build-apk-local.ps1",

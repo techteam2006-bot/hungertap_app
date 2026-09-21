@@ -46,6 +46,10 @@
       "package": "com.hungertap.app",
       "googleServicesFile": "./google-services.json",
       "icon": "./assets/splash_icon.png",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#FDC403"
+      },
       "versionCode": 6,
       "softwareKeyboardLayoutMode": "pan",
       "permissions": [
@@ -68,11 +72,7 @@
             "DEFAULT"
           ]
         }
-      ],
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/splash_icon.png",
-        "backgroundColor": "#FFB301"
-      }
+      ]
     },
     "web": {
       "bundler": "metro"

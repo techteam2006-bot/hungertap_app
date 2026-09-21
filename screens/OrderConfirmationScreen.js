@@ -25,6 +25,21 @@ import LoadingSpinner from '../components/LoadingSpinner';
 
 const { width } = Dimensions.get('window');
 
+const PICKUP_PAYMENT_METHODS = new Set([
+  'pickup',
+  'pay_at_pickup',
+  'pay-at-pickup',
+  'cod',
+  'cash',
+  'counter',
+]);
+
+const getPaymentSummaryLabel = (method) => {
+  const normalized = String(method || '').toLowerCase().trim();
+  if (PICKUP_PAYMENT_METHODS.has(normalized)) return 'Pay at pickup';
+  return 'Paid online';
+};
+
 const OrderConfirmationScreen = ({ navigation, route }) => {
   const { userId } = useAuth();
   const { clearCart } = useCart();
@@ -190,7 +205,7 @@ const OrderConfirmationScreen = ({ navigation, route }) => {
         {
           icon: 'wallet-outline',
           label: 'Payment',
-          value: paymentMethod === 'easebuzz_v2' ? 'Paid online' : 'Pay at pickup',
+          value: getPaymentSummaryLabel(paymentMethod),
         },
         {
           icon: 'cash-outline',
