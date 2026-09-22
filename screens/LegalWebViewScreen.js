@@ -14,12 +14,12 @@ import { useTheme } from '../lib/ThemeContext';
 import { appTypography } from '../lib/darkThemeConfig';
 
 const QUANTITY_IMAGE_NOTE =
-  'NOTE: The quantity in the image may differ from the original item quantity';
+  'NOTE: The food appearance and quantity served may differ from the image shown. The image is for representation purposes only.';
 
 /** Inserts the quantity note as the second-last point in the Order Collection section. */
 const INSERT_ORDER_COLLECTION_NOTE = `(function() {
   try {
-    var marker = 'quantity in the image may differ from the original item quantity';
+    var marker = 'food appearance and quantity served may differ from the image shown';
     if (document.body && (document.body.innerText || '').toLowerCase().indexOf(marker) !== -1) return;
     var headings = document.querySelectorAll('h3.section-title, .section-title');
     for (var i = 0; i < headings.length; i++) {

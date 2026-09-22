@@ -8,11 +8,12 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
-  Alert,
 } from 'react-native';
 import AppIcon from './AppIcon';
+import ConfirmModal from './ConfirmModal';
 import OTPInput from './OTPInput';
 import CountdownTimer from './CountdownTimer';
+import { useAppAlert } from '../lib/AppAlertContext';
 
 const BRAND_GOLD = '#D4A017';
 const EMAIL_RE = /^\S+@\S+\.\S+$/;
@@ -39,6 +40,7 @@ export default function EmailVerificationSection({
   onEmailFocus,
   onEmailSubmitEditing,
 }) {
+  const { showAppAlert } = useAppAlert();
   const [emailError, setEmailError] = useState('');
   const [otpError, setOtpError] = useState('');
   const [otpSent, setOtpSent] = useState(false);
@@ -49,6 +51,7 @@ export default function EmailVerificationSection({
   const [sentBanner, setSentBanner] = useState(false);
   const [restartKey, setRestartKey] = useState(0);
   const [timerRunning, setTimerRunning] = useState(false);
+  const [changeEmailModalVisible, setChangeEmailModalVisible] = useState(false);
 
   const revealAnim = useRef(new Animated.Value(0)).current;
   const bannerAnim = useRef(new Animated.Value(0)).current;
@@ -121,7 +124,7 @@ export default function EmailVerificationSection({
       animateReveal(true);
       showSentBanner();
       onOtpSent?.();
-      Alert.alert(
+      showAppAlert(
         'Code sent',
         `We sent a verification code to ${email.trim()}.\n\nPlease check your inbox. If you do not see it, check your Spam or Junk folder.`
       );
@@ -149,7 +152,7 @@ export default function EmailVerificationSection({
       setTimerRunning(true);
       setRestartKey((k) => k + 1);
       showSentBanner();
-      Alert.alert(
+      showAppAlert(
         'Code sent',
         `We sent a new verification code to ${email.trim()}.\n\nPlease check your inbox. If you do not see it, check your Spam or Junk folder.`
       );
@@ -175,14 +178,7 @@ export default function EmailVerificationSection({
 
   const handleChangeEmail = () => {
     if (disabled) return;
-    Alert.alert('Change email?', 'Changing email will cancel the current verification.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Change Email',
-        style: 'destructive',
-        onPress: resetForEmailChange,
-      },
-    ]);
+    setChangeEmailModalVisible(true);
   };
 
   const runVerify = useCallback(
@@ -244,7 +240,7 @@ export default function EmailVerificationSection({
           ref={emailInputRef}
           style={[
             styles.emailInput,
-            { color: colors.text, backgroundColor: colors.inputBackground },
+            { color: colors.text, backgroundColor: 'transparent' },
             emailLocked && styles.emailInputLocked,
           ]}
           placeholder="Email"
@@ -409,6 +405,20 @@ export default function EmailVerificationSection({
           </View>
         </Animated.View>
       ) : null}
+
+      <ConfirmModal
+        visible={changeEmailModalVisible}
+        title="Change email?"
+        message="Changing email will cancel the current verification."
+        cancelLabel="Cancel"
+        confirmLabel="Change Email"
+        confirmDestructive
+        onCancel={() => setChangeEmailModalVisible(false)}
+        onConfirm={() => {
+          setChangeEmailModalVisible(false);
+          resetForEmailChange();
+        }}
+      />
     </View>
   );
 }

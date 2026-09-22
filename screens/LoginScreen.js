@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   StyleSheet,
   ScrollView,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Image,
@@ -20,6 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../lib/AuthContext';
 import { useTheme } from '../lib/ThemeContext';
+import { useAppAlert } from '../lib/AppAlertContext';
 import AppIcon from '../components/AppIcon';
 import LoadingButton from '../components/LoadingButton';
 import SignupForm from '../components/SignupForm';
@@ -175,7 +175,7 @@ const createLoginStyles = (colors) =>
       fontSize: width * 0.04,
       fontFamily: appTypography.regular,
       color: colors.text,
-      backgroundColor: colors.inputBackground,
+      backgroundColor: 'transparent',
       height: '100%',
       paddingVertical: 0,
       textAlignVertical: 'center',
@@ -264,6 +264,7 @@ const createLoginStyles = (colors) =>
 export default function LoginScreen({ navigation }) {
   const { signIn, authError, pendingSignupCompletion } = useAuth();
   const { colors, isDarkMode } = useTheme();
+  const { showAppAlert } = useAppAlert();
   const insets = useSafeAreaInsets();
   const styles = useMemo(() => createLoginStyles(colors), [colors]);
 
@@ -273,6 +274,32 @@ export default function LoginScreen({ navigation }) {
   const [loading, setLoading] = useState(false);
   const [isLoginMode, setIsLoginMode] = useState(!pendingSignupCompletion);
   const [rememberMe, setRememberMe] = useState(false);
+  // Bumps TextInput keys after Android autofill so the yellow overlay is cleared
+  // even before a native rebuild picks up autofill_highlight.xml.
+  const [autofillEpoch, setAutofillEpoch] = useState(0);
+  const autofillClearTimer = useRef(null);
+
+  const clearAndroidAutofillHighlight = useCallback(() => {
+    if (Platform.OS !== 'android') return;
+    if (autofillClearTimer.current) clearTimeout(autofillClearTimer.current);
+    autofillClearTimer.current = setTimeout(() => {
+      autofillClearTimer.current = null;
+      setAutofillEpoch((n) => n + 1);
+    }, 80);
+  }, []);
+
+  const onAutofillAwareChange = useCallback(
+    (prevValue, nextValue, setter) => {
+      setter(nextValue);
+      if (
+        Platform.OS === 'android' &&
+        Math.abs(String(nextValue || '').length - String(prevValue || '').length) > 1
+      ) {
+        clearAndroidAutofillHighlight();
+      }
+    },
+    [clearAndroidAutofillHighlight]
+  );
 
   const slideAnim = useRef(new Animated.Value(0)).current;
   const loginScale = useRef(new Animated.Value(1)).current;
@@ -293,6 +320,7 @@ export default function LoginScreen({ navigation }) {
     return () => {
       showSub.remove();
       hideSub.remove();
+      if (autofillClearTimer.current) clearTimeout(autofillClearTimer.current);
     };
   }, []);
 
@@ -312,11 +340,7 @@ export default function LoginScreen({ navigation }) {
 
   useEffect(() => {
     if (authError && authError.includes('Access denied')) {
-      Alert.alert(
-        'Access Denied',
-        'This app is only for students. Admin accounts cannot access the student app.',
-        [{ text: 'OK' }]
-      );
+      showAppAlert('Access Denied', 'This app is only for students. Admin accounts cannot access the student app.');
     }
   }, [authError]);
 
@@ -365,7 +389,7 @@ export default function LoginScreen({ navigation }) {
 
   const handleLogin = async () => {
     if (!email.trim() || !loginPassword.trim()) {
-      Alert.alert('Error', 'Please fill in all fields');
+      showAppAlert('Error', 'Please fill in all fields');
       return;
     }
     if (loading) return;
@@ -381,11 +405,7 @@ export default function LoginScreen({ navigation }) {
         const msg = (error.message || '').toLowerCase();
 
         if (msg.includes('access denied') || msg.includes('only for students')) {
-          Alert.alert(
-            'Access Denied',
-            'This app is only for students. Admin accounts cannot sign in here.',
-            [{ text: 'OK' }]
-          );
+          showAppAlert('Access Denied', 'This app is only for students. Admin accounts cannot sign in here.');
           return;
         }
 
@@ -417,7 +437,7 @@ export default function LoginScreen({ navigation }) {
             'Please verify your email address before signing in. Check your inbox for a confirmation code.';
         }
 
-        Alert.alert('Login Failed', errorMessage);
+        showAppAlert('Login Failed', errorMessage);
       } else {
         if (rememberMe) {
           AsyncStorage.setItem('rememberedEmail', email.trim());
@@ -433,7 +453,7 @@ export default function LoginScreen({ navigation }) {
         String(error?.message || error || '')
           .toLowerCase()
           .includes('network');
-      Alert.alert(
+      showAppAlert(
         offline ? 'Login Failed' : 'Error',
         offline ? AUTH_NETWORK_ERROR_MESSAGE : 'An unexpected error occurred. Please try again.'
       );
@@ -539,18 +559,19 @@ export default function LoginScreen({ navigation }) {
                         style={styles.inputIcon}
                       />
                       <TextInput
+                        key={`login-email-${autofillEpoch}`}
                         ref={emailRef}
                         style={styles.input}
                         placeholder="Email"
                         placeholderTextColor="#9CA3AF"
                         value={email}
-                        onChangeText={setEmail}
+                        onChangeText={(t) => onAutofillAwareChange(email, t, setEmail)}
                         keyboardType="email-address"
                         autoCapitalize="none"
                         autoCorrect={false}
                         autoComplete="email"
                         textContentType="username"
-                        importantForAutofill="auto"
+                        importantForAutofill="yes"
                         underlineColorAndroid="transparent"
                         editable={!loading}
                         returnKeyType="next"
@@ -567,17 +588,20 @@ export default function LoginScreen({ navigation }) {
                         style={styles.inputIcon}
                       />
                       <TextInput
+                        key={`login-password-${autofillEpoch}`}
                         ref={passwordRef}
                         style={styles.input}
                         placeholder="Password"
                         placeholderTextColor="#9CA3AF"
                         value={loginPassword}
-                        onChangeText={setLoginPassword}
+                        onChangeText={(t) =>
+                          onAutofillAwareChange(loginPassword, t, setLoginPassword)
+                        }
                         secureTextEntry={!loginPasswordVisible}
                         autoCapitalize="none"
                         autoComplete="password"
                         textContentType="password"
-                        importantForAutofill="auto"
+                        importantForAutofill="yes"
                         underlineColorAndroid="transparent"
                         editable={!loading}
                         returnKeyType="done"

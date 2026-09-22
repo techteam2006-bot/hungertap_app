@@ -5,7 +5,6 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -21,6 +20,7 @@ import CountdownTimer from '../components/CountdownTimer';
 import PasswordRuleList, { passwordMeetsAllRules } from '../components/PasswordRuleList';
 import { useTheme } from '../lib/ThemeContext';
 import { useAuth } from '../lib/AuthContext';
+import { useAppAlert } from '../lib/AppAlertContext';
 import { appTypography } from '../lib/darkThemeConfig';
 import LoadingButton from '../components/LoadingButton';
 import { LOGIN_SCREEN_LOGO } from '../lib/appLogo';
@@ -135,7 +135,7 @@ const createForgotPasswordStyles = (colors) =>
       fontSize: width * 0.04,
       fontFamily: appTypography.regular,
       color: colors.text,
-      backgroundColor: colors.inputBackground,
+      backgroundColor: 'transparent',
       height: '100%',
       paddingVertical: 0,
       textAlignVertical: 'center',
@@ -228,6 +228,20 @@ const createForgotPasswordStyles = (colors) =>
       marginTop: -height * 0.006,
       marginBottom: height * 0.014,
     },
+    passwordInlineError: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 8,
+      marginTop: height * 0.008,
+      marginBottom: height * 0.01,
+      paddingHorizontal: 2,
+    },
+    passwordInlineErrorText: {
+      flex: 1,
+      fontSize: width * 0.033,
+      fontFamily: appTypography.regular,
+      lineHeight: width * 0.045,
+    },
     errorContainer: {
       padding: width * 0.03,
       borderRadius: width * 0.03,
@@ -266,6 +280,7 @@ const createForgotPasswordStyles = (colors) =>
 
 const ForgotPasswordScreen = ({ navigation, route }) => {
   const { colors } = useTheme();
+  const { showAppAlert } = useAppAlert();
   const styles = useMemo(() => createForgotPasswordStyles(colors), [colors]);
   const {
     resetPassword,
@@ -350,7 +365,7 @@ const ForgotPasswordScreen = ({ navigation, route }) => {
       if (result.success) {
         resetOtpState();
         startResendTimer();
-        Alert.alert('Code Sent', 'A new reset code was sent to your email.');
+        showAppAlert('Code Sent', 'A new reset code was sent to your email.');
       } else {
         setErrors({ general: result.error || 'Failed to resend code.' });
       }
@@ -417,17 +432,17 @@ const ForgotPasswordScreen = ({ navigation, route }) => {
     if (submitting || !otpVerified) return;
     setErrors({});
     if (!newPassword.trim() || !confirmPassword.trim()) {
-      setErrors({ general: 'Please enter and confirm your new password' });
+      setErrors({ password: 'Please enter and confirm your new password' });
       return;
     }
     if (!passwordMeetsAllRules(newPassword)) {
       setErrors({
-        general: 'Password must meet all requirements listed below the password field.',
+        password: 'Password must meet all requirements listed below the password field.',
       });
       return;
     }
     if (newPassword !== confirmPassword) {
-      setErrors({ general: 'Passwords do not match' });
+      setErrors({ password: 'Passwords do not match' });
       return;
     }
 
@@ -435,20 +450,27 @@ const ForgotPasswordScreen = ({ navigation, route }) => {
       setSubmitting(true);
       const result = await completePasswordReset(newPassword);
       if (result.success) {
-        Alert.alert(
+        showAppAlert(
           'Password Updated',
           changePassword
             ? 'Your password has been changed. Please sign in again with your new password.'
             : 'Your password has been changed successfully. Please sign in.',
-          [
-            {
-              text: 'OK',
-              onPress: () => navigation.navigate('Login'),
-            },
-          ]
+          {
+            onClose: () => navigation.navigate('Login'),
+          }
         );
       } else {
-        setErrors({ general: result.error || 'Failed to reset password.' });
+        const msg = result.error || 'Failed to reset password.';
+        const isPasswordIssue =
+          result.errorType === 'password_rejected' ||
+          result.errorType === 'invalid_password' ||
+          result.errorType === 'same_password' ||
+          /password|secure|breach|weak|different from/i.test(String(msg));
+        if (isPasswordIssue) {
+          setErrors({ password: msg });
+        } else {
+          setErrors({ general: msg });
+        }
       }
     } catch (e) {
       console.error('Complete password reset exception:', e);
@@ -612,7 +634,12 @@ const ForgotPasswordScreen = ({ navigation, route }) => {
                 {otpVerified ? (
                   <>
                     <Text style={styles.passwordSectionLabel}>New password</Text>
-                    <View style={styles.inputContainer}>
+                    <View
+                      style={[
+                        styles.inputContainer,
+                        errors.password ? styles.inputContainerError : null,
+                      ]}
+                    >
                       <AppIcon
                         name="lock-closed-outline"
                         size={20}
@@ -625,7 +652,15 @@ const ForgotPasswordScreen = ({ navigation, route }) => {
                         placeholder="New password"
                         placeholderTextColor={colors.inputPlaceholder}
                         value={newPassword}
-                        onChangeText={setNewPassword}
+                        onChangeText={(t) => {
+                          setNewPassword(t);
+                          if (errors.password) {
+                            setErrors((prev) => {
+                              const { password: _p, ...rest } = prev;
+                              return rest;
+                            });
+                          }
+                        }}
                         secureTextEntry={!newPasswordVisible}
                         autoCapitalize="none"
                         autoComplete="new-password"
@@ -649,6 +684,15 @@ const ForgotPasswordScreen = ({ navigation, route }) => {
                       </TouchableOpacity>
                     </View>
 
+                    {errors.password ? (
+                      <View style={styles.passwordInlineError} accessibilityLiveRegion="polite">
+                        <AppIcon name="close-circle" size={16} color={colors.error} />
+                        <Text style={[styles.passwordInlineErrorText, { color: colors.error }]}>
+                          {errors.password}
+                        </Text>
+                      </View>
+                    ) : null}
+
                     <PasswordRuleList
                       password={newPassword}
                       mutedColor={colors.textTertiary || '#9CA3AF'}
@@ -656,7 +700,14 @@ const ForgotPasswordScreen = ({ navigation, route }) => {
                       style={styles.passwordRules}
                     />
 
-                    <View style={styles.inputContainer}>
+                    <View
+                      style={[
+                        styles.inputContainer,
+                        errors.password && /match/i.test(String(errors.password || ''))
+                          ? styles.inputContainerError
+                          : null,
+                      ]}
+                    >
                       <AppIcon
                         name="lock-closed-outline"
                         size={20}
@@ -669,7 +720,15 @@ const ForgotPasswordScreen = ({ navigation, route }) => {
                         placeholder="Confirm new password"
                         placeholderTextColor={colors.inputPlaceholder}
                         value={confirmPassword}
-                        onChangeText={setConfirmPassword}
+                        onChangeText={(t) => {
+                          setConfirmPassword(t);
+                          if (errors.password && /match/i.test(String(errors.password || ''))) {
+                            setErrors((prev) => {
+                              const { password: _p, ...rest } = prev;
+                              return rest;
+                            });
+                          }
+                        }}
                         secureTextEntry={!confirmPasswordVisible}
                         autoCapitalize="none"
                         autoComplete="new-password"

@@ -7,16 +7,12 @@ import {
   StyleSheet,
   Animated,
   Easing,
-  Alert,
   findNodeHandle,
   UIManager,
 } from 'react-native';
-import AppIcon from './AppIcon';
-import LoadingButton from './LoadingButton';
-import EmailVerificationSection from './EmailVerificationSection';
-import PasswordRuleList, { passwordMeetsAllRules } from './PasswordRuleList';
 import { useAuth } from '../lib/AuthContext';
 import { useTheme } from '../lib/ThemeContext';
+import { useAppAlert } from '../lib/AppAlertContext';
 import { appTypography } from '../lib/darkThemeConfig';
 import {
   describeOtpFailure,
@@ -27,6 +23,10 @@ import {
 } from '../lib/authErrorMessages';
 import { fetchFixedSignupCanteen } from '../lib/canteenLookup';
 import { openLegalPage } from '../lib/legalLinks';
+import AppIcon from './AppIcon';
+import LoadingButton from './LoadingButton';
+import EmailVerificationSection from './EmailVerificationSection';
+import PasswordRuleList, { passwordMeetsAllRules } from './PasswordRuleList';
 
 const BRAND_GOLD = '#D4A017';
 const EMAIL_RE = /^\S+@\S+\.\S+$/;
@@ -37,6 +37,7 @@ const canteenValidationError = (message) => ({
 
 export default function SignupForm({ navigation, onSwitchToLogin, style, scrollRef }) {
   const { colors } = useTheme();
+  const { showAppAlert } = useAppAlert();
   const {
     sendSignupEmailOtp,
     verifyEmailCode,
@@ -337,9 +338,10 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
           return;
         }
         const { type, message } = mapSignupError(error);
-        setGeneralError(message);
         if (type === 'password_rejected' || type === 'invalid_password') {
           setPasswordError(message);
+        } else {
+          setGeneralError(message);
         }
         return;
       }
@@ -350,7 +352,7 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
         email: String(email || '').trim().toLowerCase(),
         password: String(password || ''),
       });
-      Alert.alert('Account created', 'Your email and password are filled in. Tap Sign In to continue.');
+      showAppAlert('Account created', 'Your email and password are filled in. Tap Sign In to continue.');
     } catch (e) {
       console.warn('SignupForm handleSignUp:', e?.message || e);
       setGeneralError(SIGNUP_ERROR_MESSAGES.network_error);
@@ -409,7 +411,7 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
         <AppIcon name="person-outline" size={18} color={tertiary} style={styles.icon} />
         <TextInput
           ref={nameRef}
-          style={[styles.input, { color: colors.text, backgroundColor: colors.inputBackground }]}
+          style={[styles.input, { color: colors.text, backgroundColor: 'transparent' }]}
           placeholder="User Name"
           placeholderTextColor={tertiary}
           value={fullName}
@@ -443,7 +445,7 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
         <AppIcon name="business-outline" size={18} color={tertiary} style={styles.icon} />
         <TextInput
           ref={canteenRef}
-          style={[styles.input, { color: colors.text, backgroundColor: colors.inputBackground }]}
+          style={[styles.input, { color: colors.text, backgroundColor: 'transparent' }]}
           placeholder={canteenLoading ? 'Loading canteen…' : 'Canteen'}
           placeholderTextColor={tertiary}
           value={canteenLoading ? '' : canteenName}
@@ -540,7 +542,7 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
           <AppIcon name="lock-closed-outline" size={18} color={tertiary} style={styles.icon} />
           <TextInput
             ref={passwordRef}
-            style={[styles.input, { color: colors.text, backgroundColor: colors.inputBackground }]}
+            style={[styles.input, { color: colors.text, backgroundColor: 'transparent' }]}
             placeholder={passwordLocked ? 'Password (verify email first)' : 'Password'}
             placeholderTextColor={tertiary}
             value={password}
@@ -618,7 +620,7 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
           <AppIcon name="lock-closed-outline" size={18} color={tertiary} style={styles.icon} />
           <TextInput
             ref={confirmRef}
-            style={[styles.input, { color: colors.text, backgroundColor: colors.inputBackground }]}
+            style={[styles.input, { color: colors.text, backgroundColor: 'transparent' }]}
             placeholder={
               passwordLocked ? 'Confirm Password (verify email first)' : 'Confirm Password'
             }

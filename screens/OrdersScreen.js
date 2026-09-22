@@ -5,7 +5,6 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  Alert,
   Image,
   TextInput,
   Animated,
@@ -15,6 +14,8 @@ import {
 import Constants from 'expo-constants';
 import AppIcon from '../components/AppIcon';
 import BrandYellowStrip from '../components/BrandYellowStrip';
+import ConfirmModal from '../components/ConfirmModal';
+import { useAppAlert } from '../lib/AppAlertContext';
 import { pullRefreshControlProps } from '../lib/pullToRefresh';
 import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../lib/ThemeContext';
@@ -23,7 +24,7 @@ import { useCart } from '../lib/CartContext';
 import { supabase, deriveItemIsAvailable } from '../lib/supabase';
 import { pickLineRowsFromOrderRow } from '../lib/orderQueries';
 import { getOrders, getMoreOrders } from '../lib/ordersCache';
-import { getLineItemIdFromRow, resolveOrderHeaderTotalFromRows } from '../lib/orderLineRowMoney';
+import { getLineItemIdFromRow, mapLineRowToBillItem, resolveOrderHeaderTotalFromRows } from '../lib/orderLineRowMoney';
 import { pxToPercentX, pxToPercentY } from '../utils/percent';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { appTypography } from '../lib/darkThemeConfig';
@@ -43,6 +44,7 @@ import {
 
 const OrdersScreen = ({ navigation }) => {
   const { colors, isDarkMode } = useTheme();
+  const { showAppAlert } = useAppAlert();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { addToCart, clearCart, getTotalItems } = useCart();
@@ -57,6 +59,9 @@ const OrdersScreen = ({ navigation }) => {
   const [activeStatus, setActiveStatus] = useState('all');
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [reorderingOrderId, setReorderingOrderId] = useState(null);
+  const [replaceCartModalVisible, setReplaceCartModalVisible] = useState(false);
+  const [replaceCartBusy, setReplaceCartBusy] = useState(false);
+  const pendingReorderRef = useRef(null);
   const searchInputRef = useRef(null);
   const isFetchingRef = useRef(false);
   const pollingIntervalRef = useRef(null);
@@ -134,7 +139,7 @@ const OrdersScreen = ({ navigation }) => {
 
       if (ordersError && !(Array.isArray(ordersData) && ordersData.length > 0)) {
         console.error('❌ Error fetching orders:', ordersError);
-        if (!options.silent) Alert.alert('Error', 'Failed to load orders');
+        if (!options.silent) showAppAlert('Error', 'Failed to load orders');
       } else {
         console.log('✅ Orders fetched successfully:', ordersData?.length || 0);
         setOrders(mapOrdersPayload(ordersData));
@@ -142,7 +147,7 @@ const OrdersScreen = ({ navigation }) => {
       }
     } catch (error) {
       console.error('❌ Error fetching orders:', error);
-      Alert.alert('Error', 'Failed to load orders');
+      showAppAlert('Error', 'Failed to load orders');
     } finally {
       isFetchingRef.current = false;
       if (!options.silent) setLoading(false);
@@ -266,7 +271,7 @@ const OrdersScreen = ({ navigation }) => {
     );
 
     if (itemIds.length === 0) {
-      Alert.alert('Unable to Reorder', 'No reorderable items were found for this order.');
+      showAppAlert('Unable to Reorder', 'No reorderable items were found for this order.');
       return;
     }
 
@@ -279,12 +284,12 @@ const OrdersScreen = ({ navigation }) => {
 
       if (error) {
         console.error('RPC Error:', error.message || error);
-        Alert.alert('Error', 'Could not load these items right now. Please try again.');
+        showAppAlert('Error', 'Could not load these items right now. Please try again.');
         return;
       }
       if (!Array.isArray(itemsData)) {
         console.warn('No data returned');
-        Alert.alert('Error', 'Could not load menu items to reorder.');
+        showAppAlert('Error', 'Could not load menu items to reorder.');
         return;
       }
 
@@ -304,7 +309,7 @@ const OrdersScreen = ({ navigation }) => {
         .filter(Boolean);
 
       if (availableItems.length === 0) {
-        Alert.alert('Items Unavailable', 'These items are currently unavailable to reorder.');
+        showAppAlert('Items Unavailable', 'These items are currently unavailable to reorder.');
         return;
       }
 
@@ -318,30 +323,8 @@ const OrdersScreen = ({ navigation }) => {
 
       if (getTotalItems() > 0) {
         setReorderingOrderId(null);
-        Alert.alert(
-          'Replace cart?',
-          'Your cart already has items. Clear your current cart and add items from this order instead?',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Clear cart & add',
-              style: 'destructive',
-              onPress: async () => {
-                setReorderingOrderId(order.id);
-                try {
-                  await applyReorder();
-                } catch (reorderError) {
-                  if (__DEV__) {
-                    console.error('Reorder failed:', reorderError);
-                  }
-                  Alert.alert('Reorder Failed', 'Could not update your cart. Please try again.');
-                } finally {
-                  setReorderingOrderId(null);
-                }
-              },
-            },
-          ]
-        );
+        pendingReorderRef.current = { orderId: order.id, availableItems };
+        setReplaceCartModalVisible(true);
         return;
       }
 
@@ -350,14 +333,51 @@ const OrdersScreen = ({ navigation }) => {
       if (__DEV__) {
         console.error('Reorder failed:', reorderError);
       }
-      Alert.alert('Reorder Failed', 'Could not add items to cart. Please try again.');
+      showAppAlert('Reorder Failed', 'Could not add items to cart. Please try again.');
     } finally {
       setReorderingOrderId(null);
     }
   };
 
+  const closeReplaceCartModal = () => {
+    if (replaceCartBusy) return;
+    pendingReorderRef.current = null;
+    setReplaceCartModalVisible(false);
+  };
+
+  const confirmReplaceCartReorder = async () => {
+    const pending = pendingReorderRef.current;
+    if (!pending?.availableItems?.length) {
+      closeReplaceCartModal();
+      return;
+    }
+    setReplaceCartBusy(true);
+    setReorderingOrderId(pending.orderId);
+    try {
+      await clearCart();
+      for (const item of pending.availableItems) {
+        await addToCart(item);
+      }
+      pendingReorderRef.current = null;
+      setReplaceCartModalVisible(false);
+      navigation.navigate('Cart');
+    } catch (reorderError) {
+      if (__DEV__) {
+        console.error('Reorder failed:', reorderError);
+      }
+      showAppAlert('Reorder Failed', 'Could not update your cart. Please try again.');
+    } finally {
+      setReplaceCartBusy(false);
+      setReorderingOrderId(null);
+    }
+  };
+
   const renderOrderItem = (order) => {
-    const summaryItems = parseOrderSummary(order.item_name);
+    const lineRows = pickLineRowsFromOrderRow(order);
+    const summaryItems =
+      lineRows.length > 0
+        ? lineRows.map(mapLineRowToBillItem)
+        : parseOrderSummary(order.item_name);
     const summaryText = summaryItems.length
       ? summaryItems.map(item => `${item.name} x${item.quantity}`).join(', ')
       : 'Items unavailable';
@@ -487,15 +507,37 @@ const OrdersScreen = ({ navigation }) => {
     );
   };
 
-  const renderEmptyState = () => (
-    <View style={styles.emptyState}>
-      <AppIcon name="receipt-outline" size={64} color={colors.textTertiary} />
-      <Text style={[styles.emptyTitle, { color: colors.text }]}>No Orders Yet</Text>
-      <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
-        Your order history will appear here
-      </Text>
-    </View>
-  );
+  const renderEmptyState = () => {
+    const searching = Boolean(debouncedQuery?.trim());
+    return (
+      <View style={styles.emptyState}>
+        <AppIcon name="receipt-outline" size={64} color={colors.textTertiary} />
+        <Text style={[styles.emptyTitle, { color: colors.text }]}>No Orders Yet</Text>
+        <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
+          {searching
+            ? 'The searched food item is unavailable or the entered item is incorrect. Please check the spelling or try searching for another food item.'
+            : 'Your order history will appear here'}
+        </Text>
+        {searching ? (
+          <TouchableOpacity
+            onPress={() => {
+              setSearchQuery('');
+              setDebouncedQuery('');
+              searchInputRef.current?.blur?.();
+            }}
+            style={styles.emptyClearBtn}
+            activeOpacity={0.75}
+            accessibilityRole="button"
+            accessibilityLabel="Clear search"
+          >
+            <Text style={[styles.emptyClearLabel, { color: colors.brandYellow }]}>
+              Clear search
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    );
+  };
 
   const statusFilters = useMemo(() => ORDER_STATUS_FILTERS, []);
 
@@ -528,13 +570,13 @@ const OrdersScreen = ({ navigation }) => {
         status: activeStatus,
       });
       if (error && !(Array.isArray(data) && data.length > 0)) {
-        Alert.alert('Error', 'Could not load more orders');
+        showAppAlert('Error', 'Could not load more orders');
         return;
       }
       setOrders(mapOrdersPayload(data));
       setHasMoreOrders(Boolean(hasMore));
     } catch (e) {
-      Alert.alert('Error', 'Could not load more orders');
+      showAppAlert('Error', 'Could not load more orders');
     } finally {
       setLoadingMore(false);
     }
@@ -548,7 +590,8 @@ const OrdersScreen = ({ navigation }) => {
   }, [activeStatus]);
 
   const renderOrdersFooter = useCallback(() => {
-    if (!hasMoreOrders || orders.length === 0) return null;
+    // While searching, never show "See more" — empty search uses Clear search instead.
+    if (debouncedQuery?.trim() || !hasMoreOrders || orders.length === 0) return null;
     return (
       <View style={styles.seeMoreFooter}>
         <TouchableOpacity
@@ -559,12 +602,15 @@ const OrdersScreen = ({ navigation }) => {
           accessibilityLabel="See more orders"
           disabled={loadingMore}
         >
+          {loadingMore ? (
+            <LoadingSpinner size="small" color="#8E8E93" style={{ marginRight: 8 }} />
+          ) : null}
           <Text style={styles.seeMoreText}>{loadingMore ? 'Loading…' : 'See more'}</Text>
           {!loadingMore ? <AppIcon name="chevron-down" size={16} color="#8E8E93" /> : null}
         </TouchableOpacity>
       </View>
     );
-  }, [hasMoreOrders, orders.length, handleSeeMoreOrders, loadingMore]);
+  }, [hasMoreOrders, orders.length, handleSeeMoreOrders, loadingMore, debouncedQuery]);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.pageBackground }]}>
@@ -736,6 +782,18 @@ const OrdersScreen = ({ navigation }) => {
           }
         />
       )}
+
+      <ConfirmModal
+        visible={replaceCartModalVisible}
+        title="Replace cart?"
+        message="Your cart already has items. Clear your current cart and add items from this order instead?"
+        cancelLabel="Cancel"
+        confirmLabel="Clear cart & add"
+        confirmDestructive
+        busy={replaceCartBusy}
+        onCancel={closeReplaceCartModal}
+        onConfirm={confirmReplaceCartReorder}
+      />
     </View>
   );
 };
@@ -844,6 +902,7 @@ const styles = StyleSheet.create({
   },
   listContainerEmpty: {
     flexGrow: 1,
+    justifyContent: 'center',
   },
   seeMoreFooter: {
     paddingTop: 4,
@@ -1006,9 +1065,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   emptyState: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 60,
+    paddingVertical: 40,
+    paddingHorizontal: 28,
+    minHeight: 320,
   },
   emptyTitle: {
     fontSize: 18,
@@ -1022,6 +1084,15 @@ const styles = StyleSheet.create({
     fontFamily: appTypography.regular,
     textAlign: 'center',
     color: '#666',
+  },
+  emptyClearBtn: {
+    marginTop: 18,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+  },
+  emptyClearLabel: {
+    fontSize: 15,
+    fontFamily: appTypography.semiBold,
   },
   loadingContainer: {
     flex: 1,

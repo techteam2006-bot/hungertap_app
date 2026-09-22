@@ -5,7 +5,6 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Alert,
   useWindowDimensions,
   Image,
   Animated,
@@ -40,8 +39,7 @@ import {
 import { fetchActivePaymentGateways } from '../lib/paymentGatewaysApi';
 import PaymentGatewaySelector from '../components/PaymentGatewaySelector';
 import { toAlertMessage } from '../lib/toAlertMessage';
-import { getMenu, getLastRememberedCanteen, rememberLastCanteen } from '../lib/menuCache';
-import { VIEWS } from '../lib/supabaseViews';
+import { getMenu, getLastRememberedCanteen } from '../lib/menuCache';
 import { useAuth } from '../lib/AuthContext';
 import { pxToPercentX, pxToPercentY } from '../utils/percent';
 import { appTypography } from '../lib/darkThemeConfig';
@@ -57,11 +55,12 @@ import {
 } from '../lib/orderFlowErrors';
 import LoadingButton from '../components/LoadingButton';
 import BrandYellowStrip from '../components/BrandYellowStrip';
+import ConfirmModal from '../components/ConfirmModal';
+import { useAppAlert } from '../lib/AppAlertContext';
 import {
   CART_MAX_ORDER_TOTAL,
   CART_MAX_ORDER_TOTAL_MESSAGE,
   exceedsMaxOrderTotal,
-  resolveTakeawayFeePerItem,
   takeawayChargeForLines,
   getLowStockWarningItems,
   formatLowStockWarningMessages,
@@ -810,6 +809,7 @@ const createCartStyles = (colors, windowHeight) =>
 
 const CartScreen = ({ navigation }) => {
   const { colors, isDarkMode } = useTheme();
+  const { showAppAlert } = useAppAlert();
   const { height: windowHeight } = useWindowDimensions();
   const styles = useMemo(
     () => createCartStyles(colors, windowHeight),
@@ -819,12 +819,6 @@ const CartScreen = ({ navigation }) => {
   // Remount body after returning from payment SDK/WebView — Android often leaves
   // ScrollView layout stuck with content pinned under the header.
   const [layoutEpoch, setLayoutEpoch] = useState(0);
-  useFocusEffect(
-    useCallback(() => {
-      setLayoutEpoch((n) => n + 1);
-      return undefined;
-    }, [])
-  );
   const { 
     cartItems, 
     increaseQuantity, 
@@ -836,9 +830,23 @@ const CartScreen = ({ navigation }) => {
     isTakeaway,
     setIsTakeaway,
     takeawayFeePerItem,
+    takeawayFeeLoading,
     setTakeawayFeePerItem,
+    refreshTakeawayFee,
     refreshCart,
   } = useCart();
+
+  // Remount body only on real focus (payment SDK layout recovery) — not when
+  // refreshTakeawayFee identity changes mid-scroll.
+  const refreshTakeawayFeeRef = useRef(refreshTakeawayFee);
+  refreshTakeawayFeeRef.current = refreshTakeawayFee;
+  useFocusEffect(
+    useCallback(() => {
+      setLayoutEpoch((n) => n + 1);
+      void refreshTakeawayFeeRef.current?.();
+      return undefined;
+    }, [])
+  );
 
   const { user, updateUserPhone } = useAuth();
   
@@ -876,58 +884,17 @@ const CartScreen = ({ navigation }) => {
   const [phoneModalError, setPhoneModalError] = useState('');
   const [phoneSaving, setPhoneSaving] = useState(false);
   const [phoneRequiredForCheckout, setPhoneRequiredForCheckout] = useState(false);
+  const [clearCartModalVisible, setClearCartModalVisible] = useState(false);
+  const [lowStockModalVisible, setLowStockModalVisible] = useState(false);
+  const [lowStockModalMessage, setLowStockModalMessage] = useState('');
+  const [notifPromptVisible, setNotifPromptVisible] = useState(false);
+  const lowStockContinueRef = useRef(null);
+  const notifContinueRef = useRef(null);
   const phoneSavedResumeRef = useRef(null);
   const checkoutPhoneRef = useRef('');
   const placeOrderInFlightRef = useRef(false);
   const [checkoutErrorToast, setCheckoutErrorToast] = useState('');
   const [isOrderSummaryExpanded, setIsOrderSummaryExpanded] = useState(false); // State for Order Summary dropdown
-
-  // Sync takeaway fee from AsyncStorage + live canteens.takeaway_charge (matches create_order).
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const last = await getLastRememberedCanteen();
-        if (!cancelled && last?.takeawayCharge != null) {
-          setTakeawayFeePerItem(last.takeawayCharge);
-        }
-        const canteenId = user?.id
-          ? await getUserCanteenId(user.id)
-          : last?.id || null;
-        if (!canteenId || cancelled) return;
-        let feeRaw = null;
-        let name = last?.name || '';
-        const viewRes = await supabase
-          .from(VIEWS.ACTIVE_OPEN_CANTEENS)
-          .select('takeaway_charge, name')
-          .eq('id', canteenId)
-          .maybeSingle();
-        if (!viewRes.error && viewRes.data?.takeaway_charge != null) {
-          feeRaw = viewRes.data.takeaway_charge;
-          name = viewRes.data.name || name;
-        } else {
-          const { data } = await supabase
-            .from('canteens')
-            .select('takeaway_charge, name')
-            .eq('id', canteenId)
-            .maybeSingle();
-          if (data?.takeaway_charge != null) {
-            feeRaw = data.takeaway_charge;
-            name = data.name || name;
-          }
-        }
-        if (cancelled || feeRaw == null) return;
-        const fee = resolveTakeawayFeePerItem(feeRaw);
-        setTakeawayFeePerItem(fee);
-        rememberLastCanteen(canteenId, name, {
-          takeawayCharge: fee,
-        }).catch(() => {});
-      } catch (_) {}
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [user?.id, setTakeawayFeePerItem]);
 
   // Keep a ref so checkout resume after saving phone does not see a stale user.
   useEffect(() => {
@@ -1000,11 +967,15 @@ const CartScreen = ({ navigation }) => {
         setRecommendationsLoading(true);
         const canteenId = user?.id ? await getUserCanteenId(user.id) : null;
         let resolvedCanteenId = canteenId;
-        if (!resolvedCanteenId && user?.id) {
+        if (!resolvedCanteenId) {
           try {
             const last = await getLastRememberedCanteen();
             if (last?.id) resolvedCanteenId = last.id;
           } catch (_) {}
+        }
+        if (!resolvedCanteenId) {
+          setAllFoodItems([]);
+          return;
         }
         const { data, error } = await getMenu(resolvedCanteenId, {
           forceRefresh,
@@ -1058,9 +1029,17 @@ const CartScreen = ({ navigation }) => {
     [cartItems]
   );
 
-  const handleTakeawayToggle = () => {
+  const handleTakeawayToggle = async () => {
     if (isTakeaway) {
       setIsTakeaway(false);
+      return;
+    }
+    const fee = await refreshTakeawayFee?.();
+    if (fee == null) {
+      showAppAlert(
+        'Takeaway',
+        'Could not load takeaway charge. Check your connection and try again.'
+      );
       return;
     }
     setIsTakeaway(true);
@@ -1148,28 +1127,21 @@ const CartScreen = ({ navigation }) => {
   // console.log('🔍 Cart Debug Info:', { cartItems: cartItems.length, allFoodItems: allFoodItems.length, recommendations: recommendations.length });
 
   const handleClearCart = () => {
-    Alert.alert(
-      'Clear Cart',
-      'Are you sure you want to clear your cart?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Clear', style: 'destructive', onPress: clearCart },
-      ]
-    );
+    setClearCartModalVisible(true);
   };
 
   const handlePayment = async () => {
     if (cartItems.length === 0) {
-      Alert.alert('Empty Cart', 'Please add some items to your cart first.');
+      showAppAlert('Empty Cart', 'Please add some items to your cart first.');
       return;
     }
     if (exceedsMaxOrderTotal(getTotalPrice())) {
-      Alert.alert('Order limit', CART_MAX_ORDER_TOTAL_MESSAGE);
+      showAppAlert('Order limit', CART_MAX_ORDER_TOTAL_MESSAGE);
       return;
     }
     if (placeOrderInFlightRef.current || isCreatingOrder) return;
     if (!CONFIG.CREATE_ORDER_V2_URL) {
-      Alert.alert(
+      showAppAlert(
         'Checkout Unavailable',
         'Online payment is not available right now. Please try again later or contact support.'
       );
@@ -1183,7 +1155,7 @@ const CartScreen = ({ navigation }) => {
     try {
       const userId = getUserId();
       if (!userId) {
-        Alert.alert('Authentication Required', 'Please sign in to place an order.');
+        showAppAlert('Authentication Required', 'Please sign in to place an order.');
         return;
       }
 
@@ -1191,7 +1163,7 @@ const CartScreen = ({ navigation }) => {
         data: { session },
       } = await supabase.auth.getSession();
       if (!session?.access_token) {
-        Alert.alert('Error', 'User session not found. Please login again.');
+        showAppAlert('Error', 'User session not found. Please login again.');
         return;
       }
 
@@ -1210,26 +1182,26 @@ const CartScreen = ({ navigation }) => {
 
       const prep = await prepareCheckoutCart(userId, cartItems);
       if (prep.stockErrors.length > 0) {
-        Alert.alert('Cannot place order', prep.stockErrors.join('\n'));
+        showAppAlert('Cannot place order', prep.stockErrors.join('\n'));
         return;
       }
 
       const linesForOrder = prep.cartAfterCanteen;
       if (!linesForOrder.length) {
-        Alert.alert('Cart empty', 'No valid items left.');
+        showAppAlert('Cart empty', 'No valid items left.');
         return;
       }
 
       const continueCheckout = async () => {
         const args = prepareCheckoutOrderArgs(linesForOrder, isTakeaway);
         if (!args.ok) {
-          Alert.alert('Cannot place order', toAlertMessage(args.error, 'Invalid cart.'));
+          showAppAlert('Cannot place order', toAlertMessage(args.error, 'Invalid cart.'));
           return;
         }
 
         const check = await validateCartItemsForUserCanteen(userId, linesForOrder, args.p_items);
         if (!check.ok) {
-          Alert.alert('Cannot place order', toAlertMessage(check.error, 'Cart validation failed.'));
+          showAppAlert('Cannot place order', toAlertMessage(check.error, 'Cart validation failed.'));
           return;
         }
 
@@ -1262,36 +1234,30 @@ const CartScreen = ({ navigation }) => {
         if (prep.stockWarnings.length > 0) {
           placeOrderInFlightRef.current = false;
           setIsCreatingOrder(false);
-          Alert.alert(
-            'Low stock warning',
-            `${prep.stockWarnings.join('\n')}\n\nIf stock runs out after payment, that item may be cancelled and refunded.`,
-            [
-              { text: 'Go back', style: 'cancel' },
-              {
-                text: 'Continue',
-                onPress: () => {
-                  placeOrderInFlightRef.current = true;
-                  setIsCreatingOrder(true);
-                  continueCheckout()
-                    .catch((error) => {
-                      const m = typeof error?.message === 'string' ? error.message.trim() : '';
-                      if (m === MSG_POOR_NETWORK || isNetworkConnectivityFailure(error)) {
-                        setCheckoutErrorToast(MSG_POOR_NETWORK);
-                      } else if (m === MSG_COULD_NOT_FETCH_DATA) {
-                        setCheckoutErrorToast(MSG_COULD_NOT_FETCH_DATA);
-                      } else {
-                        console.warn('handlePayment:', error?.message || error);
-                        setCheckoutErrorToast(toAlertMessage(error, MSG_PAYMENT_FAILED));
-                      }
-                    })
-                    .finally(() => {
-                      placeOrderInFlightRef.current = false;
-                      setIsCreatingOrder(false);
-                    });
-                },
-              },
-            ]
+          setLowStockModalMessage(
+            `${prep.stockWarnings.join('\n')}\n\nIf stock runs out after payment, that item may be cancelled and refunded.`
           );
+          lowStockContinueRef.current = () => {
+            placeOrderInFlightRef.current = true;
+            setIsCreatingOrder(true);
+            continueCheckout()
+              .catch((error) => {
+                const m = typeof error?.message === 'string' ? error.message.trim() : '';
+                if (m === MSG_POOR_NETWORK || isNetworkConnectivityFailure(error)) {
+                  setCheckoutErrorToast(MSG_POOR_NETWORK);
+                } else if (m === MSG_COULD_NOT_FETCH_DATA) {
+                  setCheckoutErrorToast(MSG_COULD_NOT_FETCH_DATA);
+                } else {
+                  console.warn('handlePayment:', error?.message || error);
+                  setCheckoutErrorToast(toAlertMessage(error, MSG_PAYMENT_FAILED));
+                }
+              })
+              .finally(() => {
+                placeOrderInFlightRef.current = false;
+                setIsCreatingOrder(false);
+              });
+          };
+          setLowStockModalVisible(true);
           return;
         }
         await continueCheckout();
@@ -1301,72 +1267,60 @@ const CartScreen = ({ navigation }) => {
       if (!pushReady.ready && pushReady.canRegister) {
         placeOrderInFlightRef.current = false;
         setIsCreatingOrder(false);
-        Alert.alert(
-          'Enable order notifications?',
-          'Turn on notifications so you get updates when your order is placed, ready, or refunded.',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Not now',
-              onPress: () => {
-                placeOrderInFlightRef.current = true;
-                setIsCreatingOrder(true);
-                runWithOptionalStockWarning()
-                  .catch((error) => {
-                    const m = typeof error?.message === 'string' ? error.message.trim() : '';
-                    if (m === MSG_POOR_NETWORK || isNetworkConnectivityFailure(error)) {
-                      setCheckoutErrorToast(MSG_POOR_NETWORK);
-                    } else if (m === MSG_COULD_NOT_FETCH_DATA) {
-                      setCheckoutErrorToast(MSG_COULD_NOT_FETCH_DATA);
-                    } else {
-                      console.warn('handlePayment:', error?.message || error);
-                      setCheckoutErrorToast(toAlertMessage(error, MSG_PAYMENT_FAILED));
-                    }
-                  })
-                  .finally(() => {
-                    placeOrderInFlightRef.current = false;
-                    setIsCreatingOrder(false);
-                  });
-              },
-            },
-            {
-              text: 'Enable',
-              onPress: () => {
-                (async () => {
-                  placeOrderInFlightRef.current = true;
-                  setIsCreatingOrder(true);
-                  try {
-                    const result = await registerForPushNotificationsAsync(userId);
-                    if (result.token || result.localOnly) {
-                      await setNotificationsEnabled(true);
-                      NotificationService.isInitialized = false;
-                      await NotificationService.initialize();
-                    } else if (result.reason === 'permission_denied') {
-                      Alert.alert(
-                        'Permission needed',
-                        'Allow notifications in system settings to get order updates. You can continue checkout without them.'
-                      );
-                    }
-                    await runWithOptionalStockWarning();
-                  } catch (error) {
-                    const m = typeof error?.message === 'string' ? error.message.trim() : '';
-                    if (m === MSG_POOR_NETWORK || isNetworkConnectivityFailure(error)) {
-                      setCheckoutErrorToast(MSG_POOR_NETWORK);
-                    } else if (m === MSG_COULD_NOT_FETCH_DATA) {
-                      setCheckoutErrorToast(MSG_COULD_NOT_FETCH_DATA);
-                    } else {
-                      console.warn('handlePayment:', error?.message || error);
-                      setCheckoutErrorToast(toAlertMessage(error, MSG_PAYMENT_FAILED));
-                    }
-                  } finally {
-                    placeOrderInFlightRef.current = false;
-                    setIsCreatingOrder(false);
-                  }
-                })();
-              },
-            },
-          ]
-        );
+        notifContinueRef.current = {
+          skip: () => {
+            placeOrderInFlightRef.current = true;
+            setIsCreatingOrder(true);
+            runWithOptionalStockWarning()
+              .catch((error) => {
+                const m = typeof error?.message === 'string' ? error.message.trim() : '';
+                if (m === MSG_POOR_NETWORK || isNetworkConnectivityFailure(error)) {
+                  setCheckoutErrorToast(MSG_POOR_NETWORK);
+                } else if (m === MSG_COULD_NOT_FETCH_DATA) {
+                  setCheckoutErrorToast(MSG_COULD_NOT_FETCH_DATA);
+                } else {
+                  console.warn('handlePayment:', error?.message || error);
+                  setCheckoutErrorToast(toAlertMessage(error, MSG_PAYMENT_FAILED));
+                }
+              })
+              .finally(() => {
+                placeOrderInFlightRef.current = false;
+                setIsCreatingOrder(false);
+              });
+          },
+          enable: async () => {
+            placeOrderInFlightRef.current = true;
+            setIsCreatingOrder(true);
+            try {
+              const result = await registerForPushNotificationsAsync(userId);
+              if (result.token || result.localOnly) {
+                await setNotificationsEnabled(true);
+                NotificationService.isInitialized = false;
+                await NotificationService.initialize();
+              } else if (result.reason === 'permission_denied') {
+                showAppAlert(
+                  'Permission needed',
+                  'Allow notifications in system settings to get order updates. You can continue checkout without them.'
+                );
+              }
+              await runWithOptionalStockWarning();
+            } catch (error) {
+              const m = typeof error?.message === 'string' ? error.message.trim() : '';
+              if (m === MSG_POOR_NETWORK || isNetworkConnectivityFailure(error)) {
+                setCheckoutErrorToast(MSG_POOR_NETWORK);
+              } else if (m === MSG_COULD_NOT_FETCH_DATA) {
+                setCheckoutErrorToast(MSG_COULD_NOT_FETCH_DATA);
+              } else {
+                console.warn('handlePayment:', error?.message || error);
+                setCheckoutErrorToast(toAlertMessage(error, MSG_PAYMENT_FAILED));
+              }
+            } finally {
+              placeOrderInFlightRef.current = false;
+              setIsCreatingOrder(false);
+            }
+          },
+        };
+        setNotifPromptVisible(true);
         return;
       }
 
@@ -1691,7 +1645,7 @@ const CartScreen = ({ navigation }) => {
                 </LinearGradient>
               </View>
               <Text style={styles.quantityImageNote}>
-                NOTE: The quantity in the image may differ from the original item quantity
+                NOTE: The food appearance and quantity served may differ from the image shown. The image is for representation purposes only.
               </Text>
             </View>
 
@@ -1718,9 +1672,13 @@ const CartScreen = ({ navigation }) => {
                   {isTakeaway && <AppIcon name="checkmark" size={14} color="white" />}
                 </View>
                 <Text style={styles.globalTakeawayText}>Takeaway</Text>
-                <Text style={styles.globalTakeawayPriceHint}>
-                  (+₹{takeawayFeePerItem})
-                </Text>
+                {takeawayFeePerItem != null ? (
+                  <Text style={styles.globalTakeawayPriceHint}>
+                    (+₹{takeawayFeePerItem})
+                  </Text>
+                ) : takeawayFeeLoading ? (
+                  <Text style={styles.globalTakeawayPriceHint}>…</Text>
+                ) : null}
                 <AppIcon name="basket-outline" size={18} color="#D99367" style={{ marginLeft: 6 }} />
               </TouchableOpacity>
               <Text style={styles.globalTakeawayDescription}>Pick up your order at Canteen Counter</Text>
@@ -1883,6 +1841,58 @@ const CartScreen = ({ navigation }) => {
           </View>
         </View>
       ) : null}
+
+      <ConfirmModal
+        visible={clearCartModalVisible}
+        title="Clear Cart"
+        message="Are you sure you want to clear your cart?"
+        cancelLabel="Cancel"
+        confirmLabel="Clear"
+        confirmDestructive
+        onCancel={() => setClearCartModalVisible(false)}
+        onConfirm={() => {
+          setClearCartModalVisible(false);
+          clearCart();
+        }}
+      />
+
+      <ConfirmModal
+        visible={lowStockModalVisible}
+        title="Low stock warning"
+        message={lowStockModalMessage}
+        cancelLabel="Go back"
+        confirmLabel="Continue"
+        onCancel={() => {
+          lowStockContinueRef.current = null;
+          setLowStockModalVisible(false);
+        }}
+        onConfirm={() => {
+          const cont = lowStockContinueRef.current;
+          lowStockContinueRef.current = null;
+          setLowStockModalVisible(false);
+          cont?.();
+        }}
+      />
+
+      <ConfirmModal
+        visible={notifPromptVisible}
+        title="Enable order notifications?"
+        message="Turn on notifications so you get updates when your order is placed, ready, or refunded."
+        cancelLabel="Not now"
+        confirmLabel="Enable"
+        onCancel={() => {
+          const handlers = notifContinueRef.current;
+          notifContinueRef.current = null;
+          setNotifPromptVisible(false);
+          handlers?.skip?.();
+        }}
+        onConfirm={() => {
+          const handlers = notifContinueRef.current;
+          notifContinueRef.current = null;
+          setNotifPromptVisible(false);
+          void handlers?.enable?.();
+        }}
+      />
 
       <Modal
         visible={phoneModalVisible}

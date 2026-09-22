@@ -21,6 +21,7 @@ import HomeStyleToggle from '../components/HomeStyleToggle';
 import { LinearGradient } from 'expo-linear-gradient';
 import AppIcon from '../components/AppIcon';
 import BrandYellowStrip from '../components/BrandYellowStrip';
+import ConfirmModal from '../components/ConfirmModal';
 import { pullRefreshControlProps } from '../lib/pullToRefresh';
 import { useAuth } from '../lib/AuthContext';
 import {
@@ -120,6 +121,7 @@ const ProfileScreen = ({ navigation }) => {
   const [notifToggleBusy, setNotifToggleBusy] = React.useState(false);
   const [vegModeEnabled, setVegModeEnabled] = React.useState(false);
   const [deleteModalVisible, setDeleteModalVisible] = React.useState(false);
+  const [signOutModalVisible, setSignOutModalVisible] = React.useState(false);
   const [deletePassword, setDeletePassword] = React.useState('');
   const [deletePasswordVisible, setDeletePasswordVisible] = React.useState(false);
   const [deleteBusy, setDeleteBusy] = React.useState(false);
@@ -298,10 +300,7 @@ const ProfileScreen = ({ navigation }) => {
   };
 
   const handleSignOut = () => {
-    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Sign Out', style: 'destructive', onPress: signOut },
-    ]);
+    setSignOutModalVisible(true);
   };
 
   const openDeleteModal = () => {
@@ -620,6 +619,20 @@ const ProfileScreen = ({ navigation }) => {
         </View>
       </ScrollView>
       </View>
+
+      <ConfirmModal
+        visible={signOutModalVisible}
+        title="Sign Out"
+        message="Are you sure you want to sign out?"
+        cancelLabel="Cancel"
+        confirmLabel="Sign Out"
+        confirmDestructive
+        onCancel={() => setSignOutModalVisible(false)}
+        onConfirm={() => {
+          setSignOutModalVisible(false);
+          signOut();
+        }}
+      />
 
       <Modal
         visible={deleteModalVisible}

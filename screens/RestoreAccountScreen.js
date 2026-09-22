@@ -15,6 +15,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../lib/AuthContext';
 import { useTheme } from '../lib/ThemeContext';
 import AppIcon from '../components/AppIcon';
+import ConfirmModal from '../components/ConfirmModal';
 import { appTypography } from '../lib/darkThemeConfig';
 
 const { width: WINDOW_WIDTH } = Dimensions.get('window');
@@ -59,6 +60,7 @@ export default function RestoreAccountScreen() {
   const { colors, isDarkMode } = useTheme();
   const { profile, user, restoreOwnAccount, signOut, authError, setAuthError } = useAuth();
   const [busy, setBusy] = useState(false);
+  const [signOutModalVisible, setSignOutModalVisible] = useState(false);
 
   const deletedOnLabel = useMemo(
     () => formatDeletedOn(profile?.deleted_at),
@@ -80,10 +82,7 @@ export default function RestoreAccountScreen() {
   };
 
   const handleSignOut = () => {
-    Alert.alert('Sign out', 'Sign out without restoring your account?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Sign out', style: 'destructive', onPress: () => signOut() },
-    ]);
+    setSignOutModalVisible(true);
   };
 
   return (
@@ -158,6 +157,20 @@ export default function RestoreAccountScreen() {
           <Text style={[styles.signOutLabel, { color: colors.textSecondary }]}>Sign out</Text>
         </TouchableOpacity>
       </View>
+
+      <ConfirmModal
+        visible={signOutModalVisible}
+        title="Sign out"
+        message="Sign out without restoring your account?"
+        cancelLabel="Cancel"
+        confirmLabel="Sign out"
+        confirmDestructive
+        onCancel={() => setSignOutModalVisible(false)}
+        onConfirm={() => {
+          setSignOutModalVisible(false);
+          signOut();
+        }}
+      />
     </View>
   );
 }

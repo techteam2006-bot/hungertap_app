@@ -6,6 +6,10 @@
     "version": "1.0.4",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
+    "androidNavigationBar": {
+      "enforceContrast": false,
+      "barStyle": "dark"
+    },
     "owner": "24951a66p9",
     "icon": "./assets/splash_icon.png",
     "splash": {
@@ -83,7 +87,15 @@
       "expo-secure-store",
       "expo-notifications",
       "expo-background-fetch",
+      [
+        "expo-navigation-bar",
+        {
+          "enforceContrast": false,
+          "style": "dark"
+        }
+      ],
       "./plugins/withEasebuzzManifestMergerFix.js",
+      "./plugins/withAutofillHighlightFix.js",
       [
         "expo-build-properties",
         {

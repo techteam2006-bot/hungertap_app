@@ -5,7 +5,6 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
-  Alert,
   FlatList,
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -24,6 +23,8 @@ import {
 } from 'react-native';
 import Constants from 'expo-constants';
 import AppIcon from '../components/AppIcon';
+import ConfirmModal from '../components/ConfirmModal';
+import { useAppAlert } from '../lib/AppAlertContext';
 import { LinearGradient } from 'expo-linear-gradient';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useAuth } from '../lib/AuthContext';
@@ -124,6 +125,7 @@ const HomeScreen = ({ navigation, route }) => {
     getTotalPrice,
     clearCart,
   } = useCart();
+  const { showAppAlert } = useAppAlert();
   const { canteenStatus, checkCanteenStatus } = useCanteenStatus();
   /** Closed overlay / cart locks only after a successful server read (avoids offline → false “closed”). */
   const kitchenConfirmedClosed = useMemo(
@@ -228,6 +230,9 @@ const HomeScreen = ({ navigation, route }) => {
   const [collegeCanteens, setCollegeCanteens] = useState([]);
   const [showCanteenPicker, setShowCanteenPicker] = useState(false);
   const [canteenPickerLoading, setCanteenPickerLoading] = useState(false);
+  const [changeCanteenModalVisible, setChangeCanteenModalVisible] = useState(false);
+  const [changeCanteenBusy, setChangeCanteenBusy] = useState(false);
+  const pendingCanteenSwitchRef = useRef(null);
 
   // Veg mode: scheduled days (local) override; else signed-in users use public.users.veg_mode_enabled
   const loadVegModePreference = useCallback(async () => {
@@ -470,6 +475,7 @@ const HomeScreen = ({ navigation, route }) => {
   const nextOffsetRef = useRef(0);
   const pagingInFlightRef = useRef(false);
   const menuAutoPrefetchSafetyRef = useRef(0);
+  const menuLoadedCanteenRef = useRef(null);
 
   const serverCategoryIdForPaging = useMemo(() => {
     if (activeFilter === 'all') return null;
@@ -523,31 +529,53 @@ const HomeScreen = ({ navigation, route }) => {
     });
   }, []);
 
-  const reloadMenuFromStart = useCallback(async () => {
-    if (user?.id && !menuCanteenReady) return;
-
-    if (menuFromHttpEnabled()) {
-      invalidateHttpMenuCache();
-    } else {
-      invalidateCanteenMenuEdgeCache(currentCanteenId);
+  const reloadMenuFromStart = useCallback(async (opts = {}) => {
+    const forceNetwork = Boolean(opts?.forceNetwork);
+    // Edge get-canteen-menu requires canteen_id — keep loading until switcher / last-remembered.
+    if (!currentCanteenId) {
+      setLoading(true);
+      setMenuLoadError(null);
+      pagingInFlightRef.current = false;
+      return;
     }
-    // Soft-invalidate durable cache so forceRefresh fetches network first,
-    // while still allowing offline fallback if the request fails.
-    invalidateMenu(currentCanteenId).catch(() => {});
+    if (user?.id && !menuCanteenReady) {
+      setLoading(true);
+      setMenuLoadError(null);
+      pagingInFlightRef.current = false;
+      return;
+    }
+
+    // Only bust caches on explicit pull-to-refresh / retry — first paint should use cache.
+    if (forceNetwork) {
+      if (menuFromHttpEnabled()) {
+        invalidateHttpMenuCache();
+      } else {
+        invalidateCanteenMenuEdgeCache(currentCanteenId);
+      }
+      invalidateMenu(currentCanteenId).catch(() => {});
+    }
 
     pagingInFlightRef.current = true;
     menuAutoPrefetchSafetyRef.current = 0;
     setMenuLoadError(null);
     setLoadingMore(false);
     setLoading(true);
-    setMenuItems([]);
+    // Clear only when switching canteens — keep rows on revisit for smooth paint.
+    if (menuLoadedCanteenRef.current !== currentCanteenId) {
+      if (menuLoadedCanteenRef.current != null) {
+        setMenuItems([]);
+      }
+      menuLoadedCanteenRef.current = currentCanteenId;
+    }
     nextOffsetRef.current = 0;
     setHasMore(false);
 
     try {
-      const canteenFilter = user?.id ? currentCanteenId : null;
-      // Load the full canteen menu in one shot (client filters by category/search).
-      const { data: rawRows, error } = await getMenu(canteenFilter, { forceRefresh: true });
+      const canteenFilter = currentCanteenId;
+      // Cache-first for smooth open; force network only on pull/retry.
+      const { data: rawRows, error } = await getMenu(canteenFilter, {
+        forceRefresh: forceNetwork,
+      });
 
       const rows = transformRawToMenuRows(rawRows || []);
 
@@ -648,12 +676,12 @@ const HomeScreen = ({ navigation, route }) => {
         await fetchCategories();
       } catch (e) {
         console.error('Change canteen error:', e);
-        Alert.alert('Error', 'Could not change canteen. Try again.');
+        showAppAlert('Error', 'Could not change canteen. Try again.');
       } finally {
         setCanteenPickerLoading(false);
       }
     },
-    [user?.id, checkCanteenStatus, fetchCategories]
+    [user?.id, checkCanteenStatus, fetchCategories, showAppAlert]
   );
 
   const handleSelectCanteen = useCallback(
@@ -674,39 +702,42 @@ const HomeScreen = ({ navigation, route }) => {
       }
 
       if (getTotalItems() > 0) {
-        Alert.alert(
-          'Change canteen?',
-          'Your cart is for the current canteen. Switching will remove all items from your cart.',
-          [
-            {
-              text: 'Cancel',
-              style: 'cancel',
-              onPress: () => setShowCanteenPicker(false),
-            },
-            {
-              text: 'Clear cart & switch',
-              style: 'destructive',
-              onPress: () => {
-                void (async () => {
-                  try {
-                    await clearCart();
-                    await performCanteenSwitch(canteen);
-                  } catch (e) {
-                    console.error('Change canteen (after clear cart):', e);
-                    Alert.alert('Error', 'Could not switch canteen. Try again.');
-                  }
-                })();
-              },
-            },
-          ]
-        );
+        pendingCanteenSwitchRef.current = canteen;
+        setChangeCanteenModalVisible(true);
         return;
       }
 
       void performCanteenSwitch(canteen);
     },
-    [user?.id, currentCanteenId, getTotalItems, clearCart, performCanteenSwitch]
+    [user?.id, currentCanteenId, getTotalItems, performCanteenSwitch]
   );
+
+  const closeChangeCanteenModal = useCallback(() => {
+    if (changeCanteenBusy) return;
+    pendingCanteenSwitchRef.current = null;
+    setChangeCanteenModalVisible(false);
+    setShowCanteenPicker(false);
+  }, [changeCanteenBusy]);
+
+  const confirmChangeCanteen = useCallback(async () => {
+    const canteen = pendingCanteenSwitchRef.current;
+    if (!canteen) {
+      closeChangeCanteenModal();
+      return;
+    }
+    setChangeCanteenBusy(true);
+    try {
+      await clearCart();
+      await performCanteenSwitch(canteen);
+      pendingCanteenSwitchRef.current = null;
+      setChangeCanteenModalVisible(false);
+    } catch (e) {
+      console.error('Change canteen (after clear cart):', e);
+      showAppAlert('Error', 'Could not switch canteen. Try again.');
+    } finally {
+      setChangeCanteenBusy(false);
+    }
+  }, [clearCart, performCanteenSwitch, closeChangeCanteenModal, showAppAlert]);
 
   useEffect(() => {
     if (!user?.id) {
@@ -832,8 +863,7 @@ const HomeScreen = ({ navigation, route }) => {
   // Full-canteen menu occupancy for hiding empty category chips (independent of paging).
   useEffect(() => {
     let mounted = true;
-    const canteenFilter = user?.id ? currentCanteenId : null;
-    if (user?.id && !currentCanteenId) {
+    if (!currentCanteenId) {
       setCategoryOccupancy(null);
       return undefined;
     }
@@ -841,7 +871,7 @@ const HomeScreen = ({ navigation, route }) => {
     setCategoryOccupancy(null);
     (async () => {
       try {
-        const { data, error } = await getMenu(canteenFilter);
+        const { data, error } = await getMenu(currentCanteenId);
         if (!mounted) return;
         if (!Array.isArray(data)) {
           // Keep occupancy unknown so we don't hide categories incorrectly.
@@ -861,9 +891,8 @@ const HomeScreen = ({ navigation, route }) => {
 
   // Background refresh → update full menu without a manual pull.
   useEffect(() => {
-    if (!currentCanteenId && user?.id) return undefined;
-    const canteenFilter = user?.id ? currentCanteenId : null;
-    return subscribeMenuUpdates(canteenFilter, (rawData) => {
+    if (!currentCanteenId) return undefined;
+    return subscribeMenuUpdates(currentCanteenId, (rawData) => {
       try {
         setCategoryOccupancy(computeCategoryOccupancy(rawData));
         const rows = Array.isArray(rawData) ? [...rawData] : [];
@@ -948,21 +977,10 @@ const HomeScreen = ({ navigation, route }) => {
             .order('name');
           if (!viewRes.error && Array.isArray(viewRes.data)) {
             canteens = viewRes.data;
-          } else {
-            if (viewRes.error) {
-              console.error('Canteen switcher canteens:', viewRes.error.message || viewRes.error);
-            }
-            const fb = await supabase
-              .from('canteens')
-              .select('id, name, is_open, takeaway_charge')
-              .eq('college_id', collegeId)
-              .order('name');
-            if (fb.error) {
-              console.error('Canteen switcher canteens:', fb.error.message || fb.error);
-              return;
-            }
-            if (!Array.isArray(fb.data)) return;
-            canteens = fb.data;
+          } else if (viewRes.error) {
+            // Do not query `canteens` — students get permission denied under RLS/grants.
+            console.error('Canteen switcher canteens:', viewRes.error.message || viewRes.error);
+            return;
           }
         }
         if (!mounted) return;
@@ -980,11 +998,10 @@ const HomeScreen = ({ navigation, route }) => {
                 takeawayCharge: current.takeaway_charge,
               }).catch(() => {});
             } else {
-              const { data: canteenRow } = await supabase
-                .from('canteens')
-                .select('name, takeaway_charge')
-                .eq('id', userCanteenId)
-                .maybeSingle();
+              const { data: rpcRows } = await supabase.rpc('get_student_canteen_takeaway', {
+                p_canteen_id: userCanteenId,
+              });
+              const canteenRow = Array.isArray(rpcRows) ? rpcRows[0] : rpcRows;
               if (canteenRow) {
                 setCurrentCanteenName(canteenRow.name);
                 setCurrentCanteenId(userCanteenId);
@@ -1081,7 +1098,7 @@ const HomeScreen = ({ navigation, route }) => {
   const onRefresh = async () => {
     setRefreshing(true);
     await Promise.all([
-      reloadMenuFromStart(),
+      reloadMenuFromStart({ forceNetwork: true }),
       fetchCategories(),
       checkCanteenStatus(),
     ]);
@@ -1362,16 +1379,15 @@ const HomeScreen = ({ navigation, route }) => {
   const handleAddToCart = useCallback((item) => {
     // Block only when the server has confirmed kitchen is closed
     if (kitchenConfirmedClosed) {
-      Alert.alert(
+      showAppAlert(
         'Canteen Closed',
-        'Sorry, the canteen is currently closed. You cannot add items to cart.',
-        [{ text: 'OK' }]
+        'Sorry, the canteen is currently closed. You cannot add items to cart.'
       );
       return;
     }
 
     if (!item.isAvailable) {
-      Alert.alert('Out of Stock', 'This item is currently out of stock.');
+      showAppAlert('Out of Stock', 'This item is currently out of stock.');
       return;
     }
     
@@ -1387,7 +1403,7 @@ const HomeScreen = ({ navigation, route }) => {
         setSnackbarVisible(false);
       }, 5000);
     });
-  }, [addToCart, kitchenConfirmedClosed]);
+  }, [addToCart, kitchenConfirmedClosed, showAppAlert]);
 
   const handleQuickActionPress = useCallback((filter) => {
     setActiveFilter(filter);
@@ -1768,7 +1784,13 @@ const HomeScreen = ({ navigation, route }) => {
     </View>
   );
 
-  // Avoid a second full-screen loader after auth redirect; use in-list shimmer instead.
+  // Avoid empty flash: treat "still resolving canteen / first fetch" as loading.
+  const menuAwaitingCanteen =
+    !currentCanteenId || (Boolean(user?.id) && !menuCanteenReady);
+  const showMenuLoading =
+    loading || (menuAwaitingCanteen && menuItems.length === 0 && !menuLoadError);
+
+  // Avoid a second full-screen loader after auth redirect; use in-list spinner instead.
   const isHoldingForLoad = false;
 
   // Pulsing logo while holding
@@ -2055,7 +2077,7 @@ const HomeScreen = ({ navigation, route }) => {
           }
           ListHeaderComponent={listHeaderWithStickyBanner}
           ListEmptyComponent={
-            loading ? (
+            showMenuLoading ? (
               renderLoadingItem()
             ) : menuLoadError ? (
               <View style={[styles.emptyState, { paddingHorizontal: 24 }]}>
@@ -2072,7 +2094,7 @@ const HomeScreen = ({ navigation, route }) => {
                   {menuLoadError}
                 </Text>
                 <TouchableOpacity
-                  onPress={() => reloadMenuFromStart()}
+                  onPress={() => reloadMenuFromStart({ forceNetwork: true })}
                   style={[styles.emptyStateClearBtn, { marginTop: 18 }]}
                   activeOpacity={0.75}
                 >
@@ -2093,7 +2115,7 @@ const HomeScreen = ({ navigation, route }) => {
                   ]}
                 >
                   {debouncedSearchQuery.trim()
-                    ? 'Nothing matches that search. Try a shorter word, check spelling, or clear the search to see the full menu.'
+                    ? 'No matching items found. Please check your search and try again.'
                     : 'Nothing is listed for this pick yet. Choose another category, open All Items, or come back a little later.'}
                 </Text>
                 {debouncedSearchQuery.trim() ? (
@@ -2351,6 +2373,18 @@ const HomeScreen = ({ navigation, route }) => {
           </View>
         </GestureHandlerRootView>
       </Modal>
+
+      <ConfirmModal
+        visible={changeCanteenModalVisible}
+        title="Change canteen?"
+        message="Your cart is for the current canteen. Switching will remove all items from your cart."
+        cancelLabel="Cancel"
+        confirmLabel="Clear cart & switch"
+        confirmDestructive
+        busy={changeCanteenBusy}
+        onCancel={closeChangeCanteenModal}
+        onConfirm={confirmChangeCanteen}
+      />
 
       <BottomSnackbar
         visible={snackbarVisible}

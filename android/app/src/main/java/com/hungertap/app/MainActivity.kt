@@ -1,7 +1,10 @@
 package com.hungertap.app
 
+import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
+
+import androidx.core.view.WindowCompat
 
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
@@ -17,6 +20,17 @@ class MainActivity : ReactActivity() {
     // This is required for expo-splash-screen.
     setTheme(R.style.AppTheme);
     super.onCreate(null)
+
+    // Edge-to-edge: keep the system nav bar transparent so the app tab bar
+    // (black in dark mode) shows through — no forced white contrast strip.
+    WindowCompat.setDecorFitsSystemWindows(window, false)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+      window.isNavigationBarContrastEnforced = false
+    }
+    @Suppress("DEPRECATION")
+    window.navigationBarColor = Color.TRANSPARENT
+    @Suppress("DEPRECATION")
+    window.statusBarColor = Color.TRANSPARENT
   }
 
   /**

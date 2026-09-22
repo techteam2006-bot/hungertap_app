@@ -180,7 +180,7 @@ const ItemDetailScreen = ({ route, navigation }) => {
             ))}
           </View>
           <Text style={[styles.quantityImageNote, { color: colors.textTertiary }]}>
-            NOTE: The quantity in the image may differ from the original item quantity
+            NOTE: The food appearance and quantity served may differ from the image shown. The image is for representation purposes only.
           </Text>
         </View>
       </ScrollView>

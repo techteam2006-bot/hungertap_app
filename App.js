@@ -6,6 +6,7 @@ import { NavigationContainer, createNavigationContainerRef } from '@react-naviga
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { StatusBar } from 'expo-status-bar';
+import * as NavigationBar from 'expo-navigation-bar';
 import {
   Animated,
   AppState,
@@ -64,6 +65,7 @@ import FavoritesScreen from './screens/FavoritesHomeScreen';
 import { AuthProvider, useAuth } from './lib/AuthContext';
 import { CartProvider } from './lib/CartContext';
 import { ThemeProvider, useTheme } from './lib/ThemeContext';
+import { AppAlertProvider } from './lib/AppAlertContext';
 import { FavoritesProvider } from './lib/FavoritesContext';
 import { CanteenStatusProvider, useCanteenStatus } from './lib/CanteenStatusContext';
 import CartBadgeUpdater from './components/CartBadgeUpdater';
@@ -142,7 +144,7 @@ function MainTabs() {
         tabBarStyle: hideTabBarKitchenClosed ? {
           display: 'none',
         } : {
-          backgroundColor: colors.tabBarBackground,
+          backgroundColor: isDarkMode ? '#000000' : colors.tabBarBackground,
           borderTopColor: colors.tabBarBorder,
           borderTopWidth: StyleSheet.hairlineWidth,
           height: Platform.OS === 'ios'
@@ -348,15 +350,22 @@ function AppNavigator() {
 
   // Motorola & OEM Android Permission Resume Fix: re-check FCM permission when app transitions to active
   useEffect(() => {
+    // Expo Go (SDK 53+): remote push APIs throw — skip entirely.
+    if (isExpoGo) return undefined;
+
     const handleAppStateChange = async (nextAppState) => {
       if (nextAppState === 'active' && user?.id) {
-        const { status } = await Notifications.getPermissionsAsync();
-        if (status === 'granted') {
-          console.log('🔄 App resumed — retrying FCM token registration (permission granted)');
-          await registerForPushNotificationsAsync(user.id);
-          await updatePushTokenStatusInSupabase(user.id, true);
-        } else if (status === 'denied') {
-          await updatePushTokenStatusInSupabase(user.id, false);
+        try {
+          const { status } = await Notifications.getPermissionsAsync();
+          if (status === 'granted') {
+            console.log('🔄 App resumed — retrying FCM token registration (permission granted)');
+            await registerForPushNotificationsAsync(user.id);
+            await updatePushTokenStatusInSupabase(user.id, true);
+          } else if (status === 'denied') {
+            await updatePushTokenStatusInSupabase(user.id, false);
+          }
+        } catch (err) {
+          console.log('App resume push check skipped:', err?.message || err);
         }
       }
     };
@@ -367,7 +376,7 @@ function AppNavigator() {
 
   // Subscribe to OS token rotation updates
   useEffect(() => {
-    if (!user?.id) return;
+    if (!user?.id || isExpoGo) return undefined;
     const cleanup = setupPushTokenRefreshListener(user.id);
     return () => {
       if (cleanup) cleanup();
@@ -375,22 +384,21 @@ function AppNavigator() {
   }, [user?.id]);
 
   useEffect(() => {
-    // show notifications in foreground
+    // show notifications in foreground (no-op in Expo Go)
     setupForegroundHandler();
 
-    // Initialize notification service
+    // Initialize notification service (local alerts; push skipped in Expo Go)
     const initializeNotifications = async () => {
       try {
         await NotificationService.initialize();
         console.log('✅ Notifications initialized in AppNavigator');
-        // Local notifications only for Expo Go - no push registration needed
       } catch (error) {
         console.log('❌ Failed to initialize notifications:', error);
       }
     };
 
     const maybeRegisterPushToken = async () => {
-      if (!user?.id) return;
+      if (!user?.id || isExpoGo) return;
       try {
         // Fresh installs: default ON so native FCM token is registered to user_tokens.fcm_token
         const enabled = await getNotificationsEnabled();
@@ -540,6 +548,7 @@ export default function App() {
       {/* Auth must wrap font loading and theme so no subtree ever mounts without a provider. */}
       <AuthProvider>
         <ThemeProvider>
+          <AppAlertProvider>
           {!fontsLoaded ? (
             <ThemedFontLoading />
           ) : (
@@ -553,6 +562,7 @@ export default function App() {
               </CanteenStatusProvider>
             </ForceUpdateGate>
           )}
+          </AppAlertProvider>
         </ThemeProvider>
       </AuthProvider>
     </SafeAreaProvider>
@@ -561,7 +571,33 @@ export default function App() {
 
 function AppWithTheme() {
   const { colors, isDarkMode } = useTheme();
-  
+
+  // Android system nav / gesture bar: match app theme (black in dark mode).
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+
+    const applyNavBarStyle = async () => {
+      try {
+        // Edge-to-edge: SystemUI / NavigationBar background APIs are unsupported
+        // and spam WARN — only set button/style contrast.
+        NavigationBar.setStyle(isDarkMode ? 'dark' : 'light');
+        try {
+          await NavigationBar.setButtonStyleAsync(isDarkMode ? 'light' : 'dark');
+        } catch (_) {
+          // Ignored when edge-to-edge blocks this API
+        }
+      } catch (e) {
+        // Older builds / unsupported devices — ignore
+      }
+    };
+
+    applyNavBarStyle();
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') applyNavBarStyle();
+    });
+    return () => sub.remove();
+  }, [isDarkMode]);
+
   return (
     <NavigationContainer
       theme={{

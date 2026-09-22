@@ -15,6 +15,7 @@ import {
 import * as Clipboard from 'expo-clipboard';
 import AppIcon from '../components/AppIcon';
 import BrandYellowStrip from '../components/BrandYellowStrip';
+import ConfirmModal from '../components/ConfirmModal';
 import { pullRefreshControlProps } from '../lib/pullToRefresh';
 import { CommonActions, useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -24,9 +25,8 @@ import { useCart } from '../lib/CartContext';
 import { supabase, deriveItemIsAvailable } from '../lib/supabase';
 import { fetchOrderWithLineJoins, pickLineRowsFromOrderRow } from '../lib/orderQueries';
 import {
-  getLineSubtotalFromRow,
-  getUnitPriceForRow,
   getLineItemIdFromRow,
+  mapLineRowToBillItem,
   resolveOrderHeaderTotalFromRows,
 } from '../lib/orderLineRowMoney';
 import { appTypography } from '../lib/darkThemeConfig';
@@ -63,16 +63,41 @@ const formatStepTime = (isoOrDate) => {
 
 const timelineStorageKey = (orderId) => `order_timeline_ts_${orderId}`;
 
-/** When line prices are missing but grand total is known (e.g. delivered snapshot), split total by quantity. */
-function allocateLineTotalsFromGrandTotal(items, grandTotal) {
+/**
+ * When some/all line prices are missing but grand total is known, fill gaps from
+ * remainder (or full total) proportional to quantity. Prefer real `line_total` values.
+ */
+function allocateLineTotalsFromGrandTotal(items, grandTotal, resolveTotal) {
   if (!items?.length || !(Number(grandTotal) > 0)) return items || [];
-  const quantities = items.map((i) => (Number.isFinite(Number(i.quantity)) ? Number(i.quantity) : 1));
-  const qSum = quantities.reduce((a, b) => a + b, 0);
-  if (!qSum) return items;
-  return items.map((item, idx) => ({
-    ...item,
-    total_price: grandTotal * (quantities[idx] / qSum),
-  }));
+  const resolved = items.map((item) => {
+    const t = typeof resolveTotal === 'function' ? resolveTotal(item) : null;
+    return t !== null && Number.isFinite(t) ? t : null;
+  });
+  const knownSum = resolved.reduce((s, t) => s + (t !== null ? t : 0), 0);
+  const missingIdx = [];
+  let missingQty = 0;
+  items.forEach((item, idx) => {
+    if (resolved[idx] === null) {
+      missingIdx.push(idx);
+      missingQty += Number.isFinite(Number(item.quantity)) ? Number(item.quantity) : 1;
+    }
+  });
+  if (missingIdx.length === 0) return items;
+
+  const remainder =
+    knownSum >= 0.01 ? Math.max(0, Number(grandTotal) - knownSum) : Number(grandTotal);
+  if (!(remainder >= 0.01) || !(missingQty > 0)) return items;
+
+  return items.map((item, idx) => {
+    if (resolved[idx] !== null) return item;
+    const qty = Number.isFinite(Number(item.quantity)) ? Number(item.quantity) : 1;
+    const share = Number(((remainder * qty) / missingQty).toFixed(2));
+    return {
+      ...item,
+      line_total: share,
+      total_price: share,
+    };
+  });
 }
 
 const OrderStatusScreen = ({ navigation, route }) => {
@@ -93,6 +118,9 @@ const OrderStatusScreen = ({ navigation, route }) => {
   const [qrLoading, setQrLoading] = useState(false);
   const [priceLookup, setPriceLookup] = useState({});
   const [reordering, setReordering] = useState(false);
+  const [replaceCartModalVisible, setReplaceCartModalVisible] = useState(false);
+  const [replaceCartBusy, setReplaceCartBusy] = useState(false);
+  const pendingReorderItemsRef = useRef(null);
   const [initialOrderHydrated, setInitialOrderHydrated] = useState(() => Boolean(order));
   /** Client-side step timestamps recorded as tracking advances. */
   const [stepTimestamps, setStepTimestamps] = useState({});
@@ -119,9 +147,16 @@ const OrderStatusScreen = ({ navigation, route }) => {
   }, []);
 
   useEffect(() => {
-    if (order?.items && Array.isArray(order.items)) {
+    const rows = pickLineRowsFromOrderRow(order);
+    if (rows.length > 0) {
+      setOrderItems(rows.map(mapLineRowToBillItem));
+      return;
+    }
+    if (order?.items && Array.isArray(order.items) && order.items.length > 0) {
       setOrderItems(order.items);
-    } else if (order?.item_name) {
+      return;
+    }
+    if (order?.item_name) {
       setOrderItems(parseOrderSummary(order.item_name));
     }
   }, [order, parseOrderSummary]);
@@ -283,28 +318,10 @@ const OrderStatusScreen = ({ navigation, route }) => {
       
       if (data) {
         const orderItemsRows = pickLineRowsFromOrderRow(data);
-        const lineDisplayName = (oi) =>
-          String(oi?.item_name || oi?.items?.name || 'Item').trim();
-        const normalizedLineItems = orderItemsRows.map((oi) => {
-          const sub = getLineSubtotalFromRow(oi);
-          const unit = getUnitPriceForRow(oi);
-          const ip =
-            oi?.items?.price != null && Number.isFinite(Number(oi?.items?.price))
-              ? Number(oi.items.price)
-              : undefined;
-          return {
-            name: lineDisplayName(oi),
-            quantity: Number(oi?.quantity ?? 1) || 1,
-            total_price: sub > 0 ? sub : undefined,
-            unit_price: unit,
-            price: ip,
-            item_id: getLineItemIdFromRow(oi),
-            status: oi?.status != null ? String(oi.status) : null,
-          };
-        });
+        const normalizedLineItems = orderItemsRows.map(mapLineRowToBillItem);
         const counts = {};
         for (const oi of orderItemsRows) {
-          const name = lineDisplayName(oi) || 'Item';
+          const name = String(oi?.item_name || oi?.items?.name || 'Item').trim() || 'Item';
           if (!name) continue;
           const quantity = Number(oi?.quantity ?? 1) || 1; // Use quantity from backend
           counts[name] = (counts[name] || 0) + quantity;
@@ -531,14 +548,21 @@ const OrderStatusScreen = ({ navigation, route }) => {
   const resolveItemTotal = useCallback(
     (item) => {
       if (!item) return null;
-      if (item.total_price !== undefined) {
-        const total = parseCurrencyValue(item.total_price);
-        if (total !== null) return total;
+
+      // Prefer snapshotted line totals from order_items / archived_order_items
+      for (const key of ['line_total', 'total_price', 'item_total', 'line_amount']) {
+        if (item[key] === undefined || item[key] === null || item[key] === '') continue;
+        const total = parseCurrencyValue(item[key]);
+        if (total !== null && total >= 0) return total;
       }
 
       const unitRaw = item.unit_price ?? item.price_per_unit ?? item.price;
       const unit = parseCurrencyValue(unitRaw);
       const quantity = Number.isFinite(Number(item.quantity)) ? Number(item.quantity) : 1;
+
+      if (unit !== null) {
+        return unit * quantity;
+      }
 
       const normalizedName = typeof item.name === 'string' ? item.name.trim().toLowerCase() : null;
       if (normalizedName && Object.prototype.hasOwnProperty.call(priceLookup, normalizedName)) {
@@ -546,10 +570,6 @@ const OrderStatusScreen = ({ navigation, route }) => {
         if (catalogPrice !== null) {
           return catalogPrice * quantity;
         }
-      }
-
-      if (unit !== null) {
-        return unit * quantity;
       }
 
       return null;
@@ -694,30 +714,8 @@ const OrderStatusScreen = ({ navigation, route }) => {
 
       if (getTotalItems() > 0) {
         setReordering(false);
-        Alert.alert(
-          'Replace cart?',
-          'Your cart already has items. Clear your current cart and add items from this order instead?',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Clear cart & add',
-              style: 'destructive',
-              onPress: async () => {
-                setReordering(true);
-                try {
-                  await applyReorder();
-                } catch (err) {
-                  if (__DEV__) {
-                    console.error('Reorder failed:', err);
-                  }
-                  Alert.alert('Reorder Failed', 'Could not update your cart. Please try again.');
-                } finally {
-                  setReordering(false);
-                }
-              },
-            },
-          ]
-        );
+        pendingReorderItemsRef.current = availableItems;
+        setReplaceCartModalVisible(true);
         return;
       }
 
@@ -728,6 +726,39 @@ const OrderStatusScreen = ({ navigation, route }) => {
       }
       Alert.alert('Reorder Failed', 'Could not add items to cart. Please try again.');
     } finally {
+      setReordering(false);
+    }
+  };
+
+  const closeReplaceCartModal = () => {
+    if (replaceCartBusy) return;
+    pendingReorderItemsRef.current = null;
+    setReplaceCartModalVisible(false);
+  };
+
+  const confirmReplaceCartReorder = async () => {
+    const availableItems = pendingReorderItemsRef.current;
+    if (!availableItems?.length) {
+      closeReplaceCartModal();
+      return;
+    }
+    setReplaceCartBusy(true);
+    setReordering(true);
+    try {
+      await clearCart();
+      for (const item of availableItems) {
+        await addToCart(item);
+      }
+      pendingReorderItemsRef.current = null;
+      setReplaceCartModalVisible(false);
+      navigation.navigate('Cart');
+    } catch (err) {
+      if (__DEV__) {
+        console.error('Reorder failed:', err);
+      }
+      Alert.alert('Reorder Failed', 'Could not update your cart. Please try again.');
+    } finally {
+      setReplaceCartBusy(false);
       setReordering(false);
     }
   };
@@ -1036,8 +1067,8 @@ const OrderStatusScreen = ({ navigation, route }) => {
     orderIsDelivered &&
     finalTotal > 0 &&
     orderItems.length > 0 &&
-    pricedLinesSum < 0.01
-      ? allocateLineTotalsFromGrandTotal(orderItems, finalTotal)
+    pricedLinesSum + 0.009 < finalTotal
+      ? allocateLineTotalsFromGrandTotal(orderItems, finalTotal, resolveItemTotal)
       : orderItems;
 
   const totalAmountDisplay = formatCurrencyValue(finalTotal);
@@ -1461,6 +1492,18 @@ const OrderStatusScreen = ({ navigation, route }) => {
           </TouchableOpacity>
         ) : null}
       </ScrollView>
+
+      <ConfirmModal
+        visible={replaceCartModalVisible}
+        title="Replace cart?"
+        message="Your cart already has items. Clear your current cart and add items from this order instead?"
+        cancelLabel="Cancel"
+        confirmLabel="Clear cart & add"
+        confirmDestructive
+        busy={replaceCartBusy}
+        onCancel={closeReplaceCartModal}
+        onConfirm={confirmReplaceCartReorder}
+      />
 
     </View>
   );
