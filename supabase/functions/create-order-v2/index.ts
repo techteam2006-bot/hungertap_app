@@ -35,7 +35,7 @@ return jsonResponse({ success: false, error: "Unauthorized user session" }, 401)
 const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 const reqLogger = logger.withContext({ userId: user.id });
 const body = await req.json();
-const { items, is_takeaway = false, gateway_code = null } = body || {};
+const { items, is_takeaway = false, gateway_code = null, offer_code = null } = body || {};
 if (!items || !Array.isArray(items) || items.length === 0) {
 reqLogger.warn("Cart is empty or invalid", { failure_type: "business_failure" });
 return jsonResponse({ success: false, error: "Cart is empty" }, 400);
@@ -112,11 +112,15 @@ return jsonResponse(
 }
 }
 const rpcTimer = reqLogger.startTimer("rpc_create_order_v2_app");
+const offerCode = typeof offer_code === "string" && offer_code.trim() !== ""
+  ? offer_code.trim().toUpperCase()
+  : null;
 const { data: rpcRes, error: rpcErr } = await supabaseAdmin.rpc("create_order_v2_app", {
 p_gateway_code: targetGatewayCode,
 p_is_takeaway: Boolean(is_takeaway),
 p_items: items,
 p_placed_by: user.id,
+p_offer_code: offerCode,
 });
 rpcTimer.done({ success: !rpcErr && Boolean(rpcRes?.success) });
 if (rpcErr) {

@@ -250,7 +250,7 @@ export const AnimatedFoodCard = ({
             ]}
             resizeMode={newCardImageRemote ? 'cover' : 'contain'}
             priority={imagePriority}
-            showLoadingIndicator={imagePriority !== 'high'}
+            showLoadingIndicator
             fallbackIcon="restaurant"
           />
 

@@ -343,6 +343,13 @@ export default function AppIcon({ name, size = 24, color, style }) {
         <Path d="M224 144h192M288 224h128" fill="none" stroke={iconColor} strokeWidth={32} strokeLinecap="round" strokeLinejoin="round" />
         </Svg>
       );
+    case 'pricetag-outline':
+      return (
+        <Svg viewBox="0 0 512 512" width={size} height={size} style={style}>
+        <Path d="M435.25 48h-122.9a14.46 14.46 0 0 0-10.2 4.2L56.45 297.9a28.85 28.85 0 0 0 0 40.7l117 117a28.85 28.85 0 0 0 40.7 0L459.75 210a14.46 14.46 0 0 0 4.2-10.2v-122.9A28.86 28.86 0 0 0 435.25 48Z" fill="none" stroke={iconColor} strokeWidth={32} strokeLinecap="round" strokeLinejoin="round" />
+        <Circle cx={368.35} cy={143.65} r={28} fill="none" stroke={iconColor} strokeWidth={32} />
+        </Svg>
+      );
     case 'refresh':
       return (
         <Svg viewBox="0 0 512 512" width={size} height={size} style={style}>

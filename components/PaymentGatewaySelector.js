@@ -46,10 +46,6 @@ export default function PaymentGatewaySelector({ gateways, selectedGateway, onSe
             Payment Options
           </Text>
         </View>
-        <View style={styles.secureTag}>
-          <AppIcon name="shield-checkmark-outline" size={12} color="#10B981" />
-          <Text style={styles.secureText}>100% SECURE</Text>
-        </View>
       </View>
 
       {gateways.map((gw) => {
@@ -146,21 +142,6 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 15,
-  },
-  secureTag: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(16, 185, 129, 0.1)',
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  secureText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#10B981',
-    letterSpacing: 0.3,
   },
   card: {
     borderRadius: 10,

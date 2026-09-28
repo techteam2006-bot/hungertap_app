@@ -1,6 +1,6 @@
 {
   "name": "canteen-app",
-  "version": "1.0.4",
+  "version": "1.0.8",
   "type": "commonjs",
   "main": "index.js",
   "scripts": {
@@ -42,6 +42,7 @@
     "expo-device": "~8.0.10",
     "expo-file-system": "~19.0.23",
     "expo-font": "^14.0.9",
+    "expo-image": "~3.0.11",
     "expo-linear-gradient": "~15.0.8",
     "expo-linking": "~8.0.12",
     "expo-navigation-bar": "~5.0.10",
@@ -72,6 +73,21 @@
     "typescript": "~5.9.2"
   },
   "private": true,
+  "expo": {
+    "autolinking": {
+      "android": {
+        "exclude": [
+          "expo-dev-client",
+          "expo-dev-launcher",
+          "expo-dev-menu",
+          "expo-dev-menu-interface",
+          "expo-manifests",
+          "expo-json-utils",
+          "expo-updates-interface"
+        ]
+      }
+    }
+  },
   "description": "",
   "directories": {
     "lib": "lib"

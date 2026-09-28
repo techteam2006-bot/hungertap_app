@@ -1,155 +1,74 @@
-import React, { useState, useCallback, useEffect, useMemo } from 'react';
-import { View, Image, ActivityIndicator, StyleSheet, Platform } from 'react-native';
+import React, { useMemo, useState, useCallback } from 'react';
+import { View, StyleSheet, Platform } from 'react-native';
+import { Image } from 'expo-image';
 import { useTheme } from '../lib/ThemeContext';
 import { ITEM_IMAGE_FALLBACK } from '../lib/appLogo';
-import { rememberImageUris, getCachedImageUri, cacheImageToDisk } from '../lib/ImageCache';
+import { rememberImageUris } from '../lib/ImageCache';
 
-// Global image cache for faster loading
-const imageCache = new Map();
-const prefetchQueue = new Set();
-
-function sourceKey(source) {
-  if (source == null) return '';
-  if (typeof source === 'number') return `n:${source}`;
-  if (typeof source === 'object' && typeof source.uri === 'string') return `u:${source.uri}`;
-  return 'x';
-}
-
+/**
+ * Menu / explore / detail item photos.
+ * Uses expo-image so Android does not leave progressive JPEGs half-painted
+ * (RN Image + Fresco often shows top half only).
+ */
 const OptimizedImage = ({
   source,
   style,
   resizeMode = 'cover',
   fallbackIcon: _fallbackIcon = 'restaurant',
-  showLoadingIndicator = true,
-  priority = 'normal', // 'high', 'normal', 'low'
+  showLoadingIndicator: _showLoadingIndicator = true,
+  priority = 'normal',
   ...props
 }) => {
-  const { colors } = useTheme();
-  const remoteUri = typeof source === 'object' && source?.uri ? source.uri : null;
-  const diskUri = remoteUri ? getCachedImageUri(remoteUri) : null;
-  const uri = diskUri || remoteUri;
-  const key = useMemo(() => sourceKey(source) + (uri || ''), [source, uri]);
-  const alreadyCached = !!(uri && (imageCache.has(uri) || (remoteUri && typeof getCachedImageUri(remoteUri) === 'string' && getCachedImageUri(remoteUri) !== remoteUri)));
-
-  const [loading, setLoading] = useState(!alreadyCached && !!uri);
+  const { colors, isDarkMode } = useTheme();
   const [error, setError] = useState(false);
-  const [imageLoaded, setImageLoaded] = useState(alreadyCached);
-  const [resolvedUri, setResolvedUri] = useState(uri);
 
-  // Remote URI may change — reset load state when switching items.
-  useEffect(() => {
-    let cancelled = false;
-    const cached = !!(uri && imageCache.has(uri));
-    setError(false);
-    setLoading(!cached && !!uri);
-    setImageLoaded(cached);
-    setResolvedUri(uri);
-    if (remoteUri && remoteUri.startsWith('http')) {
-      cacheImageToDisk(remoteUri).then((local) => {
-        if (!cancelled && local) setResolvedUri(local);
-      });
-    }
-    return () => {
-      cancelled = true;
-    };
-  }, [key, uri, remoteUri]);
+  const remoteUri = typeof source === 'object' && source?.uri ? String(source.uri) : null;
+  const isLocalAsset = typeof source === 'number';
 
-  const memoizedSource = useMemo(() => {
-    if (source == null) return null;
-    if (typeof source === 'number') return source;
-    if (resolvedUri) {
-      return { uri: resolvedUri };
-    }
-    if (typeof source === 'object' && source.uri) {
-      return { uri: source.uri };
-    }
-    return source;
-  }, [key, source, resolvedUri]);
+  const frameBg = isDarkMode ? '#1A1A1A' : colors.mutedRowBackground || '#EFEFEF';
+  const contentFit = resizeMode === 'contain' ? 'contain' : 'cover';
 
-  // Prefetch / download in background
-  useEffect(() => {
-    const prefetchUri = remoteUri;
-    if (!prefetchUri || prefetchQueue.has(prefetchUri) || imageCache.has(prefetchUri)) {
-      return undefined;
-    }
-    prefetchQueue.add(prefetchUri);
-    let cancelled = false;
-    cacheImageToDisk(prefetchUri)
-      .then((local) => {
-        if (!cancelled) {
-          imageCache.set(prefetchUri, true);
-          if (local) setResolvedUri(local);
-        }
-      })
-      .catch(() => {})
-      .finally(() => {
-        prefetchQueue.delete(prefetchUri);
-      });
-    rememberImageUris([prefetchUri]).catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [remoteUri]);
+  const resolvedSource = useMemo(() => {
+    if (error || source == null) return ITEM_IMAGE_FALLBACK;
+    if (isLocalAsset) return source;
+    if (remoteUri) return { uri: remoteUri };
+    return ITEM_IMAGE_FALLBACK;
+  }, [source, remoteUri, isLocalAsset, error]);
 
-  const handleLoadStart = useCallback(() => {
-    setLoading(true);
-    setError(false);
+  const recyclingKey = remoteUri || (isLocalAsset ? `asset:${source}` : 'fallback');
+
+  const handleError = useCallback(() => {
+    setError(true);
   }, []);
 
   const handleLoad = useCallback(() => {
-    setLoading(false);
-    setImageLoaded(true);
     setError(false);
-    if (uri) imageCache.set(uri, true);
-  }, [uri]);
+    if (remoteUri && remoteUri.startsWith('http')) {
+      rememberImageUris([remoteUri]).catch(() => {});
+    }
+  }, [remoteUri]);
 
-  const handleLoadEnd = useCallback(() => {
-    setLoading(false);
-  }, []);
-
-  const handleError = useCallback(() => {
-    setLoading(false);
-    setImageLoaded(false);
-    setError(true);
-    if (uri) imageCache.delete(uri);
-  }, [uri]);
-
-  if (!memoizedSource || error) {
-    return (
-      <View style={[styles.fallbackContainer, style, { backgroundColor: colors.surface || '#F3F4F6' }]}>
-        <Image
-          source={ITEM_IMAGE_FALLBACK}
-          style={styles.fallbackLogo}
-          resizeMode="contain"
-          accessibilityLabel="Item image placeholder"
-        />
-      </View>
-    );
-  }
-
-  const showSpinner = !imageLoaded && (loading || showLoadingIndicator);
+  // Reset error when the item/image URL changes
+  const sourceKey = remoteUri || (isLocalAsset ? String(source) : 'none');
+  React.useEffect(() => {
+    setError(false);
+  }, [sourceKey]);
 
   return (
-    <View style={[styles.frame, style, { backgroundColor: colors.surface || '#F3F4F6' }]}>
+    <View style={[styles.frame, style, { backgroundColor: frameBg }]}>
       <Image
-        key={key}
-        source={memoizedSource}
+        source={resolvedSource}
         style={styles.image}
-        resizeMode={resizeMode}
-        onLoadStart={handleLoadStart}
-        onLoad={handleLoad}
-        onLoadEnd={handleLoadEnd}
+        contentFit={error || !remoteUri ? 'contain' : contentFit}
+        cachePolicy="memory-disk"
+        recyclingKey={recyclingKey}
+        priority={priority === 'high' ? 'high' : priority === 'low' ? 'low' : 'normal'}
+        transition={Platform.OS === 'ios' ? 150 : 0}
         onError={handleError}
-        fadeDuration={Platform.OS === 'android' ? 0 : undefined}
+        onLoad={handleLoad}
         accessibilityIgnoresInvertColors
         {...props}
       />
-
-      {showSpinner ? (
-        <View style={[styles.loadingContainer, { backgroundColor: colors.surface || '#F3F4F6' }]}>
-          <ActivityIndicator size="small" color={colors.primary} />
-        </View>
-      ) : null}
     </View>
   );
 };
@@ -161,24 +80,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   image: {
-    ...StyleSheet.absoluteFillObject,
     width: '100%',
     height: '100%',
-  },
-  fallbackContainer: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderRadius: 8,
-    overflow: 'hidden',
-  },
-  fallbackLogo: {
-    width: '72%',
-    height: '72%',
-  },
-  loadingContainer: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
 });
 

@@ -107,11 +107,12 @@ const OrderStatusScreen = ({ navigation, route }) => {
   const { user } = useAuth();
   const { addToCart, clearCart, getTotalItems } = useCart();
   const [currentOrder, setCurrentOrder] = useState(order);
+  const [offerDiscountAmount, setOfferDiscountAmount] = useState(0);
   const [orderItems, setOrderItems] = useState([]);
   const [loading, setLoading] = useState(false); // Start with false to avoid loading screen
   const [notFound, setNotFound] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [isOrderSummaryExpanded, setIsOrderSummaryExpanded] = useState(false);
+  const [isOrderSummaryExpanded, setIsOrderSummaryExpanded] = useState(true);
   const isFetchingRef = useRef(false);
   const [profileFullName, setProfileFullName] = useState('');
   const [encryptedQRCode, setEncryptedQRCode] = useState(null);
@@ -120,6 +121,32 @@ const OrderStatusScreen = ({ navigation, route }) => {
   const [reordering, setReordering] = useState(false);
   const [replaceCartModalVisible, setReplaceCartModalVisible] = useState(false);
   const [replaceCartBusy, setReplaceCartBusy] = useState(false);
+
+  useEffect(() => {
+    const orderId = currentOrder?.id;
+    if (!orderId) {
+      setOfferDiscountAmount(0);
+      return undefined;
+    }
+    let cancelled = false;
+    supabase
+      .from('offer_redemptions')
+      .select('discount_amount, status')
+      .eq('order_id', orderId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (cancelled) return;
+        const amount = Number(data?.discount_amount);
+        const show = data && data.status !== 'released' && Number.isFinite(amount) && amount > 0;
+        setOfferDiscountAmount(show ? amount : 0);
+      })
+      .catch(() => {
+        if (!cancelled) setOfferDiscountAmount(0);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentOrder?.id]);
   const pendingReorderItemsRef = useRef(null);
   const [initialOrderHydrated, setInitialOrderHydrated] = useState(() => Boolean(order));
   /** Client-side step timestamps recorded as tracking advances. */
@@ -1338,6 +1365,16 @@ const OrderStatusScreen = ({ navigation, route }) => {
                       </View>
                     );
                   })}
+                  {offerDiscountAmount > 0 ? (
+                    <View style={[styles.takeawayChargeRow, { borderTopColor: colors.divider }]}>
+                      <Text style={[styles.takeawayChargeLabel, { color: colors.textSecondary }]}>
+                        Discount
+                      </Text>
+                      <Text style={[styles.takeawayChargeValue, { color: colors.text }]}>
+                        −₹{formatCurrencyValue(offerDiscountAmount)}
+                      </Text>
+                    </View>
+                  ) : null}
                   {takeawayChargesRow}
                   <View style={[styles.priceBreakdownTotal, { borderTopColor: colors.divider }]}>
                     <Text style={[styles.priceBreakdownTotalLabel, { color: colors.text }]}>Total</Text>

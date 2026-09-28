@@ -3,7 +3,7 @@
     "name": "HungerTap",
     "slug": "canteen-app",
     "scheme": "hungertap",
-    "version": "1.0.4",
+    "version": "1.0.8",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "androidNavigationBar": {
@@ -54,7 +54,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#FDC403"
       },
-      "versionCode": 6,
+      "versionCode": 8,
       "softwareKeyboardLayoutMode": "pan",
       "permissions": [
         "INTERNET",

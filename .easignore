@@ -24,7 +24,9 @@ yarn-debug.log*
 yarn-error.log*
 
 # Local build outputs & measurement artifacts
+builds/
 build-artifacts/
+android/app/.cxx/
 dist/
 web-build/
 .expo/
@@ -48,3 +50,14 @@ credentials/
 Thumbs.db
 .vscode/
 .idea/
+
+# Not needed to build the app — backend, docs, dev scripts, scratch
+supabase/
+docs/
+scripts/
+*.sql
+*.test.js
+supabase_edge_function_*.ts
+.tmp_*
+tmp_*
+*_chunk*.txt

@@ -6,7 +6,6 @@ import {
   ScrollView,
   TouchableOpacity,
   useWindowDimensions,
-  Image,
   Animated,
   ActivityIndicator,
   RefreshControl,
@@ -15,6 +14,8 @@ import {
   Pressable,
   KeyboardAvoidingView,
   Platform,
+  InteractionManager,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import AppIcon from '../components/AppIcon';
@@ -45,6 +46,9 @@ import { pxToPercentX, pxToPercentY } from '../utils/percent';
 import { appTypography } from '../lib/darkThemeConfig';
 import Svg, { Path } from 'react-native-svg';
 import { getItemImageSource } from '../lib/itemImage';
+import OptimizedImage from '../components/OptimizedImage';
+import ApplyOffersSheet from '../components/ApplyOffersSheet';
+import { fetchActiveOffers, previewOfferDiscount, offerErrorMessage } from '../lib/offers';
 import { prepareCheckoutCart } from '../lib/cartCheckout';
 import { navigateBackFromCart } from '../lib/navigateHome';
 import {
@@ -204,7 +208,7 @@ const createCartStyles = (colors, windowHeight) =>
     height: 54,
     borderRadius: 10,
     marginRight: 12,
-    resizeMode: 'cover',
+    overflow: 'hidden',
   },
   itemDetails: {
     flex: 1,
@@ -384,6 +388,7 @@ const createCartStyles = (colors, windowHeight) =>
     width: 36,
     height: 36,
     borderRadius: 6,
+    overflow: 'hidden',
   },
   recommendationMeta: {
     flexShrink: 1,
@@ -705,6 +710,47 @@ const createCartStyles = (colors, windowHeight) =>
     alignItems: 'center',
     justifyContent: 'center',
   },
+  offersRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.elevatedSurface,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  offersMain: {
+    flex: 1,
+    minWidth: 0,
+  },
+  offersTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  offersLeadIcon: {
+    marginLeft: -6,
+    marginRight: 8,
+    marginTop: 4,
+  },
+  offersTitle: {
+    fontSize: 15,
+    fontFamily: appTypography.bold,
+    color: colors.text,
+  },
+  offersSubtitle: {
+    fontSize: 12,
+    fontFamily: appTypography.regular,
+    color: colors.textTertiary,
+    marginTop: 2,
+    marginLeft: 30,
+  },
+  offersRemove: {
+    fontSize: 14,
+    marginLeft: 8,
+  },
   globalTakeawayContainer: {
     backgroundColor: colors.elevatedSurface,
     borderRadius: 10,
@@ -869,6 +915,75 @@ const CartScreen = ({ navigation }) => {
 
   const getFinalTotalForLines = (lines) => getSubtotalForLines(lines) + getTakeawayChargeForLines(lines);
 
+  const getPayableTotal = () => {
+    const discounted = Number(offerPreview?.amount_after_discount);
+    if (appliedOffer && Number.isFinite(discounted)) return discounted;
+    return getFinalTotal();
+  };
+
+  useEffect(() => {
+    if (!appliedOffer?.code || !cartItems.length) {
+      setOfferPreview(null);
+      return undefined;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      const prep = prepareCheckoutOrderArgs(cartItems, isTakeaway);
+      if (!prep.ok) return;
+      const preview = await previewOfferDiscount({
+        code: appliedOffer.code,
+        items: prep.p_items,
+        isTakeaway,
+      });
+      if (cancelled) return;
+      if (!preview.ok) {
+        setOfferPreview(null);
+        setAppliedOffer(null);
+        setCheckoutErrorToast(preview.error || offerErrorMessage(preview.error));
+        return;
+      }
+      setOfferPreview(preview);
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [appliedOffer?.code, cartItems, isTakeaway]);
+
+  const openOffersSheet = async () => {
+    setOffersSheetVisible(true);
+    setOffersLoading(true);
+    setOffersLoadError('');
+    const res = await fetchActiveOffers();
+    setOffersLoading(false);
+    setAvailableOffers(res.offers || []);
+    if (!res.ok) setOffersLoadError(res.error || 'Offers are unavailable right now. You can still try a coupon code.');
+  };
+
+  const applyOfferByCode = async (code) => {
+    const prep = prepareCheckoutOrderArgs(cartItems, isTakeaway);
+    if (!prep.ok) return { ok: false, error: 'Cart is empty or invalid.' };
+    const preview = await previewOfferDiscount({
+      code,
+      items: prep.p_items,
+      isTakeaway,
+    });
+    if (!preview.ok) return { ok: false, error: preview.error };
+    setAppliedOffer({
+      id: preview.offer_id,
+      code: preview.code,
+      title: preview.title,
+      description: preview.description,
+      kind: preview.kind,
+      value: preview.value,
+      min_order_amount: preview.min_order_amount,
+      campaign: preview.campaign,
+    });
+    setOfferPreview(preview);
+    setOffersSheetVisible(false);
+    return { ok: true };
+  };
+
   /** To Pay line: `2 × ₹45.00 = ₹90.00` */
   const formatToPayLine = (item) => {
     const qty = Math.max(1, Math.floor(Number(item?.quantity ?? 1)) || 1);
@@ -884,6 +999,8 @@ const CartScreen = ({ navigation }) => {
   const [phoneModalError, setPhoneModalError] = useState('');
   const [phoneSaving, setPhoneSaving] = useState(false);
   const [phoneRequiredForCheckout, setPhoneRequiredForCheckout] = useState(false);
+  const [phoneInputReady, setPhoneInputReady] = useState(false);
+  const [phoneKeyboardHeight, setPhoneKeyboardHeight] = useState(0);
   const [clearCartModalVisible, setClearCartModalVisible] = useState(false);
   const [lowStockModalVisible, setLowStockModalVisible] = useState(false);
   const [lowStockModalMessage, setLowStockModalMessage] = useState('');
@@ -893,8 +1010,15 @@ const CartScreen = ({ navigation }) => {
   const phoneSavedResumeRef = useRef(null);
   const checkoutPhoneRef = useRef('');
   const placeOrderInFlightRef = useRef(false);
+  const phoneInputRef = useRef(null);
   const [checkoutErrorToast, setCheckoutErrorToast] = useState('');
   const [isOrderSummaryExpanded, setIsOrderSummaryExpanded] = useState(false); // State for Order Summary dropdown
+  const [offersSheetVisible, setOffersSheetVisible] = useState(false);
+  const [availableOffers, setAvailableOffers] = useState([]);
+  const [offersLoading, setOffersLoading] = useState(false);
+  const [offersLoadError, setOffersLoadError] = useState('');
+  const [appliedOffer, setAppliedOffer] = useState(null);
+  const [offerPreview, setOfferPreview] = useState(null);
 
   // Keep a ref so checkout resume after saving phone does not see a stale user.
   useEffect(() => {
@@ -1055,17 +1179,58 @@ const CartScreen = ({ navigation }) => {
       setPhoneDraft(savedPhone || '');
       setPhoneModalError('');
       setPhoneRequiredForCheckout(Boolean(opts.required));
+      setPhoneInputReady(false);
       setPhoneModalVisible(true);
     },
     [savedPhone]
   );
 
+  const focusPhoneInput = useCallback(() => {
+    const node = phoneInputRef.current;
+    if (!node) return;
+    node.focus?.();
+  }, []);
+
   const closePhoneModal = useCallback(() => {
     if (phoneSaving) return;
+    setPhoneInputReady(false);
     setPhoneModalVisible(false);
     setPhoneRequiredForCheckout(false);
     phoneSavedResumeRef.current = null;
   }, [phoneSaving]);
+
+  // After the sheet finishes presenting, mount+focus the field so the keypad opens with Add/Change.
+  useEffect(() => {
+    if (!phoneModalVisible || !phoneInputReady || phoneSaving) return undefined;
+    const task = InteractionManager.runAfterInteractions(() => {
+      focusPhoneInput();
+    });
+    const t1 = setTimeout(focusPhoneInput, 50);
+    const t2 = setTimeout(focusPhoneInput, 250);
+    return () => {
+      task.cancel?.();
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [phoneModalVisible, phoneInputReady, phoneSaving, focusPhoneInput]);
+
+  // Android Modal does not move with adjustPan, so lift the sheet by the keypad height.
+  useEffect(() => {
+    if (!phoneModalVisible) {
+      setPhoneKeyboardHeight(0);
+      return undefined;
+    }
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, (event) => {
+      setPhoneKeyboardHeight(event?.endCoordinates?.height || 0);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => setPhoneKeyboardHeight(0));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [phoneModalVisible]);
 
   const savePhoneFromModal = useCallback(async () => {
     if (!isValidIndianMobile(phoneDraft)) {
@@ -1210,6 +1375,7 @@ const CartScreen = ({ navigation }) => {
           items: args.p_items,
           is_takeaway: args.p_is_takeaway,
           gateway_code: selectedGateway || 'cashfree',
+          offer_code: appliedOffer?.code || undefined,
         });
 
         if (!v2.ok) {
@@ -1218,7 +1384,9 @@ const CartScreen = ({ navigation }) => {
           return;
         }
 
-        const orderTotal = getFinalTotalForLines(linesForOrder);
+        const orderTotal = appliedOffer && offerPreview?.amount_after_discount != null
+          ? Number(offerPreview.amount_after_discount)
+          : getFinalTotalForLines(linesForOrder);
         const nav = await navigateToPaymentProcessingAfterV2(navigation, supabase, v2, {
           userId,
           orderItems: [...linesForOrder],
@@ -1360,10 +1528,12 @@ const CartScreen = ({ navigation }) => {
             activeOpacity={0.7}
             onPress={() => navigation.navigate('ItemDetail', { item: itemForDetail })}
           >
-            <Image
+            <OptimizedImage
               source={itemImageSource}
               style={styles.itemImage}
               resizeMode={itemImageRemote ? 'cover' : 'contain'}
+              priority="high"
+              showLoadingIndicator={false}
             />
             <View style={styles.itemDetails}>
               <Text style={styles.itemName}>{item.name}</Text>
@@ -1461,10 +1631,11 @@ const CartScreen = ({ navigation }) => {
                     activeOpacity={0.7}
                     onPress={() => navigation.navigate('ItemDetail', { item: itemForDetail })}
                   >
-                    <Image
+                    <OptimizedImage
                       source={recImageSource}
                       style={styles.recommendationImage}
                       resizeMode={recImageRemote ? 'cover' : 'contain'}
+                      showLoadingIndicator={false}
                     />
                     <View style={styles.recommendationMeta}>
                       <Text style={styles.recommendationName} numberOfLines={1}>{item.name}</Text>
@@ -1516,7 +1687,7 @@ const CartScreen = ({ navigation }) => {
           Total
         </Text>
         <Text style={[styles.summaryValue, { color: colors.primary, fontFamily: appTypography.bold }]}>
-          ₹{getFinalTotal()}
+          ₹{getPayableTotal()}
         </Text>
       </View>
     </View>
@@ -1684,6 +1855,47 @@ const CartScreen = ({ navigation }) => {
               <Text style={styles.globalTakeawayDescription}>Pick up your order at Canteen Counter</Text>
             </View>
 
+            <TouchableOpacity
+              style={styles.offersRow}
+              onPress={openOffersSheet}
+              accessibilityRole="button"
+              accessibilityLabel="Apply offers"
+            >
+              <View style={styles.offersMain}>
+                <View style={styles.offersTitleRow}>
+                  <AppIcon
+                    name="pricetag-outline"
+                    size={28}
+                    color={colors.text}
+                    style={styles.offersLeadIcon}
+                  />
+                  <Text style={styles.offersTitle}>
+                    {appliedOffer ? appliedOffer.title || `Offer ${appliedOffer.code}` : 'Apply offers'}
+                  </Text>
+                </View>
+                <Text style={styles.offersSubtitle}>
+                  {appliedOffer
+                    ? `Saving ₹${Number(offerPreview?.discount_amount || 0)}`
+                    : 'View offers or enter a coupon code'}
+                </Text>
+              </View>
+              {appliedOffer ? (
+                <TouchableOpacity
+                  onPress={() => {
+                    setAppliedOffer(null);
+                    setOfferPreview(null);
+                  }}
+                  hitSlop={8}
+                >
+                  <Text style={[styles.offersRemove, { color: colors.brandYellow || '#E5A93B', fontFamily: appTypography.bold }]}>
+                    Remove
+                  </Text>
+                </TouchableOpacity>
+              ) : (
+                <AppIcon name="chevron-forward" size={22} color={colors.textSecondary} />
+              )}
+            </TouchableOpacity>
+
             {/* To Pay Section */}
             <View style={styles.toPaySection}>
               {/* Top header with inline price */}
@@ -1703,7 +1915,7 @@ const CartScreen = ({ navigation }) => {
                         </View>
                         <Text style={styles.toPaySubtitleAligned}>Pay now & enjoy your food</Text>
                       </View>
-                      <Text style={styles.toPayAmount}>₹{getFinalTotal()}</Text>
+                      <Text style={styles.toPayAmount}>₹{getPayableTotal()}</Text>
                     </View>
                   </View>
                 </View>
@@ -1736,9 +1948,15 @@ const CartScreen = ({ navigation }) => {
                       <Text style={styles.priceBreakdownItemPrice}>₹{getTakeawayCharge()}</Text>
                     </View>
                   )}
+                  {appliedOffer && Number(offerPreview?.discount_amount) > 0 ? (
+                    <View style={styles.priceBreakdownItem}>
+                      <Text style={styles.priceBreakdownItemName}>Discount ({appliedOffer.code})</Text>
+                      <Text style={styles.priceBreakdownItemPrice}>−₹{Number(offerPreview.discount_amount)}</Text>
+                    </View>
+                  ) : null}
                   <View style={styles.priceBreakdownTotal}>
                     <Text style={styles.priceBreakdownTotalLabel}>Total</Text>
-                    <Text style={styles.priceBreakdownTotalAmount}>₹{getFinalTotal()}</Text>
+                    <Text style={styles.priceBreakdownTotalAmount}>₹{getPayableTotal()}</Text>
                   </View>
                   
                   {/* Wave SVG Decoration - only when expanded */}
@@ -1807,7 +2025,7 @@ const CartScreen = ({ navigation }) => {
             title={
               orderOverLimit
                 ? `Over ₹${CART_MAX_ORDER_TOTAL} limit`
-                : `Place Order ₹${getFinalTotal()}`
+                : `Place Order ₹${getPayableTotal()}`
             }
             loadingTitle="Starting checkout..."
             loading={isCreatingOrder}
@@ -1899,19 +2117,25 @@ const CartScreen = ({ navigation }) => {
         animationType="slide"
         transparent
         onRequestClose={closePhoneModal}
+        onShow={() => {
+          // Mount the input after the modal is visible, then autoFocus opens the keypad.
+          setPhoneInputReady(true);
+        }}
       >
         <KeyboardAvoidingView
           style={styles.phoneModalOverlay}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={0}
         >
-          <Pressable style={StyleSheet.absoluteFill} onPress={closePhoneModal} />
+          <Pressable style={StyleSheet.absoluteFill} onPress={closePhoneModal} accessibilityRole="button" />
           <View
             style={[
               styles.phoneModalCard,
               {
                 backgroundColor: colors.elevatedSurface,
                 borderColor: colors.border,
-                paddingBottom: 28 + (insets?.bottom || 0),
+                marginBottom: Platform.OS === 'android' ? phoneKeyboardHeight : 0,
+                paddingBottom: 16 + (Platform.OS === 'ios' ? 12 : 8) + (phoneKeyboardHeight > 0 ? 0 : insets?.bottom || 0),
               },
             ]}
           >
@@ -1922,28 +2146,49 @@ const CartScreen = ({ navigation }) => {
               Payment gateways need your 10-digit mobile number. It is saved to your account so you
               can change it later from the cart.
             </Text>
-            <TextInput
-              style={[
-                styles.phoneModalInput,
-                {
-                  color: colors.text,
-                  backgroundColor: colors.inputBackground,
-                  borderColor: phoneModalError ? colors.error : colors.border,
-                },
-              ]}
-              value={phoneDraft}
-              onChangeText={(t) => {
-                setPhoneDraft(normalizePhoneDigits(t).slice(0, 10));
-                if (phoneModalError) setPhoneModalError('');
-              }}
-              placeholder="10-digit mobile number"
-              placeholderTextColor={colors.inputPlaceholder || colors.textTertiary}
-              keyboardType="phone-pad"
-              maxLength={10}
-              autoFocus
-              underlineColorAndroid="transparent"
-              editable={!phoneSaving}
-            />
+            {phoneInputReady ? (
+              <TextInput
+                key="phone-modal-input"
+                ref={phoneInputRef}
+                style={[
+                  styles.phoneModalInput,
+                  {
+                    color: colors.text,
+                    backgroundColor: colors.inputBackground,
+                    borderColor: phoneModalError ? colors.error : colors.border,
+                  },
+                ]}
+                value={phoneDraft}
+                onChangeText={(t) => {
+                  setPhoneDraft(normalizePhoneDigits(t).slice(0, 10));
+                  if (phoneModalError) setPhoneModalError('');
+                }}
+                placeholder="10-digit mobile number"
+                placeholderTextColor={colors.inputPlaceholder || colors.textTertiary}
+                keyboardType="phone-pad"
+                maxLength={10}
+                autoFocus
+                showSoftInputOnFocus
+                caretHidden={false}
+                selectTextOnFocus={false}
+                underlineColorAndroid="transparent"
+                editable={!phoneSaving}
+                blurOnSubmit={false}
+              />
+            ) : (
+              <View
+                style={[
+                  styles.phoneModalInput,
+                  {
+                    backgroundColor: colors.inputBackground,
+                    borderColor: colors.border,
+                    justifyContent: 'center',
+                  },
+                ]}
+              >
+                <Text style={{ color: colors.text }}>{phoneDraft || ' '}</Text>
+              </View>
+            )}
             {phoneModalError ? (
               <Text style={[styles.phoneModalError, { color: colors.error }]}>{phoneModalError}</Text>
             ) : null}
@@ -1977,6 +2222,22 @@ const CartScreen = ({ navigation }) => {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+      <ApplyOffersSheet
+        visible={offersSheetVisible}
+        offers={availableOffers}
+        loading={offersLoading}
+        loadError={offersLoadError}
+        appliedOffer={appliedOffer}
+        subtotal={Number(offerPreview?.discountable_subtotal ?? getTotalPrice())}
+        onClose={() => setOffersSheetVisible(false)}
+        onSelectOffer={(offer) => applyOfferByCode(offer?.code)}
+        onApplyCode={(code) => applyOfferByCode(code)}
+        onRemoveOffer={() => {
+          setAppliedOffer(null);
+          setOfferPreview(null);
+          setOffersSheetVisible(false);
+        }}
+      />
     </View>
   );
 };
