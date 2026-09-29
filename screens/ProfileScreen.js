@@ -179,6 +179,9 @@ const ProfileScreen = ({ navigation }) => {
   React.useEffect(() => {
     const unsubscribe = navigation.addListener('focus', async () => {
       try {
+        setNotificationsEnabled(await getNotificationsEnabled());
+      } catch (e) {}
+      try {
         if (user?.id) {
           const fromBackend = await fetchUserVegModeEnabled(user.id);
           if (fromBackend !== null) {
@@ -204,12 +207,16 @@ const ProfileScreen = ({ navigation }) => {
     const previous = notificationsEnabled;
     setNotificationsEnabled(value);
     setNotifToggleBusy(true);
+    // Write intent to cache IMMEDIATELY — before any async work — so concurrent
+    // handleAppStateChange reads the correct value and does not race-re-enable.
+    await persistNotificationsEnabled(value).catch(() => {});
     try {
       if (value === true) {
         const { token, reason, localOnly } = await registerForPushNotificationsAsync(effectiveUserId);
 
-        // Expo Go: remote push unavailable — still enable in-app local notifications.
+        // Expo Go: remote push unavailable — still enable in-app local notifications and sync Supabase token status.
         if (!token && reason === 'expo_go' && localOnly) {
+          await updatePushTokenStatusInSupabase(effectiveUserId, true);
           await persistNotificationsEnabled(true);
           await NotificationService.initialize();
           return;
@@ -271,6 +278,7 @@ const ProfileScreen = ({ navigation }) => {
         const { ok } = await updatePushTokenStatusInSupabase(effectiveUserId, false);
         if (!ok) {
           setNotificationsEnabled(previous);
+          await persistNotificationsEnabled(previous).catch(() => {});
           if (!(await isBackendReachable())) {
             Alert.alert(NETWORK_ERROR_TITLE, NETWORK_ERROR_MESSAGE);
           } else {
@@ -282,12 +290,13 @@ const ProfileScreen = ({ navigation }) => {
       } else {
         await NotificationService.clearAllNotifications();
       }
-      await persistNotificationsEnabled(value);
+      // Cache was already written at tap-time above. Only reset NotificationService here.
       if (value === false) {
         NotificationService.isInitialized = false;
       }
     } catch (e) {
       setNotificationsEnabled(previous);
+      await persistNotificationsEnabled(previous).catch(() => {}); // revert early-write on error
       console.error('Error toggling notifications:', e);
       if (isNetworkError(e)) Alert.alert(NETWORK_ERROR_TITLE, NETWORK_ERROR_MESSAGE);
       else Alert.alert('Notifications', 'Something went wrong. Please try again.');

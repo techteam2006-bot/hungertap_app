@@ -351,7 +351,7 @@ const PUSH_RESYNC_MIN_MS = 6 * 60 * 60 * 1000;
 
 function AppNavigator() {
   const { user, loading, isSignedIn, userId } = useAuth();
-  const lastPushSyncRef = React.useRef({ at: 0, status: null, userId: null });
+  const lastPushSyncRef = React.useRef({ at: 0, status: null, userId: null, appEnabled: null });
 
   // Supabase's recommended React Native setup: refresh the auth token only while
   // the app is in the foreground. Stops background timers / retry requests from
@@ -373,23 +373,29 @@ function AppNavigator() {
     const handleAppStateChange = async (nextAppState) => {
       if (nextAppState === 'active' && user?.id) {
         try {
-          const { status } = await Notifications.getPermissionsAsync();
+          const [{ status }, appNotificationsEnabled] = await Promise.all([
+            Notifications.getPermissionsAsync(),
+            getNotificationsEnabled().catch(() => true),
+          ]);
           // Every resume used to write the push token twice. Only re-sync when the
-          // permission changed or the last sync is old — saves backend requests.
+          // permission or in-app preference changed or the last sync is old — saves backend requests.
           const last = lastPushSyncRef.current;
           if (
             last.userId === user.id &&
             last.status === status &&
+            last.appEnabled === appNotificationsEnabled &&
             Date.now() - last.at < PUSH_RESYNC_MIN_MS
           ) {
             return;
           }
-          lastPushSyncRef.current = { at: Date.now(), status, userId: user.id };
-          if (status === 'granted') {
-            console.log('🔄 App resumed — retrying FCM token registration (permission granted)');
-            await registerForPushNotificationsAsync(user.id);
+          lastPushSyncRef.current = { at: Date.now(), status, userId: user.id, appEnabled: appNotificationsEnabled };
+          if (status === 'granted' && appNotificationsEnabled) {
+            console.log('🔄 App resumed — syncing push token (permission granted & notifications enabled)');
+            // updatePushTokenStatusInSupabase(true) already calls registerForPushNotificationsAsync internally.
+            // Calling register separately here caused 4x duplicate RPC+PATCH on every app resume.
             await updatePushTokenStatusInSupabase(user.id, true);
-          } else if (status === 'denied') {
+          } else if (status === 'denied' || !appNotificationsEnabled) {
+            console.log('🔄 App resumed — keeping push disabled (permission denied or disabled in-app)');
             await updatePushTokenStatusInSupabase(user.id, false);
           }
         } catch (err) {
