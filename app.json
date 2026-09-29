@@ -3,7 +3,7 @@
     "name": "HungerTap",
     "slug": "canteen-app",
     "scheme": "hungertap",
-    "version": "1.0.8",
+    "version": "1.0.9",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "androidNavigationBar": {
@@ -54,7 +54,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#FDC403"
       },
-      "versionCode": 8,
+      "versionCode": 9,
       "softwareKeyboardLayoutMode": "pan",
       "permissions": [
         "INTERNET",
@@ -76,6 +76,11 @@
             "DEFAULT"
           ]
         }
+      ],
+      "blockedPermissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.SYSTEM_ALERT_WINDOW"
       ]
     },
     "web": {
@@ -101,8 +106,8 @@
         {
           "android": {
             "minSdkVersion": 24,
-            "compileSdkVersion": 35,
-            "targetSdkVersion": 35,
+            "compileSdkVersion": 36,
+            "targetSdkVersion": 36,
             "enableMinifyInReleaseBuilds": true,
             "enableShrinkResourcesInReleaseBuilds": true,
             "reactNativeArchitectures": [

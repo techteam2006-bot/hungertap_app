@@ -53,6 +53,7 @@ import CanteenClosedMessage from '../components/CanteenClosedMessage';
 import { pxToPercentX, pxToPercentY } from '../utils/percent';
 import { invalidateHttpMenuCache, menuFromHttpEnabled } from '../lib/menuHttp';
 import { invalidateCanteenMenuEdgeCache } from '../lib/canteenMenuEdge';
+import { isNetworkError, NETWORK_ERROR_TITLE, NETWORK_ERROR_MESSAGE } from '../lib/network';
 import {
   getMenu,
   invalidateMenu,
@@ -580,7 +581,11 @@ const HomeScreen = ({ navigation, route }) => {
       const rows = transformRawToMenuRows(rawRows || []);
 
       if (error && rows.length === 0) {
-        setMenuLoadError('Could not load menu. Pull down to refresh or try again.');
+        setMenuLoadError(
+          isNetworkError(error)
+            ? `${NETWORK_ERROR_MESSAGE} Pull down to refresh.`
+            : 'Could not load menu. Pull down to refresh or try again.'
+        );
         setMenuItems([]);
         setHasMore(false);
         return;
@@ -591,7 +596,11 @@ const HomeScreen = ({ navigation, route }) => {
       setHasMore(false);
       setCategoryOccupancy(computeCategoryOccupancy(rawRows || []));
     } catch (e) {
-      setMenuLoadError('Could not load menu. Pull down to refresh or try again.');
+      setMenuLoadError(
+        isNetworkError(e)
+          ? `${NETWORK_ERROR_MESSAGE} Pull down to refresh.`
+          : 'Could not load menu. Pull down to refresh or try again.'
+      );
       setMenuItems([]);
       setHasMore(false);
     } finally {
@@ -676,7 +685,8 @@ const HomeScreen = ({ navigation, route }) => {
         await fetchCategories();
       } catch (e) {
         console.error('Change canteen error:', e);
-        showAppAlert('Error', 'Could not change canteen. Try again.');
+        if (isNetworkError(e)) showAppAlert(NETWORK_ERROR_TITLE, NETWORK_ERROR_MESSAGE);
+        else showAppAlert('Error', 'Could not change canteen. Try again.');
       } finally {
         setCanteenPickerLoading(false);
       }
@@ -733,7 +743,8 @@ const HomeScreen = ({ navigation, route }) => {
       setChangeCanteenModalVisible(false);
     } catch (e) {
       console.error('Change canteen (after clear cart):', e);
-      showAppAlert('Error', 'Could not switch canteen. Try again.');
+      if (isNetworkError(e)) showAppAlert(NETWORK_ERROR_TITLE, NETWORK_ERROR_MESSAGE);
+      else showAppAlert('Error', 'Could not switch canteen. Try again.');
     } finally {
       setChangeCanteenBusy(false);
     }
@@ -2082,7 +2093,7 @@ const HomeScreen = ({ navigation, route }) => {
             ) : menuLoadError ? (
               <View style={[styles.emptyState, { paddingHorizontal: 24 }]}>
                 <AppIcon
-                  name="cloud-offline-outline"
+                  name="wifi-outline"
                   size={52}
                   color={colors.textTertiary}
                   style={{ marginBottom: 14 }}

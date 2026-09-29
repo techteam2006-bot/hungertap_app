@@ -61,3 +61,7 @@ supabase_edge_function_*.ts
 .tmp_*
 tmp_*
 *_chunk*.txt
+
+# Browser-only design/preview pages (not part of the app)
+cashfree gateway demo/
+cashfree-ui-preview/

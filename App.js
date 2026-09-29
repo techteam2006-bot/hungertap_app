@@ -63,6 +63,7 @@ import FavoritesScreen from './screens/FavoritesHomeScreen';
 // Context Providers
 // Auth handled by Supabase now (Clerk removed)
 import { AuthProvider, useAuth } from './lib/AuthContext';
+import { supabase } from './lib/supabase';
 import { CartProvider } from './lib/CartContext';
 import { ThemeProvider, useTheme } from './lib/ThemeContext';
 import { AppAlertProvider } from './lib/AppAlertContext';
@@ -345,8 +346,24 @@ function Navigation() {
   );
 }
 
+/** Push-token re-sync on resume at most this often (unless permission changed). */
+const PUSH_RESYNC_MIN_MS = 6 * 60 * 60 * 1000;
+
 function AppNavigator() {
   const { user, loading, isSignedIn, userId } = useAuth();
+  const lastPushSyncRef = React.useRef({ at: 0, status: null, userId: null });
+
+  // Supabase's recommended React Native setup: refresh the auth token only while
+  // the app is in the foreground. Stops background timers / retry requests from
+  // idle phones hitting the backend on a weak network.
+  useEffect(() => {
+    if (AppState.currentState === 'active') supabase.auth.startAutoRefresh();
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') supabase.auth.startAutoRefresh();
+      else supabase.auth.stopAutoRefresh();
+    });
+    return () => sub.remove();
+  }, []);
 
   // Motorola & OEM Android Permission Resume Fix: re-check FCM permission when app transitions to active
   useEffect(() => {
@@ -357,6 +374,17 @@ function AppNavigator() {
       if (nextAppState === 'active' && user?.id) {
         try {
           const { status } = await Notifications.getPermissionsAsync();
+          // Every resume used to write the push token twice. Only re-sync when the
+          // permission changed or the last sync is old — saves backend requests.
+          const last = lastPushSyncRef.current;
+          if (
+            last.userId === user.id &&
+            last.status === status &&
+            Date.now() - last.at < PUSH_RESYNC_MIN_MS
+          ) {
+            return;
+          }
+          lastPushSyncRef.current = { at: Date.now(), status, userId: user.id };
           if (status === 'granted') {
             console.log('🔄 App resumed — retrying FCM token registration (permission granted)');
             await registerForPushNotificationsAsync(user.id);

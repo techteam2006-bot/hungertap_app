@@ -24,6 +24,10 @@ import { useCart } from '../lib/CartContext';
 import { supabase, deriveItemIsAvailable } from '../lib/supabase';
 import { pickLineRowsFromOrderRow } from '../lib/orderQueries';
 import { getOrders, getMoreOrders } from '../lib/ordersCache';
+import useAppActive from '../lib/useAppActive';
+import * as Notifications from 'expo-notifications';
+import { isFinalOrderStatus, ORDERS_LIST_POLL_MS } from '../lib/orderPolling';
+import { isNetworkError, NETWORK_ERROR_TITLE, NETWORK_ERROR_MESSAGE } from '../lib/network';
 import { getLineItemIdFromRow, mapLineRowToBillItem, resolveOrderHeaderTotalFromRows } from '../lib/orderLineRowMoney';
 import { pxToPercentX, pxToPercentY } from '../utils/percent';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -139,7 +143,10 @@ const OrdersScreen = ({ navigation }) => {
 
       if (ordersError && !(Array.isArray(ordersData) && ordersData.length > 0)) {
         console.error('❌ Error fetching orders:', ordersError);
-        if (!options.silent) showAppAlert('Error', 'Failed to load orders');
+        if (!options.silent) {
+          if (isNetworkError(ordersError)) showAppAlert(NETWORK_ERROR_TITLE, NETWORK_ERROR_MESSAGE);
+          else showAppAlert('Error', 'Failed to load orders');
+        }
       } else {
         console.log('✅ Orders fetched successfully:', ordersData?.length || 0);
         setOrders(mapOrdersPayload(ordersData));
@@ -147,7 +154,8 @@ const OrdersScreen = ({ navigation }) => {
       }
     } catch (error) {
       console.error('❌ Error fetching orders:', error);
-      showAppAlert('Error', 'Failed to load orders');
+      if (isNetworkError(error)) showAppAlert(NETWORK_ERROR_TITLE, NETWORK_ERROR_MESSAGE);
+      else showAppAlert('Error', 'Failed to load orders');
     } finally {
       isFetchingRef.current = false;
       if (!options.silent) setLoading(false);
@@ -164,49 +172,56 @@ const OrdersScreen = ({ navigation }) => {
     };
   }, [user?.id]);
 
+  // No Realtime (keeps the project's Realtime quota for the canteen panels).
+  // Refresh on open / return to foreground, on an order push notification,
+  // and every 30 s while this screen is open and some order is still in progress.
+  const appActive = useAppActive();
+  const ordersRef = useRef(orders);
+  ordersRef.current = orders;
+  const fetchOrdersRef = useRef(null);
+  fetchOrdersRef.current = fetchOrders;
+
   // Fetch first page of 10 (for active status / all) on open and when status filter changes.
   useFocusEffect(
     useCallback(() => {
-      if (!user?.id) return undefined;
+      if (!user?.id || !appActive) return undefined;
 
-      fetchOrders({ silent: false, forceRefresh: true, status: activeStatus });
+      fetchOrdersRef.current?.({ silent: false, forceRefresh: true, status: activeStatus });
 
-      const topic = `orders_list_${user.id}`;
-      let debounceTimer = null;
-      const scheduleRefresh = () => {
-        if (debounceTimer) clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => {
-          if (!isFetchingRef.current) {
-            fetchOrders({ silent: true, forceRefresh: true, status: activeStatus });
-          }
-        }, 250);
-      };
-
-      const channel = supabase
-        .channel(topic)
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'orders',
-            filter: `placed_by=eq.${user.id}`,
-          },
-          scheduleRefresh
-        )
-        .subscribe();
-
-      return () => {
-        if (debounceTimer) clearTimeout(debounceTimer);
-        try {
-          supabase.removeChannel(channel);
-        } catch (_) {
-          try {
-            channel.unsubscribe();
-          } catch (__) {}
+      let stopped = false;
+      let timer = null;
+      const hasActiveOrder = () =>
+        (ordersRef.current || []).some((o) => o?.status && !isFinalOrderStatus(o.status));
+      const refreshSilently = () => {
+        if (!isFetchingRef.current) {
+          fetchOrdersRef.current?.({ silent: true, forceRefresh: true, status: activeStatus });
         }
       };
-    }, [user?.id, activeStatus])
+      const schedule = () => {
+        timer = setTimeout(() => {
+          if (stopped) return;
+          if (hasActiveOrder()) refreshSilently();
+          schedule();
+        }, ORDERS_LIST_POLL_MS);
+      };
+      schedule();
+
+      // Kitchen status changes also send a push — refresh instantly when one arrives.
+      let notifSub = null;
+      try {
+        notifSub = Notifications.addNotificationReceivedListener(() => refreshSilently());
+      } catch (_) {
+        notifSub = null;
+      }
+
+      return () => {
+        stopped = true;
+        if (timer) clearTimeout(timer);
+        try {
+          notifSub?.remove();
+        } catch (_) {}
+      };
+    }, [user?.id, activeStatus, appActive])
   );
 
   const onRefresh = useCallback(async () => {
@@ -284,7 +299,8 @@ const OrdersScreen = ({ navigation }) => {
 
       if (error) {
         console.error('RPC Error:', error.message || error);
-        showAppAlert('Error', 'Could not load these items right now. Please try again.');
+        if (isNetworkError(error)) showAppAlert(NETWORK_ERROR_TITLE, NETWORK_ERROR_MESSAGE);
+        else showAppAlert('Error', 'Could not load these items right now. Please try again.');
         return;
       }
       if (!Array.isArray(itemsData)) {
@@ -333,7 +349,8 @@ const OrdersScreen = ({ navigation }) => {
       if (__DEV__) {
         console.error('Reorder failed:', reorderError);
       }
-      showAppAlert('Reorder Failed', 'Could not add items to cart. Please try again.');
+      if (isNetworkError(reorderError)) showAppAlert(NETWORK_ERROR_TITLE, NETWORK_ERROR_MESSAGE);
+      else showAppAlert('Reorder Failed', 'Could not add items to cart. Please try again.');
     } finally {
       setReorderingOrderId(null);
     }
@@ -365,7 +382,8 @@ const OrdersScreen = ({ navigation }) => {
       if (__DEV__) {
         console.error('Reorder failed:', reorderError);
       }
-      showAppAlert('Reorder Failed', 'Could not update your cart. Please try again.');
+      if (isNetworkError(reorderError)) showAppAlert(NETWORK_ERROR_TITLE, NETWORK_ERROR_MESSAGE);
+      else showAppAlert('Reorder Failed', 'Could not update your cart. Please try again.');
     } finally {
       setReplaceCartBusy(false);
       setReorderingOrderId(null);
@@ -570,13 +588,15 @@ const OrdersScreen = ({ navigation }) => {
         status: activeStatus,
       });
       if (error && !(Array.isArray(data) && data.length > 0)) {
-        showAppAlert('Error', 'Could not load more orders');
+        if (isNetworkError(error)) showAppAlert(NETWORK_ERROR_TITLE, NETWORK_ERROR_MESSAGE);
+        else showAppAlert('Error', 'Could not load more orders');
         return;
       }
       setOrders(mapOrdersPayload(data));
       setHasMoreOrders(Boolean(hasMore));
     } catch (e) {
-      showAppAlert('Error', 'Could not load more orders');
+      if (isNetworkError(e)) showAppAlert(NETWORK_ERROR_TITLE, NETWORK_ERROR_MESSAGE);
+      else showAppAlert('Error', 'Could not load more orders');
     } finally {
       setLoadingMore(false);
     }

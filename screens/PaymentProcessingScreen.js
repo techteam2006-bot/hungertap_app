@@ -8,14 +8,14 @@ import {
   Linking,
   ActivityIndicator,
   BackHandler,
+  TouchableOpacity,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { useTheme } from '../lib/ThemeContext';
 import BrandYellowStrip from '../components/BrandYellowStrip';
 import { appTypography } from '../lib/darkThemeConfig';
-import { supabase, prepareCheckoutOrderArgs } from '../lib/supabase';
-import { postCreateOrderV2 } from '../lib/createOrderV2';
+import { supabase } from '../lib/supabase';
 import { useCart } from '../lib/CartContext';
 import { useAuth } from '../lib/AuthContext';
 import {
@@ -40,6 +40,7 @@ import {
   configureCashfreeCallbacks,
   clearCashfreeCallbacks,
   startCashfreeCheckout,
+  isCashfreeElementSdkAvailable,
 } from '../lib/cashfreeCheckout';
 import {
   isEasebuzzNativeSdkAvailable,
@@ -53,11 +54,23 @@ import {
 } from '../lib/razorpayCheckout';
 import { postVerifyRazorpayPayment } from '../lib/verifyRazorpayPayment';
 import { CONFIG } from '../config';
+import CashfreeCheckoutSheet from '../components/cashfree/CashfreeCheckoutSheet';
+import { USE_CUSTOM_CASHFREE_UI } from '../lib/cashfreeUiTheme';
 
-const POLL_MS = 2500;
+/**
+ * Order-status polling. Every poll is one PostgREST request, and the backend
+ * has a small connection budget (~60), so: never more than ONE status request
+ * in flight per phone, and poll slowly while the payer is only choosing a
+ * payment method.
+ */
+const POLL_MS = 3000; // payment in progress
+const POLL_IDLE_MS = 15000; // custom Cashfree UI open, no payment started yet
+const VERIFY_POLL_MS = 1500; // after the gateway says "done", until the webhook lands
+const VERIFY_WINDOW_MS = 30000;
 const STUCK_MS = 180000;
 /**
- * Wait this long for native SDK UI to present before falling back to WebView.
+ * Wait this long for native SDK UI to present before treating it as a launch
+ * failure (Cashfree/Easebuzz: back to cart; Razorpay: WebView fallback).
  * Once the SDK reports that checkout opened (or doPayment returns), the timer
  * must not fire — otherwise a slow payer gets a second checkout after cancel/pay.
  */
@@ -65,30 +78,19 @@ const SDK_FALLBACK_MS = 30000;
 const WEBVIEW_OVERLAY_MAX_MS = 5000;
 /** Ignore transient order statuses while checkout is still opening. */
 const CHECKOUT_LAUNCH_GRACE_MS = 35000;
-/**
- * `enforce_order_rate_limits` Guard 1: 5s cooldown between a student's orders
- * ("Order placed too quickly. Please wait N seconds"). One second of margin.
- *
- * Only the order-recreating path has to respect this — reusing an existing
- * session does not place an order at all, which is why that is the default path.
- *
- * Guard 2 (max 3 orders / 60s) cannot be waited out here; a 60s spinner is worse
- * than a clear message, so that rejection is surfaced to the user instead.
- */
-const ORDER_COOLDOWN_MS = 6000;
 
 /**
- * Cashfree, Easebuzz, and Razorpay fall back to WebView when the native module is
- * missing (Expo Go), launch fails, or Play Store / sideload checks block the SDK.
+ * Cashfree and Easebuzz are native-SDK only (no hosted/WebView fallback).
+ * Razorpay still falls back to WebView when its native module is unavailable.
  */
 const MODE = {
   CASHFREE_SDK: 'cashfree-sdk',
-  CASHFREE_WEBVIEW: 'cashfree-webview',
   EASEBUZZ_SDK: 'easebuzz-sdk',
-  EASEBUZZ_WEBVIEW: 'easebuzz-webview',
   RAZORPAY_SDK: 'razorpay-sdk',
   RAZORPAY_WEBVIEW: 'razorpay-webview',
   UNAVAILABLE: 'unavailable',
+  /** Payment SDK is not in this build (Expo Go / outdated APK) — no web fallback. */
+  SDK_MISSING: 'sdk-missing',
 };
 
 const SDK_MODES = [MODE.CASHFREE_SDK, MODE.EASEBUZZ_SDK, MODE.RAZORPAY_SDK];
@@ -125,17 +127,16 @@ function resolveInitialCheckoutMode({
     return MODE.RAZORPAY_WEBVIEW;
   }
 
+  // Cashfree and Easebuzz are native-SDK only — no hosted WebView fallback.
   if (isCashfree) {
     if (!cashfreeSessionId) return MODE.UNAVAILABLE;
     if (isCashfreeNativeSdkAvailable()) return MODE.CASHFREE_SDK;
-    return MODE.CASHFREE_WEBVIEW;
+    return MODE.SDK_MISSING;
   }
 
-  if (isEasebuzzNativeSdkAvailable() && activePaymentSessionId) {
-    return MODE.EASEBUZZ_SDK;
-  }
-  if (isAllowedCheckoutUrl(activePaymentUrl)) return MODE.EASEBUZZ_WEBVIEW;
-  return MODE.UNAVAILABLE;
+  if (!activePaymentSessionId) return MODE.UNAVAILABLE;
+  if (isEasebuzzNativeSdkAvailable()) return MODE.EASEBUZZ_SDK;
+  return MODE.SDK_MISSING;
 }
 
 /** Cashfree session ids are interpolated into a <script> tag — validate, never trust. */
@@ -146,71 +147,6 @@ function normalizeCashfreeSessionId(raw) {
   const s = String(raw || '').trim();
   if (CASHFREE_SESSION_RE.test(s) || CASHFREE_SESSION_FALLBACK_RE.test(s)) return s;
   return '';
-}
-
-/**
- * Cashfree has no URL you can navigate to for a payment_session_id — the session
- * must be handed to their JS SDK. This page is the fallback for runtimes without
- * the native module (Expo Go, or a launch failure).
- *
- * `isSandbox` comes from the server's gateway_environment, never from __DEV__.
- */
-function buildCashfreeWebJsSdkHtml(sessionId, isSandbox) {
-  const mode = isSandbox ? 'sandbox' : 'production';
-  return `<!DOCTYPE html>
-<html>
-  <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
-    <style>
-      * { box-sizing: border-box; }
-      body {
-        margin: 0; padding: 0;
-        background-color: #FFFFFF; color: #1A1A1A;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-        display: flex; align-items: center; justify-content: center; height: 100vh;
-      }
-      .spinner {
-        width: 40px; height: 40px;
-        border: 4px solid rgba(0,0,0,0.08); border-left-color: #FFB301;
-        border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px auto;
-      }
-      @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-    </style>
-  </head>
-  <body>
-    <div style="text-align:center;">
-      <div class="spinner"></div>
-      <div style="font-size:16px;font-weight:600;color:#1A1A1A;margin-bottom:4px;">Checkout</div>
-      <div style="font-size:14px;color:#666666;">Opening secure payment…</div>
-    </div>
-    <script>
-      (function () {
-        function startCheckout() {
-          try {
-            Cashfree({ mode: "${mode}" }).checkout({
-              paymentSessionId: "${sessionId}",
-              redirectTarget: "_self"
-            });
-          } catch (e) {
-            console.error("Cashfree checkout error:", e);
-          }
-        }
-        var sdkScript = document.querySelector('script[src*="sdk.cashfree.com"]');
-        if (window.Cashfree) {
-          startCheckout();
-        } else if (sdkScript) {
-          sdkScript.addEventListener("load", startCheckout);
-          sdkScript.addEventListener("error", function () {
-            console.error("Cashfree SDK script failed to load");
-          });
-        } else {
-          setTimeout(startCheckout, 1500);
-        }
-      })();
-    </script>
-  </body>
-</html>`;
 }
 
 /** Escape values embedded in Razorpay WebView HTML. */
@@ -326,8 +262,6 @@ function isExternalPaymentAppUrl(url) {
 
 function isWebViewCheckoutMode(mode) {
   return (
-    mode === MODE.CASHFREE_WEBVIEW ||
-    mode === MODE.EASEBUZZ_WEBVIEW ||
     mode === MODE.RAZORPAY_WEBVIEW
   );
 }
@@ -342,8 +276,8 @@ function useGatewayLaunchFallback({
   isRazorpay,
   activePaymentUrl,
   sdkUiPresentedRef,
-  switchToCashfreeWebViewFallback,
-  switchToEasebuzzWebViewFallback,
+  handleCashfreeLaunchFailure,
+  handleEasebuzzLaunchFailure,
   switchToRazorpayWebViewFallback,
   onSdkLaunchTimeout,
 }) {
@@ -353,18 +287,14 @@ function useGatewayLaunchFallback({
     const timer = setTimeout(() => {
       if (sdkUiPresentedRef?.current) return;
       if (isCashfree) {
-        switchToCashfreeWebViewFallback?.();
+        handleCashfreeLaunchFailure?.();
         return;
       }
       if (isRazorpay || mode === MODE.RAZORPAY_SDK) {
         switchToRazorpayWebViewFallback?.();
         return;
       }
-      if (isAllowedCheckoutUrl(activePaymentUrl)) {
-        switchToEasebuzzWebViewFallback?.();
-      } else {
-        onSdkLaunchTimeout?.();
-      }
+      handleEasebuzzLaunchFailure?.();
     }, SDK_FALLBACK_MS);
 
     return () => clearTimeout(timer);
@@ -374,8 +304,8 @@ function useGatewayLaunchFallback({
     isRazorpay,
     activePaymentUrl,
     sdkUiPresentedRef,
-    switchToCashfreeWebViewFallback,
-    switchToEasebuzzWebViewFallback,
+    handleCashfreeLaunchFailure,
+    handleEasebuzzLaunchFailure,
     switchToRazorpayWebViewFallback,
     onSdkLaunchTimeout,
   ]);
@@ -438,24 +368,31 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
   /** True once native checkout UI presented (or launch was accepted). */
   const sdkUiPresentedRef = useRef(false);
   const checkoutOpenedAtRef = useRef(Date.now());
-  const refreshInFlightRef = useRef(false);
   const webViewFallbackRequestedRef = useRef(false);
-  /**
-   * Set when refreshCheckoutSessionForWebView has already told the user why it
-   * failed. Its reasons (rate limits, closed canteen, stock) are specific and
-   * actionable, so the caller must not bury them under generic copy.
-   */
-  const refreshAlertedRef = useRef(false);
+  /** Cashfree/Easebuzz launch failure already shown to the payer. */
+  const launchFailureHandledRef = useRef(false);
+  /** Custom HungerTap Cashfree UI (components/cashfree/CashfreeCheckoutSheet) is showing. */
+  const cfCustomUiRef = useRef(false);
+  /** A payment was launched from the custom UI and has not reported back yet. */
+  const cfProcessingRef = useRef(false);
+  /** Cashfree's error message for the failed screen. */
+  const cfLastErrorRef = useRef('');
+  const [cfCustomUi, setCfCustomUi] = useState(false);
+  /** Failure pushed into the custom UI: { key, status: 'failed', message }. */
+  const [cfAttempt, setCfAttempt] = useState(null);
+  /** One order-status request at a time (see refreshPaymentStatus). */
+  const statusInFlightRef = useRef(false);
+  const verifyingRef = useRef(false);
 
-  const [checkoutOrderId, setCheckoutOrderId] = useState(() => String(initialOrderId || '').trim());
+  const [checkoutOrderId] = useState(() => String(initialOrderId || '').trim());
   const [activePaymentUrl] = useState(() => String(initialPaymentUrl || '').trim());
-  const [activePaymentId, setActivePaymentId] = useState(
+  const [activePaymentId] = useState(
     initialPaymentId != null ? String(initialPaymentId) : ''
   );
-  const [activePaymentSessionId, setActivePaymentSessionId] = useState(
+  const [activePaymentSessionId] = useState(
     initialPaymentSessionId != null ? String(initialPaymentSessionId).trim() : ''
   );
-  const [environment, setEnvironment] = useState(() =>
+  const [environment] = useState(() =>
     String(initialEnvironment || '').toUpperCase() === 'PRODUCTION' ? 'PRODUCTION' : 'SANDBOX'
   );
   const [webviewKey, setWebviewKey] = useState(0);
@@ -465,7 +402,6 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
     setWebviewKey((k) => k + 1);
   }, []);
   const [verifying, setVerifying] = useState(false);
-  const [refreshingCheckout, setRefreshingCheckout] = useState(false);
   const [webViewLoaded, setWebViewLoaded] = useState(false);
   const [blockExit, setBlockExit] = useState(true);
 
@@ -505,14 +441,7 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
   );
 
   const webViewSource = useMemo(() => {
-    if (mode === MODE.CASHFREE_WEBVIEW) {
-      if (!cashfreeSessionId) return null;
-      const isSandbox = environment !== 'PRODUCTION';
-      return {
-        html: buildCashfreeWebJsSdkHtml(cashfreeSessionId, isSandbox),
-        baseUrl: isSandbox ? 'https://sandbox.cashfree.com' : 'https://payments.cashfree.com',
-      };
-    }
+    // Only Razorpay still has a WebView checkout; Cashfree/Easebuzz are SDK-only.
     if (mode === MODE.RAZORPAY_WEBVIEW) {
       const url = String(activePaymentUrl || '').trim();
       if (isAllowedCheckoutUrl(url)) return { uri: url };
@@ -530,12 +459,9 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
       }
       return null;
     }
-    const url = String(activePaymentUrl || '').trim();
-    return isAllowedCheckoutUrl(url) ? { uri: url } : null;
+    return null;
   }, [
     mode,
-    cashfreeSessionId,
-    environment,
     activePaymentUrl,
     razorpayKeyId,
     razorpayOrderId,
@@ -643,6 +569,15 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
       clearTimeout(stuckTimerRef.current);
       stuckTimerRef.current = null;
     }
+    if (cfCustomUiRef.current) {
+      // Custom Cashfree UI shows its own "Payment failed" screen (Back to cart).
+      setCfAttempt({
+        key: Date.now(),
+        status: 'failed',
+        message: cfLastErrorRef.current || 'The payment could not be completed.',
+      });
+      return;
+    }
     Alert.alert(
       'Payment failed',
       'Your payment could not be completed. Return to cart to place the order again.',
@@ -659,148 +594,29 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
   }, [navigation]);
 
   /**
-   * Last resort: abandon the current order and buy a fresh checkout session.
-   *
-   * Only for when no usable `payment_session_id` survives — replacing a session
-   * that still works burns an order for nothing. See
-   * switchToCashfreeWebViewFallback.
+   * Cashfree / Easebuzz are SDK-only: when the native checkout cannot open,
+   * cancel this (unpaid) order and send the payer back to the cart with a
+   * clear message instead of loading a hosted payment page.
    */
-  const refreshCheckoutSessionForWebView = useCallback(async () => {
-    if (refreshInFlightRef.current || finalizedRef.current || !isCashfree) return false;
-    refreshInFlightRef.current = true;
-    refreshAlertedRef.current = false;
-    setRefreshingCheckout(true);
-
-    try {
-      const oldOrderId = checkoutOrderId;
-      if (isValidOrderUuid(oldOrderId)) {
-        await cancelOwnPendingPayment({ supabaseClient: supabase, orderId: oldOrderId });
-      }
-
-      // The order being replaced was placed seconds ago, so create-order-v2 runs
-      // straight into the per-user order cooldown unless we wait it out. Without
-      // this the replacement is always rejected and the fallback cannot succeed.
-      const sinceLastOrder = Date.now() - checkoutOpenedAtRef.current;
-      if (sinceLastOrder < ORDER_COOLDOWN_MS) {
-        await new Promise((r) => setTimeout(r, ORDER_COOLDOWN_MS - sinceLastOrder));
-      }
-      if (finalizedRef.current) return false;
-
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      if (!session?.access_token) {
-        refreshAlertedRef.current = true;
-        Alert.alert('Sign in required', 'Please sign in again to complete payment.');
-        return false;
-      }
-
-      const args = prepareCheckoutOrderArgs(orderItems, isTakeaway);
-      if (!args.ok) {
-        refreshAlertedRef.current = true;
-        Alert.alert('Checkout error', args.error || 'Invalid cart for checkout.');
-        return false;
-      }
-
-      const v2 = await postCreateOrderV2({
-        accessToken: session.access_token,
-        items: args.p_items,
-        is_takeaway: args.p_is_takeaway,
-        gateway_code: gateway,
-      });
-
-      if (!v2.ok) {
-        refreshAlertedRef.current = true;
-        Alert.alert('Checkout error', v2.error || 'Could not restart checkout.');
-        return false;
-      }
-
-      const newSessionId = String(v2.payment_session_id || '').trim();
-      const newOrderId = v2.order_id != null ? String(v2.order_id).trim() : '';
-      if (!newSessionId || !isValidOrderUuid(newOrderId)) {
-        refreshAlertedRef.current = true;
-        Alert.alert('Checkout error', 'Payment session was not returned. Please try again from the cart.');
-        return false;
-      }
-
-      setCheckoutOrderId(newOrderId);
-      setActivePaymentSessionId(newSessionId);
-      setActivePaymentId(v2.payment_id != null ? String(v2.payment_id) : '');
-      setEnvironment(
-        String(v2.gateway_environment || 'SANDBOX').toUpperCase() === 'PRODUCTION'
-          ? 'PRODUCTION'
-          : 'SANDBOX'
-      );
-      checkoutOpenedAtRef.current = Date.now();
+  const failSdkLaunch = useCallback(
+    (gatewayLabel) => {
+      if (finalizedRef.current || launchFailureHandledRef.current) return;
+      // Never interrupt a checkout the SDK already showed — its own callbacks decide.
+      if (sdkUiPresentedRef.current) return;
+      launchFailureHandledRef.current = true;
       sdkStartedRef.current = false;
-      sdkUiPresentedRef.current = false;
-      clearCashfreeCallbacks();
-      bumpWebViewKey();
-      setMode(MODE.CASHFREE_WEBVIEW);
-      return true;
-    } catch (_) {
-      refreshAlertedRef.current = true;
-      Alert.alert('Checkout error', 'Could not restart checkout. Please try again from the cart.');
-      return false;
-    } finally {
-      refreshInFlightRef.current = false;
-      setRefreshingCheckout(false);
-    }
-  }, [
-    isCashfree,
-    checkoutOrderId,
-    orderItems,
-    isTakeaway,
-    gateway,
-    bumpWebViewKey,
-  ]);
-
-  /**
-   * Fall back from the Cashfree native SDK to their Web JS SDK in a WebView.
-   *
-   * The `payment_session_id` is issued by create-order-v2 and is not bound to the
-   * native SDK — the native module failing to present it says nothing about the
-   * session, so reuse it. `buildCashfreeWebJsSdkHtml` needs only the session and
-   * the environment, both already in state.
-   *
-   * This used to cancel the order and call create-order-v2 for a replacement.
-   * That replacement landed ~1s after the order it replaced, which
-   * `enforce_order_rate_limits` always rejects, so the fallback could only ever
-   * end in "Could not open the payment page" — the checkout never reached a
-   * WebView at all. The order is now only recreated when there is genuinely no
-   * session left to show.
-   */
-  const switchToCashfreeWebViewFallback = useCallback(async () => {
-    if (finalizedRef.current || webViewFallbackRequestedRef.current) return;
-    // Never reopen hosted checkout after the native UI already presented —
-    // that path is for Expo / missing module / launch failure only.
-    if (sdkUiPresentedRef.current) return;
-    webViewFallbackRequestedRef.current = true;
-
-    if (cashfreeSessionId) {
-      sdkStartedRef.current = false;
-      clearCashfreeCallbacks();
-      bumpWebViewKey();
-      setMode(MODE.CASHFREE_WEBVIEW);
-      return;
-    }
-
-    const ok = await refreshCheckoutSessionForWebView();
-    if (!ok && !finalizedRef.current && !refreshAlertedRef.current) {
       Alert.alert(
-        'Checkout error',
-        'Could not open the payment page. Please go back and try Place Order again.',
-        [{ text: 'OK', onPress: () => leaveCheckout() }]
+        'Payment could not start',
+        `${gatewayLabel} payment could not open on this phone. You have not been charged. Please check your internet and try again from the cart. If it keeps happening, update HungerTap from the Play Store.`,
+        [{ text: 'Back to cart', onPress: () => finalizeCancel({ fromGateway: false }) }],
+        { cancelable: false }
       );
-    }
-  }, [cashfreeSessionId, bumpWebViewKey, refreshCheckoutSessionForWebView, leaveCheckout]);
+    },
+    [finalizeCancel]
+  );
 
-  const switchToEasebuzzWebViewFallback = useCallback(() => {
-    if (finalizedRef.current || sdkUiPresentedRef.current) return;
-    sdkStartedRef.current = false;
-    bumpWebViewKey();
-    setMode(isAllowedCheckoutUrl(activePaymentUrl) ? MODE.EASEBUZZ_WEBVIEW : MODE.UNAVAILABLE);
-  }, [activePaymentUrl, bumpWebViewKey]);
+  const handleCashfreeLaunchFailure = useCallback(() => failSdkLaunch('Cashfree'), [failSdkLaunch]);
+  const handleEasebuzzLaunchFailure = useCallback(() => failSdkLaunch('Easebuzz'), [failSdkLaunch]);
 
   const switchToRazorpayWebViewFallback = useCallback(() => {
     if (finalizedRef.current || webViewFallbackRequestedRef.current) return;
@@ -834,8 +650,8 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
     isRazorpay,
     activePaymentUrl,
     sdkUiPresentedRef,
-    switchToCashfreeWebViewFallback,
-    switchToEasebuzzWebViewFallback,
+    handleCashfreeLaunchFailure,
+    handleEasebuzzLaunchFailure,
     switchToRazorpayWebViewFallback,
     onSdkLaunchTimeout: () => applyOutcomeRef.current?.('failure'),
   });
@@ -880,6 +696,9 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
 
   const refreshPaymentStatus = useCallback(async () => {
     if (!checkoutOrderId || !userId || !isValidOrderUuid(checkoutOrderId) || finalizedRef.current) return;
+    // Single-flight: on a weak network a request can take many seconds — never stack them.
+    if (statusInFlightRef.current) return;
+    statusInFlightRef.current = true;
     try {
       const { data: ord } = await supabase
         .from('orders')
@@ -890,10 +709,13 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
       if (ord?.status) applyOrderStatus(ord.status);
     } catch (_) {
       /* network — next poll */
+    } finally {
+      statusInFlightRef.current = false;
     }
   }, [checkoutOrderId, userId, applyOrderStatus]);
 
   pollOnceRef.current = refreshPaymentStatus;
+  verifyingRef.current = verifying;
 
   /** Shared by the WebView return-URL path and the native SDK callbacks. */
   const applyCheckoutOutcome = useCallback(
@@ -918,46 +740,32 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
     [refreshPaymentStatus, finalizeCancel, finalizeFailure]
   );
 
-  // Active polling loop while verifying === true (runs every 0.5s for up to 30s)
+  // While verifying: the main poll loop speeds up to VERIFY_POLL_MS (single-flight).
+  // This effect only kicks off an immediate check and shows the "taking longer"
+  // message if the webhook hasn't settled the order within VERIFY_WINDOW_MS.
   useEffect(() => {
     if (!verifying || finalizedRef.current) return undefined;
-
-    let attempts = 0;
-    const maxAttempts = 60; // 60 * 0.5s = 30 seconds total
-
-    const intervalId = setInterval(async () => {
-      attempts += 1;
-      if (finalizedRef.current) {
-        clearInterval(intervalId);
-        return;
-      }
-
-      await refreshPaymentStatus();
-
-      if (attempts >= maxAttempts) {
-        clearInterval(intervalId);
-        if (!finalizedRef.current) {
-          Alert.alert(
-            'Verification Taking Longer',
-            'Your payment is being verified with the bank. Please check My Orders to see your order status.',
-            [
-              {
-                text: 'View Orders',
-                onPress: () => {
-                  allowLeaveRef.current = true;
-                  navigation.reset({
-                    index: 0,
-                    routes: [{ name: 'MainTabs', params: { screen: 'Orders' } }],
-                  });
-                },
-              },
-            ]
-          );
-        }
-      }
-    }, 500);
-
-    return () => clearInterval(intervalId);
+    refreshPaymentStatus();
+    const timer = setTimeout(() => {
+      if (finalizedRef.current) return;
+      Alert.alert(
+        'Verification Taking Longer',
+        'Your payment is being verified with the bank. Please check My Orders to see your order status.',
+        [
+          {
+            text: 'View Orders',
+            onPress: () => {
+              allowLeaveRef.current = true;
+              navigation.reset({
+                index: 0,
+                routes: [{ name: 'MainTabs', params: { screen: 'Orders' } }],
+              });
+            },
+          },
+        ]
+      );
+    }, VERIFY_WINDOW_MS);
+    return () => clearTimeout(timer);
   }, [verifying, refreshPaymentStatus, navigation]);
 
   // Held in a ref so the async SDK effects below never re-run (and never drop a
@@ -1005,6 +813,16 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
         // settled this payment, so check before acting on the SDK's verdict.
         pollOnceRef.current?.();
 
+        if (cfCustomUiRef.current) {
+          cfProcessingRef.current = false;
+          try {
+            cfLastErrorRef.current =
+              typeof error?.getMessage === 'function' ? String(error.getMessage() || '') : String(error?.message || '');
+          } catch (_) {
+            cfLastErrorRef.current = '';
+          }
+        }
+
         if (userCancelled) {
           applyOutcomeRef.current?.('cancelled');
           return;
@@ -1013,23 +831,31 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
           if (typeof __DEV__ !== 'undefined' && __DEV__) {
             // eslint-disable-next-line no-console
             console.warn(
-              '[Cashfree] Native SDK launch blocked — falling back to WebView:',
+              '[Cashfree] Native SDK launch blocked — returning to cart:',
               describeCashfreeSdkError(error)
             );
           }
           sdkUiPresentedRef.current = false;
           sdkStartedRef.current = false;
-          switchToCashfreeWebViewFallback();
+          handleCashfreeLaunchFailure();
           return;
         }
-        // Launch/session error before UI presented → WebView. After present → fail.
+        // Launch/session error before UI presented → back to cart. After present → fail.
         if (sdkUiPresentedRef.current) {
           applyOutcomeRef.current?.('failure');
           return;
         }
-        switchToCashfreeWebViewFallback();
+        handleCashfreeLaunchFailure();
       },
     });
+
+    if (!sdkStartedRef.current && USE_CUSTOM_CASHFREE_UI && isCashfreeElementSdkAvailable()) {
+      // Show HungerTap's own payment screens; each method launches its own SDK call.
+      sdkStartedRef.current = true;
+      sdkUiPresentedRef.current = true; // our UI is up — the 30s launch-failure timer must not fire
+      cfCustomUiRef.current = true;
+      setCfCustomUi(true);
+    }
 
     if (!sdkStartedRef.current) {
       sdkStartedRef.current = true;
@@ -1047,11 +873,11 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
         sdkUiPresentedRef.current = true;
       } catch (e) {
         if (typeof __DEV__ !== 'undefined' && __DEV__) {
-          console.warn('[Cashfree] startCashfreeCheckout failed, falling back to WebView:', e?.message || e);
+          console.warn('[Cashfree] startCashfreeCheckout failed — returning to cart:', e?.message || e);
         }
         sdkStartedRef.current = false;
         sdkUiPresentedRef.current = false;
-        switchToCashfreeWebViewFallback();
+        handleCashfreeLaunchFailure();
       }
     }
 
@@ -1062,10 +888,10 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
     cashfreeOrderId,
     checkoutOrderId,
     environment,
-    switchToCashfreeWebViewFallback,
+    handleCashfreeLaunchFailure,
   ]);
 
-  // --- Native SDK: Easebuzz (falls back to the server-issued URL) -----------
+  // --- Native SDK: Easebuzz (SDK only — launch failure returns to cart) -----
   useEffect(() => {
     if (mode !== MODE.EASEBUZZ_SDK || sdkStartedRef.current) return;
     sdkStartedRef.current = true;
@@ -1078,8 +904,8 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
       }
 
       // Easebuzz awaits until the payer finishes, so mark "presented" as soon as
-      // we invoke native open — otherwise the 30s timer reopens WebView mid-pay.
-      // launchFailed clears this and still falls back to WebView.
+      // we invoke native open — otherwise the 30s timer would abort mid-pay.
+      // launchFailed clears this and returns the payer to the cart.
       sdkUiPresentedRef.current = true;
 
       const res = await startEasebuzzCheckout({
@@ -1091,8 +917,7 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
       if (res.launchFailed) {
         sdkStartedRef.current = false;
         sdkUiPresentedRef.current = false;
-        bumpWebViewKey();
-        setMode(isAllowedCheckoutUrl(activePaymentUrl) ? MODE.EASEBUZZ_WEBVIEW : MODE.UNAVAILABLE);
+        handleEasebuzzLaunchFailure();
         return;
       }
 
@@ -1111,7 +936,7 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
     return () => {
       cancelled = true;
     };
-  }, [mode, activePaymentSessionId, activePaymentUrl, environment, bumpWebViewKey]);
+  }, [mode, activePaymentSessionId, environment, handleEasebuzzLaunchFailure]);
 
   // --- Native SDK: Razorpay (WebView fallback when native blocked or unavailable) ---
   useEffect(() => {
@@ -1206,16 +1031,11 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
 
   useEffect(() => {
     if (typeof __DEV__ === 'undefined' || !__DEV__) return;
-    if (mode === MODE.EASEBUZZ_WEBVIEW) {
+    if (mode === MODE.SDK_MISSING) {
       // eslint-disable-next-line no-console
-      console.log('📱 [Step 5/7] [PaymentProcessingScreen] Loading backend payment URL in WebView:', activePaymentUrl);
-    } else if (mode === MODE.CASHFREE_WEBVIEW) {
-      // eslint-disable-next-line no-console
-      console.log(
-        '📱 [Step 5/7] [PaymentProcessingScreen] Cashfree native SDK unavailable — using Web JS SDK fallback. Environment:',
-        environment,
-        '| Reason:',
-        describeCashfreeSdkAvailability()
+      console.warn(
+        '📱 [PaymentProcessingScreen] Payment SDK missing in this build:',
+        isCashfree ? describeCashfreeSdkAvailability() : 'Easebuzz native module not linked'
       );
     } else if (mode === MODE.RAZORPAY_WEBVIEW) {
       // eslint-disable-next-line no-console
@@ -1289,12 +1109,24 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
     }
 
     let pollTimer = null;
-
-    refreshPaymentStatus();
-    pollTimer = setInterval(() => pollOnceRef.current?.(), POLL_MS);
+    let stopped = false;
+    const nextDelay = () => {
+      if (verifyingRef.current) return VERIFY_POLL_MS;
+      if (cfCustomUiRef.current && !cfProcessingRef.current) return POLL_IDLE_MS;
+      return POLL_MS;
+    };
+    // Self-scheduling loop: the next poll is only scheduled after the previous
+    // one finished, so slow responses can never pile up.
+    const pollLoop = async () => {
+      if (stopped || finalizedRef.current) return;
+      await pollOnceRef.current?.();
+      if (!stopped && !finalizedRef.current) pollTimer = setTimeout(pollLoop, nextDelay());
+    };
+    pollLoop();
 
     stuckTimerRef.current = setTimeout(() => {
       if (finalizedRef.current) return;
+      if (cfCustomUiRef.current && !cfProcessingRef.current) return;
       Alert.alert(
         'Still processing',
         'Payment can take a moment. You can leave this screen — your order status under Orders updates automatically.',
@@ -1315,7 +1147,8 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
       .catch(() => {});
 
     return () => {
-      if (pollTimer) clearInterval(pollTimer);
+      stopped = true;
+      if (pollTimer) clearTimeout(pollTimer);
       if (stuckTimerRef.current) {
         clearTimeout(stuckTimerRef.current);
         stuckTimerRef.current = null;
@@ -1374,6 +1207,30 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
     [handlePaymentReturnUrl]
   );
 
+  if (mode === MODE.CASHFREE_SDK && cfCustomUi && !verifying) {
+    return (
+      <View style={styles.root}>
+        <CashfreeCheckoutSheet
+          paymentSessionId={cashfreeSessionId}
+          orderId={cashfreeOrderId || checkoutOrderId}
+          environment={environment}
+          orderItems={orderItems}
+          orderTotal={orderTotal}
+          isTakeaway={isTakeaway}
+          attempt={cfAttempt}
+          onPaymentLaunched={() => {
+            cfProcessingRef.current = true;
+          }}
+          onCancelOrder={promptAbandonCheckout}
+          onBackToCart={() => {
+            allowLeaveRef.current = true;
+            resetNavigationToCart(navigation);
+          }}
+        />
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.root, { backgroundColor: colors.contentBackground }]}>
       <BrandYellowStrip />
@@ -1399,17 +1256,24 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
             Verifying your payment…
           </Text>
         </View>
-      ) : mode === MODE.UNAVAILABLE ? (
+      ) : mode === MODE.UNAVAILABLE || mode === MODE.SDK_MISSING ? (
         <View style={[styles.fallback, { paddingBottom: insets.bottom }]}>
-          <Text style={{ color: colors.textSecondary, textAlign: 'center', padding: 24 }}>
-            {isRazorpay
-              ? 'Razorpay checkout could not start — payment details were missing from the server. Go back and try Place Order again.'
-              : isCashfree
-                ? 'Cashfree checkout could not start — no payment session was returned. Go back and try Place Order again.'
-                : 'Could not start checkout. Go back and try Place Order again.'}
+          <Text style={{ color: colors.textSecondary, textAlign: 'center', padding: 24, fontFamily: appTypography.regular, fontSize: 15 }}>
+            {mode === MODE.SDK_MISSING
+              ? 'Payments are not supported in this version of HungerTap. Please update the app from the Play Store and try again. You have not been charged.'
+              : isRazorpay
+                ? 'Razorpay checkout could not start — payment details were missing from the server. Go back and try Place Order again.'
+                : 'Checkout could not start — no payment session was returned. Go back and try Place Order again.'}
           </Text>
+          <TouchableOpacity
+            onPress={promptAbandonCheckout}
+            style={[styles.backToCartBtn, { backgroundColor: colors.primary }]}
+            activeOpacity={0.85}
+          >
+            <Text style={[styles.backToCartText, { fontFamily: appTypography.bold }]}>Back to cart</Text>
+          </TouchableOpacity>
         </View>
-      ) : SDK_MODES.includes(mode) || refreshingCheckout ? (
+      ) : SDK_MODES.includes(mode) ? (
         <View style={[styles.webLoading, { paddingBottom: insets.bottom }]}>
           <ActivityIndicator size="large" color={colors.primary} />
           <Text
@@ -1418,7 +1282,7 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
               { color: colors.textSecondary, fontFamily: appTypography.regular },
             ]}
           >
-            {refreshingCheckout ? 'Preparing checkout…' : 'Opening secure payment…'}
+            Opening secure payment…
           </Text>
         </View>
       ) : webViewSource ? (
@@ -1509,6 +1373,13 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   fallback: { flex: 1, justifyContent: 'center' },
+  backToCartBtn: {
+    alignSelf: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 28,
+    borderRadius: 10,
+  },
+  backToCartText: { color: '#000000', fontSize: 15 },
 });
 
 export default PaymentProcessingScreen;

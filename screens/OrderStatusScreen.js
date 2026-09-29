@@ -50,6 +50,10 @@ import {
   canShowPickupQr,
 } from '../lib/orderStatus';
 import { takeawayChargeForLines } from '../lib/cartRules';
+import useAppActive from '../lib/useAppActive';
+import * as Notifications from 'expo-notifications';
+import { isFinalOrderStatus, isOrderUpdateNotification, ORDER_STATUS_POLL_MS } from '../lib/orderPolling';
+import { isNetworkError, NETWORK_ERROR_TITLE, NETWORK_ERROR_MESSAGE } from '../lib/network';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 const SUPPORT_EMAIL = 'support@hungertap.online';
@@ -424,66 +428,57 @@ const OrderStatusScreen = ({ navigation, route }) => {
     }
   };
 
-  // Fetch once on mount; Realtime only while this screen is focused.
+  // Fetch once on mount.
   useEffect(() => {
     fetchLatestOrderStatus();
   }, [resolvedOrderId, user?.id]);
 
+  // No Realtime (keeps the project's Realtime quota for the canteen panels).
+  // Refresh on open / return to foreground, on an order push notification,
+  // and a slow poll while this screen is open and the order is still in progress.
+  const appActive = useAppActive();
+  const currentStatusRef = useRef(currentOrder?.status);
+  currentStatusRef.current = currentOrder?.status;
+  const fetchStatusRef = useRef(null);
+  fetchStatusRef.current = fetchLatestOrderStatus;
+
   useFocusEffect(
     useCallback(() => {
-      if (!resolvedOrderId || !user?.id) return undefined;
+      if (!resolvedOrderId || !user?.id || !appActive) return undefined;
 
-      const topic = `order_status_${resolvedOrderId}_${user.id}`;
-      const channel = supabase
-        .channel(topic)
-        .on(
-          'postgres_changes',
-          {
-            event: 'UPDATE',
-            schema: 'public',
-            table: 'orders',
-            filter: `id=eq.${resolvedOrderId}`,
-          },
-          (payload) => {
-            if (payload?.new) fetchLatestOrderStatus();
+      let stopped = false;
+      let timer = null;
+      fetchStatusRef.current?.();
+
+      const schedule = () => {
+        timer = setTimeout(async () => {
+          if (stopped) return;
+          if (!isFinalOrderStatus(currentStatusRef.current)) {
+            await fetchStatusRef.current?.();
           }
-        )
-        .on(
-          'postgres_changes',
-          {
-            event: 'DELETE',
-            schema: 'public',
-            table: 'orders',
-            filter: `id=eq.${resolvedOrderId}`,
-          },
-          () => {
-            fetchLatestOrderStatus();
-          }
-        )
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'order_items',
-            filter: `order_id=eq.${resolvedOrderId}`,
-          },
-          () => {
-            fetchLatestOrderStatus();
-          }
-        )
-        .subscribe();
+          if (!stopped && !isFinalOrderStatus(currentStatusRef.current)) schedule();
+        }, ORDER_STATUS_POLL_MS);
+      };
+      if (!isFinalOrderStatus(currentStatusRef.current)) schedule();
+
+      // Kitchen status changes also send a push — refresh instantly when one arrives.
+      let notifSub = null;
+      try {
+        notifSub = Notifications.addNotificationReceivedListener((n) => {
+          if (isOrderUpdateNotification(n)) fetchStatusRef.current?.();
+        });
+      } catch (_) {
+        notifSub = null;
+      }
 
       return () => {
+        stopped = true;
+        if (timer) clearTimeout(timer);
         try {
-          supabase.removeChannel(channel);
-        } catch (_) {
-          try {
-            channel.unsubscribe();
-          } catch (__) {}
-        }
+          notifSub?.remove();
+        } catch (_) {}
       };
-    }, [resolvedOrderId, user?.id])
+    }, [resolvedOrderId, user?.id, appActive])
   );
 
   // Fetch user's full name (use auth metadata; profiles table may not exist in new backend)
@@ -751,7 +746,8 @@ const OrderStatusScreen = ({ navigation, route }) => {
       if (__DEV__) {
         console.error('Error reordering order:', err);
       }
-      Alert.alert('Reorder Failed', 'Could not add items to cart. Please try again.');
+      if (isNetworkError(err)) Alert.alert(NETWORK_ERROR_TITLE, NETWORK_ERROR_MESSAGE);
+      else Alert.alert('Reorder Failed', 'Could not add items to cart. Please try again.');
     } finally {
       setReordering(false);
     }
@@ -783,7 +779,8 @@ const OrderStatusScreen = ({ navigation, route }) => {
       if (__DEV__) {
         console.error('Reorder failed:', err);
       }
-      Alert.alert('Reorder Failed', 'Could not update your cart. Please try again.');
+      if (isNetworkError(err)) Alert.alert(NETWORK_ERROR_TITLE, NETWORK_ERROR_MESSAGE);
+      else Alert.alert('Reorder Failed', 'Could not update your cart. Please try again.');
     } finally {
       setReplaceCartBusy(false);
       setReordering(false);

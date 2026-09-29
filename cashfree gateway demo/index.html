@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>HungerTap × Cashfree — Payment UI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css?v=2" />
+</head>
+<body>
+
+<div class="workbench">
+
+  <!-- ============ SIDEBAR / SCREEN INDEX ============ -->
+  <aside class="sidebar">
+    <div class="sidebar__brand">
+      <div class="logo-dot">HT</div>
+      <div>
+        <h1>HungerTap Payments</h1>
+        <span>Cashfree SDK — UI Kit</span>
+      </div>
+    </div>
+
+    <div class="sidebar__group-label">Checkout flow</div>
+    <button class="nav-item active" data-screen="checkout"><span class="num">1</span> Checkout (all methods)</button>
+    <button class="nav-item" data-screen="processing"><span class="num">2</span> Processing</button>
+
+    <div class="sidebar__group-label">Outcomes</div>
+    <button class="nav-item" data-screen="success"><span class="num">3</span> Payment success</button>
+    <button class="nav-item" data-screen="failed"><span class="num">4</span> Payment failed</button>
+
+    <div class="sidebar__note">
+      Every payment method — UPI, card, net banking, wallets — lives on one checkout screen as switchable tabs, the way Cashfree's own Dropin works. Click through the device frame, or jump to any screen here.
+    </div>
+  </aside>
+
+  <!-- ============ STAGE / PHONE ============ -->
+  <main class="stage">
+    <div class="stage__inner">
+      <div class="stage__label" id="stageLabel">Screen 1 of 4 — Checkout</div>
+
+      <div class="phone">
+        <div class="phone__notch"></div>
+        <div class="phone__screen">
+
+          <!-- ===================== 1. CHECKOUT — ALL METHODS, ONE SCREEN ===================== -->
+          <section class="screen active" id="screen-checkout">
+            <div class="statusbar"><span>9:41</span><span>●●●● ⟠ 100%</span></div>
+            <div class="topbar">
+              <button class="topbar__back" onclick="alert('Would return to cart')" aria-label="Back">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+              <div>
+                <h2>Checkout</h2>
+                <div class="topbar__sub">Anna University Canteen · Takeaway</div>
+              </div>
+            </div>
+
+            <div class="body-scroll">
+              <button class="disclosure" id="orderDisclosure" onclick="toggleOrderDetails()">
+                <div class="disclosure__main">
+                  <div class="disclosure__title">Order #HT-8421 · 3 items</div>
+                  <div class="disclosure__sub">Amount payable <b>₹248.00</b></div>
+                </div>
+                <svg class="chevron disclosure__chevron" width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M9 18l6-6-6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+              <div class="card order-card" id="orderDetails" style="display:none">
+                <div class="order-card__row item"><span>Veg Fried Rice × 1</span><span>₹120.00</span></div>
+                <div class="order-card__row item"><span>Paneer Roll × 2</span><span>₹160.00</span></div>
+                <div class="order-card__divider"></div>
+                <div class="order-card__row muted"><span>Item total</span><span>₹280.00</span></div>
+                <div class="order-card__row muted"><span>Packing charge</span><span>₹10.00</span></div>
+                <div class="order-card__row muted"><span>Platform fee</span><span>−₹42.00</span></div>
+                <div class="order-card__divider"></div>
+                <div class="order-card__row total"><span>Amount payable</span><span>₹248.00</span></div>
+              </div>
+
+              <div class="section-title">Choose payment method</div>
+              <div class="method-tabs" role="tablist">
+                <button class="method-tab active" data-method="upi" onclick="switchMethod('upi')">
+                  <span class="method-tab__icon">U</span> UPI
+                </button>
+                <button class="method-tab" data-method="card" onclick="switchMethod('card')">
+                  <span class="method-tab__icon">💳</span> Card
+                </button>
+                <button class="method-tab" data-method="netbanking" onclick="switchMethod('netbanking')">
+                  <span class="method-tab__icon">🏦</span> Bank
+                </button>
+                <button class="method-tab" data-method="wallet" onclick="switchMethod('wallet')">
+                  <span class="method-tab__icon">W</span> Wallet
+                </button>
+              </div>
+
+              <!-- ---- UPI pane ---- -->
+              <div class="pane active" id="pane-upi">
+                <div class="app-grid">
+                  <button class="app-grid__item" onclick="goTo('processing'); runProcessing('success')">
+                    <div class="app-grid__icon" style="background:#4285f4">G</div>
+                    <div class="app-grid__label">GPay</div>
+                  </button>
+                  <button class="app-grid__item" onclick="goTo('processing'); runProcessing('success')">
+                    <div class="app-grid__icon" style="background:#5f259f">Pe</div>
+                    <div class="app-grid__label">PhonePe</div>
+                  </button>
+                  <button class="app-grid__item" onclick="goTo('processing'); runProcessing('failed')">
+                    <div class="app-grid__icon" style="background:#00baf2">Pm</div>
+                    <div class="app-grid__label">Paytm</div>
+                  </button>
+                  <button class="app-grid__item" onclick="goTo('processing'); runProcessing('success')">
+                    <div class="app-grid__icon" style="background:#e5720e">B</div>
+                    <div class="app-grid__label">BHIM</div>
+                  </button>
+                </div>
+
+                <div class="field" style="margin-top:14px">
+                  <label for="upiIdInput">Or enter your UPI ID</label>
+                  <div class="input-wrap">
+                    <input type="text" id="upiIdInput" placeholder="yourname@okhdfcbank" />
+                  </div>
+                </div>
+
+                <button class="qr-toggle-link" id="qrToggleBtn" onclick="toggleQr()">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="7" height="7" rx="1" stroke="currentColor" stroke-width="1.8"/><rect x="14" y="3" width="7" height="7" rx="1" stroke="currentColor" stroke-width="1.8"/><rect x="3" y="14" width="7" height="7" rx="1" stroke="currentColor" stroke-width="1.8"/><path d="M14 14h3v3h-3zM19 19h2M19 14h2v2" stroke="currentColor" stroke-width="1.8"/></svg>
+                  Prefer scanning a QR code instead?
+                </button>
+
+                <div class="qr-box" id="qrBox" style="display:none">
+                  <div class="qr-frame">
+                    <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                      <rect width="100" height="100" fill="white"/>
+                      <g fill="#0f172a">
+                        <rect x="4" y="4" width="22" height="22"/><rect x="9" y="9" width="12" height="12" fill="white"/><rect x="13" y="13" width="4" height="4"/>
+                        <rect x="74" y="4" width="22" height="22"/><rect x="79" y="9" width="12" height="12" fill="white"/><rect x="83" y="13" width="4" height="4"/>
+                        <rect x="4" y="74" width="22" height="22"/><rect x="9" y="79" width="12" height="12" fill="white"/><rect x="13" y="83" width="4" height="4"/>
+                        <rect x="32" y="6" width="4" height="4"/><rect x="40" y="6" width="4" height="4"/><rect x="52" y="6" width="4" height="4"/><rect x="60" y="6" width="4" height="4"/>
+                        <rect x="34" y="14" width="4" height="4"/><rect x="46" y="14" width="4" height="4"/><rect x="58" y="14" width="4" height="4"/>
+                        <rect x="32" y="22" width="4" height="4"/><rect x="42" y="22" width="4" height="4"/><rect x="54" y="22" width="4" height="4"/><rect x="64" y="22" width="4" height="4"/>
+                        <rect x="34" y="34" width="4" height="4"/><rect x="42" y="34" width="4" height="4"/><rect x="50" y="34" width="4" height="4"/><rect x="60" y="34" width="4" height="4"/><rect x="70" y="34" width="4" height="4"/>
+                        <rect x="6" y="34" width="4" height="4"/><rect x="14" y="34" width="4" height="4"/><rect x="22" y="34" width="4" height="4"/>
+                        <rect x="32" y="42" width="4" height="4"/><rect x="46" y="42" width="4" height="4"/><rect x="58" y="42" width="4" height="4"/><rect x="74" y="42" width="4" height="4"/><rect x="88" y="42" width="4" height="4"/>
+                        <rect x="6" y="46" width="4" height="4"/><rect x="18" y="46" width="4" height="4"/>
+                        <rect x="36" y="50" width="4" height="4"/><rect x="44" y="50" width="4" height="4"/><rect x="56" y="50" width="4" height="4"/><rect x="66" y="50" width="4" height="4"/><rect x="80" y="50" width="4" height="4"/>
+                        <rect x="4" y="58" width="4" height="4"/><rect x="14" y="58" width="4" height="4"/><rect x="26" y="58" width="4" height="4"/>
+                        <rect x="34" y="62" width="4" height="4"/><rect x="48" y="62" width="4" height="4"/><rect x="60" y="62" width="4" height="4"/><rect x="72" y="62" width="4" height="4"/><rect x="86" y="62" width="4" height="4"/>
+                        <rect x="34" y="78" width="4" height="4"/><rect x="42" y="78" width="4" height="4"/><rect x="54" y="78" width="4" height="4"/><rect x="66" y="78" width="4" height="4"/><rect x="78" y="78" width="4" height="4"/><rect x="88" y="78" width="4" height="4"/>
+                        <rect x="34" y="86" width="4" height="4"/><rect x="44" y="86" width="4" height="4"/><rect x="60" y="86" width="4" height="4"/><rect x="74" y="86" width="4" height="4"/>
+                        <rect x="34" y="92" width="4" height="4"/><rect x="50" y="92" width="4" height="4"/><rect x="64" y="92" width="4" height="4"/><rect x="80" y="92" width="4" height="4"/><rect x="90" y="92" width="4" height="4"/>
+                      </g>
+                    </svg>
+                  </div>
+                  <div class="qr-timer">QR expires in <b id="qrTimer">04:32</b></div>
+                </div>
+              </div>
+
+              <!-- ---- Card pane ---- -->
+              <div class="pane" id="pane-card">
+                <div class="field">
+                  <label for="cardNumber">Card number</label>
+                  <div class="input-wrap">
+                    <input type="text" id="cardNumber" inputmode="numeric" placeholder="1234  5678  9012  3456" maxlength="19" />
+                    <div class="input-icon-right" id="cardBrandIcon"></div>
+                  </div>
+                </div>
+
+                <div class="field-row">
+                  <div class="field">
+                    <label for="cardExpiry">Expiry</label>
+                    <input type="text" id="cardExpiry" inputmode="numeric" placeholder="MM/YY" maxlength="5" />
+                  </div>
+                  <div class="field">
+                    <label for="cardCvv">CVV</label>
+                    <div class="input-wrap">
+                      <input type="password" id="cardCvv" inputmode="numeric" placeholder="•••" maxlength="4" />
+                      <div class="input-icon-right">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><rect x="5" y="11" width="14" height="9" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M8 11V7a4 4 0 0 1 8 0v4" stroke="currentColor" stroke-width="1.8"/></svg>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ---- Net banking pane ---- -->
+              <div class="pane" id="pane-netbanking">
+                <div class="app-grid">
+                  <button class="app-grid__item" onclick="goTo('processing'); runProcessing('success')">
+                    <div class="app-grid__icon" style="background:#004c8f">SBI</div>
+                    <div class="app-grid__label">SBI</div>
+                  </button>
+                  <button class="app-grid__item" onclick="goTo('processing'); runProcessing('success')">
+                    <div class="app-grid__icon" style="background:#004b8d">HDFC</div>
+                    <div class="app-grid__label">HDFC</div>
+                  </button>
+                  <button class="app-grid__item" onclick="goTo('processing'); runProcessing('success')">
+                    <div class="app-grid__icon" style="background:#f37021">ICICI</div>
+                    <div class="app-grid__label">ICICI</div>
+                  </button>
+                  <button class="app-grid__item" onclick="goTo('processing'); runProcessing('success')">
+                    <div class="app-grid__icon" style="background:#97144d">Axis</div>
+                    <div class="app-grid__label">Axis</div>
+                  </button>
+                </div>
+                <div class="field" style="margin-top:14px">
+                  <label for="bankSelect">Or choose another bank</label>
+                  <div class="input-wrap">
+                    <select id="bankSelect">
+                      <option>Select your bank</option>
+                      <option>Punjab National Bank</option>
+                      <option>Bank of Baroda</option>
+                      <option>Kotak Mahindra Bank</option>
+                      <option>IDFC FIRST Bank</option>
+                      <option>Canara Bank</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ---- Wallet pane ---- -->
+              <div class="pane" id="pane-wallet">
+                <div class="app-grid">
+                  <button class="app-grid__item" onclick="goTo('processing'); runProcessing('success')">
+                    <div class="app-grid__icon" style="background:#00baf2">Pm</div>
+                    <div class="app-grid__label">Paytm</div>
+                  </button>
+                  <button class="app-grid__item" onclick="goTo('processing'); runProcessing('success')">
+                    <div class="app-grid__icon" style="background:#ff9900">Az</div>
+                    <div class="app-grid__label">Amazon Pay</div>
+                  </button>
+                  <button class="app-grid__item" onclick="goTo('processing'); runProcessing('success')">
+                    <div class="app-grid__icon" style="background:#3f51b5">Mo</div>
+                    <div class="app-grid__label">Mobikwik</div>
+                  </button>
+                  <button class="app-grid__item" onclick="goTo('processing'); runProcessing('success')">
+                    <div class="app-grid__icon" style="background:#f5bc3b; color:#1f1502">Fc</div>
+                    <div class="app-grid__label">Freecharge</div>
+                  </button>
+                </div>
+              </div>
+
+              <div class="info-banner">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 22C12 22 20 18 20 12V5L12 2L4 5V12C4 18 12 22 12 22Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+                <span>Your payment is processed securely by <b>Cashfree Payments</b>, an RBI-authorised PA. HungerTap never stores your card, bank or wallet details.</span>
+              </div>
+            </div>
+
+            <div class="footer-cta">
+              <button class="btn btn-primary" id="payBtn" onclick="handlePay()">
+                <span class="spinner"></span>
+                <span class="btn-label">Pay ₹248.00</span>
+              </button>
+              <div class="trust-strip">
+                <span class="cashfree-badge"><span class="cf-mark"></span>cashfree</span>
+              </div>
+            </div>
+          </section>
+
+          <!-- ===================== 2. PROCESSING ===================== -->
+          <section class="screen" id="screen-processing">
+            <div class="statusbar"><span>9:41</span><span>●●●● ⟠ 100%</span></div>
+            <div class="processing-wrap">
+              <div class="processing-ring">
+                <svg class="lock" width="30" height="30" viewBox="0 0 24 24" fill="none"><rect x="5" y="11" width="14" height="9" rx="2" stroke="currentColor" stroke-width="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4" stroke="currentColor" stroke-width="2"/></svg>
+              </div>
+              <h3 id="processingTitle">Processing your payment…</h3>
+              <p>Please wait while <span class="cashfree-badge"><span class="cf-mark"></span>cashfree</span> securely confirms this transaction with your bank.</p>
+              <div class="processing-warn">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+                Do not press back or refresh this page
+              </div>
+            </div>
+          </section>
+
+          <!-- ===================== 3. SUCCESS ===================== -->
+          <section class="screen" id="screen-success">
+            <div class="statusbar"><span>9:41</span><span>●●●● ⟠ 100%</span></div>
+            <div class="result-wrap">
+              <div class="result-icon success">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </div>
+              <h2>Payment successful</h2>
+              <p class="desc">Your order has been placed and sent to the kitchen. Show your order token at the counter.</p>
+
+              <div class="receipt-card">
+                <div class="receipt-card__row"><span>Order token</span><span>#HT-8421</span></div>
+                <div class="receipt-card__row"><span>Paid via</span><span>UPI · GPay</span></div>
+                <div class="receipt-card__row"><span>Transaction ID</span><span>CF2609281147329</span></div>
+                <div class="receipt-card__row dashed"><span>Amount paid</span><span>₹248.00</span></div>
+              </div>
+
+              <div class="result-actions">
+                <button class="btn btn-primary" onclick="goTo('checkout')">Track my order</button>
+              </div>
+            </div>
+          </section>
+
+          <!-- ===================== 4. FAILED ===================== -->
+          <section class="screen" id="screen-failed">
+            <div class="statusbar"><span>9:41</span><span>●●●● ⟠ 100%</span></div>
+            <div class="result-wrap">
+              <div class="result-icon failed">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </div>
+              <h2>Payment failed</h2>
+              <p class="desc">If any amount was deducted, it will be automatically refunded to your original payment method within 5–7 business days.</p>
+
+              <div class="result-actions">
+                <button class="btn btn-primary" onclick="goTo('checkout')">Try again</button>
+              </div>
+            </div>
+          </section>
+
+        </div>
+      </div>
+
+      <div class="stage__caption">
+        Prototype for internal review — simulates the Cashfree PG Dropin experience embedded inside the HungerTap ordering app.
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="script.js?v=2"></script>
+</body>
+</html>

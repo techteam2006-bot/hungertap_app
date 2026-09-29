@@ -32,10 +32,14 @@ import {
 } from '../lib/settingsCache';
 import { useTheme } from '../lib/ThemeContext';
 import { supabase } from '../lib/supabase';
-import { registerForPushNotificationsAsync } from '../lib/services/notifications';
+import {
+  registerForPushNotificationsAsync,
+  updatePushTokenStatusInSupabase,
+} from '../lib/services/notifications';
 import NotificationService from '../lib/NotificationService';
 import { GlassCard } from '../components/ModernComponents';
 import { appTypography } from '../lib/darkThemeConfig';
+import { isNetworkError, isBackendReachable, NETWORK_ERROR_TITLE, NETWORK_ERROR_MESSAGE } from '../lib/network';
 
 const fetchUserVegModeEnabled = async () => null;
 const updateUserVegModeEnabled = async () => ({ ok: true, error: null });
@@ -122,6 +126,7 @@ const ProfileScreen = ({ navigation }) => {
   const [vegModeEnabled, setVegModeEnabled] = React.useState(false);
   const [deleteModalVisible, setDeleteModalVisible] = React.useState(false);
   const [signOutModalVisible, setSignOutModalVisible] = React.useState(false);
+  const [signingOut, setSigningOut] = React.useState(false);
   const [deletePassword, setDeletePassword] = React.useState('');
   const [deletePasswordVisible, setDeletePasswordVisible] = React.useState(false);
   const [deleteBusy, setDeleteBusy] = React.useState(false);
@@ -262,13 +267,15 @@ const ProfileScreen = ({ navigation }) => {
         await NotificationService.initialize();
         return;
       } else if (effectiveUserId) {
-        const { error } = await supabase
-          .from('user_tokens')
-          .update({ is_enabled: false })
-          .eq('user_id', effectiveUserId);
-        if (error) {
+        // Turn off only THIS phone's row (matched by its fcm_token); other phones keep working.
+        const { ok } = await updatePushTokenStatusInSupabase(effectiveUserId, false);
+        if (!ok) {
           setNotificationsEnabled(previous);
-          Alert.alert('Notifications', 'Could not save your preference. Please try again.');
+          if (!(await isBackendReachable())) {
+            Alert.alert(NETWORK_ERROR_TITLE, NETWORK_ERROR_MESSAGE);
+          } else {
+            Alert.alert('Notifications', 'Could not save your preference. Please try again.');
+          }
           return;
         }
         await NotificationService.clearAllNotifications();
@@ -282,7 +289,8 @@ const ProfileScreen = ({ navigation }) => {
     } catch (e) {
       setNotificationsEnabled(previous);
       console.error('Error toggling notifications:', e);
-      Alert.alert('Notifications', 'Something went wrong. Please try again.');
+      if (isNetworkError(e)) Alert.alert(NETWORK_ERROR_TITLE, NETWORK_ERROR_MESSAGE);
+      else Alert.alert('Notifications', 'Something went wrong. Please try again.');
     } finally {
       setNotifToggleBusy(false);
     }
@@ -300,7 +308,34 @@ const ProfileScreen = ({ navigation }) => {
   };
 
   const handleSignOut = () => {
+    if (signingOut) return;
     setSignOutModalVisible(true);
+  };
+
+  /**
+   * Sign-out needs the server so this phone stops getting order notifications
+   * for the account. On a weak/no connection, say so clearly instead of
+   * silently hanging, and offer a device-only sign-out.
+   */
+  const performSignOut = async ({ localOnly = false } = {}) => {
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      const res = await signOut({ requireNetwork: !localOnly, localOnly });
+      if (res?.offline) {
+        Alert.alert(
+          NETWORK_ERROR_TITLE,
+          "We couldn't reach HungerTap. Connect to the internet and try again, or sign out on this phone only (you may keep getting order notifications until you sign in and out again online).",
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Sign out anyway', style: 'destructive', onPress: () => performSignOut({ localOnly: true }) },
+            { text: 'Try again', onPress: () => performSignOut() },
+          ]
+        );
+      }
+    } finally {
+      setSigningOut(false);
+    }
   };
 
   const openDeleteModal = () => {
@@ -604,7 +639,8 @@ const ProfileScreen = ({ navigation }) => {
           <TouchableOpacity
             onPress={handleSignOut}
             activeOpacity={0.88}
-            style={styles.signOutTouchable}
+            disabled={signingOut}
+            style={[styles.signOutTouchable, signingOut && { opacity: 0.7 }]}
           >
             <LinearGradient
               colors={['#FF5C5C', '#DC2626', '#B91C1C']}
@@ -612,8 +648,12 @@ const ProfileScreen = ({ navigation }) => {
               end={{ x: 1, y: 1 }}
               style={styles.signOutGradient}
             >
-              <AppIcon name="log-out-outline" size={22} color="#FFFFFF" style={styles.signOutIcon} />
-              <Text style={styles.signOutLabel}>Sign out</Text>
+              {signingOut ? (
+                <ActivityIndicator size="small" color="#FFFFFF" style={styles.signOutIcon} />
+              ) : (
+                <AppIcon name="log-out-outline" size={22} color="#FFFFFF" style={styles.signOutIcon} />
+              )}
+              <Text style={styles.signOutLabel}>{signingOut ? 'Signing out…' : 'Sign out'}</Text>
             </LinearGradient>
           </TouchableOpacity>
         </View>
@@ -630,7 +670,7 @@ const ProfileScreen = ({ navigation }) => {
         onCancel={() => setSignOutModalVisible(false)}
         onConfirm={() => {
           setSignOutModalVisible(false);
-          signOut();
+          performSignOut();
         }}
       />
 
