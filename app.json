@@ -26,7 +26,7 @@
       "assets/fonts/*.ttf"
     ],
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "com.hungertap.app",
       "buildNumber": "2",
       "googleServicesFile": "./GoogleService-Info.plist",
