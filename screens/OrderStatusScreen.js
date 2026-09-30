@@ -111,6 +111,7 @@ const OrderStatusScreen = ({ navigation, route }) => {
   const { user } = useAuth();
   const { addToCart, clearCart, getTotalItems } = useCart();
   const [currentOrder, setCurrentOrder] = useState(order);
+  const resolvedOrderId = orderIdParam || idParam || order?.id || currentOrder?.id;
   const [offerDiscountAmount, setOfferDiscountAmount] = useState(0);
   const [orderItems, setOrderItems] = useState([]);
   const [loading, setLoading] = useState(false); // Start with false to avoid loading screen
@@ -127,8 +128,8 @@ const OrderStatusScreen = ({ navigation, route }) => {
   const [replaceCartBusy, setReplaceCartBusy] = useState(false);
 
   useEffect(() => {
-    const orderId = currentOrder?.id;
-    if (!orderId) {
+    const targetOrderId = resolvedOrderId || currentOrder?.id;
+    if (!targetOrderId) {
       setOfferDiscountAmount(0);
       return undefined;
     }
@@ -136,7 +137,7 @@ const OrderStatusScreen = ({ navigation, route }) => {
     supabase
       .from('offer_redemptions')
       .select('discount_amount, status')
-      .eq('order_id', orderId)
+      .eq('order_id', targetOrderId)
       .maybeSingle()
       .then(({ data }) => {
         if (cancelled) return;
@@ -150,7 +151,7 @@ const OrderStatusScreen = ({ navigation, route }) => {
     return () => {
       cancelled = true;
     };
-  }, [currentOrder?.id]);
+  }, [resolvedOrderId, currentOrder?.id]);
   const pendingReorderItemsRef = useRef(null);
   const [initialOrderHydrated, setInitialOrderHydrated] = useState(() => Boolean(order));
   /** Client-side step timestamps recorded as tracking advances. */
@@ -192,8 +193,7 @@ const OrderStatusScreen = ({ navigation, route }) => {
     }
   }, [order, parseOrderSummary]);
 
-  // Resolve a single source of truth for the order id regardless of navigation path
-  const resolvedOrderId = orderIdParam || idParam || order?.id;
+  // Single source of truth for the order id regardless of navigation path
   console.log('Resolved order ID:', resolvedOrderId, 'User ID:', user?.id);
 
   // Load + update frontend timeline timestamps as status advances
@@ -369,7 +369,11 @@ const OrderStatusScreen = ({ navigation, route }) => {
             ? String(data.item_name).trim()
             : null;
         let item_name = snapshotName || itemSummaryFromRows || null;
-        let total_amount = resolveOrderHeaderTotalFromRows(data, orderItemsRows);
+        const rawBackendTotal = data?.total_amount != null && data?.total_amount !== '' ? Number(data.total_amount) : NaN;
+        let total_amount =
+          Number.isFinite(rawBackendTotal) && rawBackendTotal >= 0
+            ? Number(rawBackendTotal.toFixed(2))
+            : resolveOrderHeaderTotalFromRows(data, orderItemsRows);
 
         // Live delivered still uses order_items until canteen close; history rows
         // already carry item_name / totals from archived_* / failed_*.
@@ -404,6 +408,22 @@ const OrderStatusScreen = ({ navigation, route }) => {
         console.log('Fetched order data:', data);
         console.log('Normalized order:', normalized);
         setNotFound(false);
+
+        if (resolvedOrderId) {
+          try {
+            const { data: redemption } = await supabase
+              .from('offer_redemptions')
+              .select('discount_amount, status')
+              .eq('order_id', resolvedOrderId)
+              .maybeSingle();
+            if (redemption && redemption.status !== 'released') {
+              const disc = Number(redemption.discount_amount);
+              if (Number.isFinite(disc) && disc > 0) {
+                setOfferDiscountAmount(disc);
+              }
+            }
+          } catch (_) {}
+        }
       } else if (!error) {
         // True miss in DB — keep route-hydrated order if navigation passed one
         if (!order) setNotFound(true);
@@ -670,9 +690,7 @@ const OrderStatusScreen = ({ navigation, route }) => {
     if (
       persistedTotalForLock !== null &&
       Number.isFinite(persistedTotalForLock) &&
-      persistedTotalForLock > 0 &&
-      (deliveredTotalLockRef.current == null ||
-        persistedTotalForLock > deliveredTotalLockRef.current)
+      persistedTotalForLock >= 0
     ) {
       deliveredTotalLockRef.current = persistedTotalForLock;
     }
@@ -1072,14 +1090,20 @@ const OrderStatusScreen = ({ navigation, route }) => {
     if (
       orderIsDelivered &&
       deliveredTotalLockRef.current != null &&
-      deliveredTotalLockRef.current > 0
+      deliveredTotalLockRef.current >= 0
     ) {
       return deliveredTotalLockRef.current;
     }
-    if (persistedTotal !== null && Number.isFinite(persistedTotal) && persistedTotal > 0) {
+    if (
+      persistedTotal !== null &&
+      Number.isFinite(persistedTotal) &&
+      (persistedTotal > 0 || (persistedTotal === 0 && offerDiscountAmount > 0))
+    ) {
       return persistedTotal;
     }
-    return computedTotal;
+    const discount = Number.isFinite(Number(offerDiscountAmount)) ? Number(offerDiscountAmount) : 0;
+    const takeaway = Number.isFinite(Number(takeawayChargeDisplay)) ? Number(takeawayChargeDisplay) : 0;
+    return Math.max(0, computedTotal - discount + takeaway);
   })();
 
   const pricedLinesSum = orderItems.reduce((sum, item) => {
@@ -1367,7 +1391,7 @@ const OrderStatusScreen = ({ navigation, route }) => {
                       <Text style={[styles.takeawayChargeLabel, { color: colors.textSecondary }]}>
                         Discount
                       </Text>
-                      <Text style={[styles.takeawayChargeValue, { color: colors.text }]}>
+                      <Text style={[styles.takeawayChargeValue, { color: colors.accentGreen || '#16a34a' }]}>
                         −₹{formatCurrencyValue(offerDiscountAmount)}
                       </Text>
                     </View>

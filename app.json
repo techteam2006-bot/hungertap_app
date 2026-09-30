@@ -28,9 +28,11 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.hungertap.app",
+      "buildNumber": "2",
       "googleServicesFile": "./GoogleService-Info.plist",
       "icon": "./assets/splash_icon.png",
       "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Used to display and cache menu and canteen images within the app.",
         "UIBackgroundModes": [
           "fetch",
           "remote-notification"

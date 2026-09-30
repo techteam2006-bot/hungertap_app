@@ -65,6 +65,8 @@ const OrdersScreen = ({ navigation }) => {
   const [reorderingOrderId, setReorderingOrderId] = useState(null);
   const [replaceCartModalVisible, setReplaceCartModalVisible] = useState(false);
   const [replaceCartBusy, setReplaceCartBusy] = useState(false);
+  /** Map of order_id → discount_amount for orders that used a coupon */
+  const [discountMap, setDiscountMap] = useState({});
   const pendingReorderRef = useRef(null);
   const searchInputRef = useRef(null);
   const isFetchingRef = useRef(false);
@@ -102,7 +104,11 @@ const OrdersScreen = ({ navigation }) => {
           ? String(order.item_name).trim()
           : null;
 
-      const total_amount = resolveOrderHeaderTotalFromRows(order, rows);
+      const rawBackendTotal = order?.total_amount != null && order?.total_amount !== '' ? Number(order.total_amount) : NaN;
+      const total_amount =
+        Number.isFinite(rawBackendTotal) && rawBackendTotal >= 0
+          ? Number(rawBackendTotal.toFixed(2))
+          : resolveOrderHeaderTotalFromRows(order, rows);
       const item_name = persistedItemName || itemSummaryFromRows || null;
 
       return {
@@ -149,8 +155,31 @@ const OrdersScreen = ({ navigation }) => {
         }
       } else {
         console.log('✅ Orders fetched successfully:', ordersData?.length || 0);
-        setOrders(mapOrdersPayload(ordersData));
+        const mapped = mapOrdersPayload(ordersData);
+        setOrders(mapped);
         setHasMoreOrders(Boolean(hasMore));
+
+        // Batch-fetch discount info for all visible orders in one query
+        const orderIds = (ordersData || []).map((o) => o?.id).filter(Boolean);
+        if (orderIds.length > 0) {
+          supabase
+            .from('offer_redemptions')
+            .select('order_id, discount_amount, status')
+            .in('order_id', orderIds)
+            .neq('status', 'released')
+            .then(({ data: redemptions }) => {
+              if (!Array.isArray(redemptions)) return;
+              const map = {};
+              for (const r of redemptions) {
+                const disc = Number(r?.discount_amount);
+                if (r?.order_id && Number.isFinite(disc) && disc > 0) {
+                  map[r.order_id] = disc;
+                }
+              }
+              setDiscountMap((prev) => ({ ...prev, ...map }));
+            })
+            .catch(() => {});
+        }
       }
     } catch (error) {
       console.error('❌ Error fetching orders:', error);
@@ -403,6 +432,8 @@ const OrdersScreen = ({ navigation }) => {
       isDeliveredLike(order.status) || order.status === 'pickup_failed';
     const canReorder = isReorderEligibleStatus(order.status);
     const canteenName = order?.canteens?.name || 'HungerTap, Hyderabad';
+    const couponDiscount = discountMap[order.id];
+    const hasCoupon = Number.isFinite(couponDiscount) && couponDiscount > 0;
 
     const handleViewOrder = () => {
       navigation.navigate('OrderStatus', { 
@@ -471,12 +502,22 @@ const OrdersScreen = ({ navigation }) => {
           <Text style={[styles.orderTimeText, { color: colors.textSecondary }]}>
             {formatDate(order.created_at)}
           </Text>
-          <Text style={[styles.billTotalText, { color: colors.textSecondary }]}>
-            Bill Total: ₹
-            {Number.isFinite(Number(order.total_amount))
-              ? Number(order.total_amount).toFixed(2)
-              : '0.00'}
-          </Text>
+          <View style={{ alignItems: 'flex-end' }}>
+            {hasCoupon && (
+              <View style={[styles.couponBadge, { backgroundColor: isDarkMode ? 'rgba(34,197,94,0.15)' : '#f0fdf4', borderColor: isDarkMode ? 'rgba(34,197,94,0.35)' : '#bbf7d0' }]}>
+                <AppIcon name="pricetag-outline" size={11} color="#16a34a" />
+                <Text style={[styles.couponBadgeText, { color: '#16a34a' }]}>
+                  −₹{couponDiscount.toFixed(2)} off
+                </Text>
+              </View>
+            )}
+            <Text style={[styles.billTotalText, { color: colors.textSecondary }]}>
+              Bill Total: ₹
+              {Number.isFinite(Number(order.total_amount))
+                ? Number(order.total_amount).toFixed(2)
+                : '0.00'}
+            </Text>
+          </View>
         </View>
         
         <View style={styles.actionButtonContainer}>
@@ -1039,6 +1080,22 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#666',
     fontFamily: appTypography.medium,
+    textAlign: 'right',
+  },
+  couponBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    marginBottom: 3,
+    alignSelf: 'flex-end',
+  },
+  couponBadgeText: {
+    fontSize: 11,
+    fontFamily: appTypography.semiBold || appTypography.bold,
   },
   actionButtonContainer: {
     paddingHorizontal: 16,

@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS public.offer_redemptions (
   CONSTRAINT offer_redemptions_order_uidx UNIQUE (order_id)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS offer_redemptions_redeemed_user_uidx
+CREATE INDEX IF NOT EXISTS offer_redemptions_redeemed_user_idx
   ON public.offer_redemptions (offer_id, user_id)
   WHERE status = 'redeemed';
 
@@ -385,14 +385,7 @@ BEGIN
      AND NEW.status IN ('preparing', 'partially_ready', 'ready') THEN
     UPDATE public.offer_redemptions r
     SET status = 'redeemed', redeemed_at = coalesce(r.redeemed_at, now()), released_at = NULL
-    WHERE r.order_id = NEW.id AND r.status IN ('reserved', 'released')
-      AND NOT EXISTS (
-        SELECT 1 FROM public.offer_redemptions other
-        WHERE other.offer_id = r.offer_id
-          AND other.user_id = r.user_id
-          AND other.status = 'redeemed'
-          AND other.order_id <> NEW.id
-      );
+    WHERE r.order_id = NEW.id AND r.status IN ('reserved', 'released');
   ELSIF OLD.status = 'pending_payment' AND NEW.status = 'payment_failed' THEN
     UPDATE public.offer_redemptions
     SET status = 'released', released_at = now()

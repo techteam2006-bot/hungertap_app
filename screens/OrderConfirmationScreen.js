@@ -150,6 +150,11 @@ const OrderConfirmationScreen = ({ navigation, route }) => {
       navigation.navigate('OrderStatus', {
         orderId: resolvedOrderId,
         fromOrderConfirmation: true,
+        order: {
+          id: resolvedOrderId,
+          order_token: displayToken !== '—' ? displayToken : undefined,
+          total_amount: totalAmount != null ? Number(totalAmount) : undefined,
+        },
       });
     } else {
       navigation.navigate('Orders');

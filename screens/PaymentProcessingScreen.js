@@ -86,6 +86,7 @@ const CHECKOUT_LAUNCH_GRACE_MS = 35000;
 const MODE = {
   CASHFREE_SDK: 'cashfree-sdk',
   EASEBUZZ_SDK: 'easebuzz-sdk',
+  EASEBUZZ_WEBVIEW: 'easebuzz-webview',
   RAZORPAY_SDK: 'razorpay-sdk',
   RAZORPAY_WEBVIEW: 'razorpay-webview',
   UNAVAILABLE: 'unavailable',
@@ -136,6 +137,14 @@ function resolveInitialCheckoutMode({
 
   if (!activePaymentSessionId) return MODE.UNAVAILABLE;
   if (isEasebuzzNativeSdkAvailable()) return MODE.EASEBUZZ_SDK;
+  const ebUrl = activePaymentUrl || (
+    activePaymentSessionId
+      ? (String(environment || '').toUpperCase() === 'PRODUCTION'
+          ? `https://pay.easebuzz.in/pay/${activePaymentSessionId}`
+          : `https://testpay.easebuzz.in/pay/${activePaymentSessionId}`)
+      : ''
+  );
+  if (isAllowedCheckoutUrl(ebUrl)) return MODE.EASEBUZZ_WEBVIEW;
   return MODE.SDK_MISSING;
 }
 
@@ -262,6 +271,7 @@ function isExternalPaymentAppUrl(url) {
 
 function isWebViewCheckoutMode(mode) {
   return (
+    mode === MODE.EASEBUZZ_WEBVIEW ||
     mode === MODE.RAZORPAY_WEBVIEW
   );
 }
@@ -275,8 +285,11 @@ function useGatewayLaunchFallback({
   isCashfree,
   isRazorpay,
   activePaymentUrl,
+  activePaymentSessionId,
+  environment,
   sdkUiPresentedRef,
   handleCashfreeLaunchFailure,
+  switchToEasebuzzWebViewFallback,
   handleEasebuzzLaunchFailure,
   switchToRazorpayWebViewFallback,
   onSdkLaunchTimeout,
@@ -294,6 +307,17 @@ function useGatewayLaunchFallback({
         switchToRazorpayWebViewFallback?.();
         return;
       }
+      const ebUrl = activePaymentUrl || (
+        activePaymentSessionId
+          ? (String(environment || '').toUpperCase() === 'PRODUCTION'
+              ? `https://pay.easebuzz.in/pay/${activePaymentSessionId}`
+              : `https://testpay.easebuzz.in/pay/${activePaymentSessionId}`)
+          : ''
+      );
+      if (isAllowedCheckoutUrl(ebUrl)) {
+        switchToEasebuzzWebViewFallback?.();
+        return;
+      }
       handleEasebuzzLaunchFailure?.();
     }, SDK_FALLBACK_MS);
 
@@ -303,8 +327,11 @@ function useGatewayLaunchFallback({
     isCashfree,
     isRazorpay,
     activePaymentUrl,
+    activePaymentSessionId,
+    environment,
     sdkUiPresentedRef,
     handleCashfreeLaunchFailure,
+    switchToEasebuzzWebViewFallback,
     handleEasebuzzLaunchFailure,
     switchToRazorpayWebViewFallback,
     onSdkLaunchTimeout,
@@ -441,7 +468,18 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
   );
 
   const webViewSource = useMemo(() => {
-    // Only Razorpay still has a WebView checkout; Cashfree/Easebuzz are SDK-only.
+    if (mode === MODE.EASEBUZZ_WEBVIEW) {
+      const url = activePaymentUrl || (
+        activePaymentSessionId
+          ? (String(environment || '').toUpperCase() === 'PRODUCTION'
+              ? `https://pay.easebuzz.in/pay/${activePaymentSessionId}`
+              : `https://testpay.easebuzz.in/pay/${activePaymentSessionId}`)
+          : ''
+      );
+      if (isAllowedCheckoutUrl(url)) return { uri: url };
+      return null;
+    }
+    // Razorpay WebView checkout fallback
     if (mode === MODE.RAZORPAY_WEBVIEW) {
       const url = String(activePaymentUrl || '').trim();
       if (isAllowedCheckoutUrl(url)) return { uri: url };
@@ -463,6 +501,8 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
   }, [
     mode,
     activePaymentUrl,
+    activePaymentSessionId,
+    environment,
     razorpayKeyId,
     razorpayOrderId,
     razorpayAmountPaise,
@@ -618,6 +658,20 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
   const handleCashfreeLaunchFailure = useCallback(() => failSdkLaunch('Cashfree'), [failSdkLaunch]);
   const handleEasebuzzLaunchFailure = useCallback(() => failSdkLaunch('Easebuzz'), [failSdkLaunch]);
 
+  const switchToEasebuzzWebViewFallback = useCallback(() => {
+    if (finalizedRef.current || sdkUiPresentedRef.current) return;
+    sdkStartedRef.current = false;
+    bumpWebViewKey();
+    const ebUrl = activePaymentUrl || (
+      activePaymentSessionId
+        ? (String(environment || '').toUpperCase() === 'PRODUCTION'
+            ? `https://pay.easebuzz.in/pay/${activePaymentSessionId}`
+            : `https://testpay.easebuzz.in/pay/${activePaymentSessionId}`)
+        : ''
+    );
+    setMode(isAllowedCheckoutUrl(ebUrl) ? MODE.EASEBUZZ_WEBVIEW : MODE.UNAVAILABLE);
+  }, [activePaymentUrl, activePaymentSessionId, environment, bumpWebViewKey]);
+
   const switchToRazorpayWebViewFallback = useCallback(() => {
     if (finalizedRef.current || webViewFallbackRequestedRef.current) return;
     if (sdkUiPresentedRef.current) return;
@@ -649,8 +703,11 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
     isCashfree,
     isRazorpay,
     activePaymentUrl,
+    activePaymentSessionId,
+    environment,
     sdkUiPresentedRef,
     handleCashfreeLaunchFailure,
+    switchToEasebuzzWebViewFallback,
     handleEasebuzzLaunchFailure,
     switchToRazorpayWebViewFallback,
     onSdkLaunchTimeout: () => applyOutcomeRef.current?.('failure'),
@@ -917,6 +974,18 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
       if (res.launchFailed) {
         sdkStartedRef.current = false;
         sdkUiPresentedRef.current = false;
+        const ebUrl = activePaymentUrl || (
+          activePaymentSessionId
+            ? (String(environment || '').toUpperCase() === 'PRODUCTION'
+                ? `https://pay.easebuzz.in/pay/${activePaymentSessionId}`
+                : `https://testpay.easebuzz.in/pay/${activePaymentSessionId}`)
+            : ''
+        );
+        if (isAllowedCheckoutUrl(ebUrl)) {
+          bumpWebViewKey();
+          setMode(MODE.EASEBUZZ_WEBVIEW);
+          return;
+        }
         handleEasebuzzLaunchFailure();
         return;
       }
@@ -936,7 +1005,14 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
     return () => {
       cancelled = true;
     };
-  }, [mode, activePaymentSessionId, environment, handleEasebuzzLaunchFailure]);
+  }, [
+    mode,
+    activePaymentSessionId,
+    activePaymentUrl,
+    environment,
+    bumpWebViewKey,
+    handleEasebuzzLaunchFailure,
+  ]);
 
   // --- Native SDK: Razorpay (WebView fallback when native blocked or unavailable) ---
   useEffect(() => {
@@ -1031,7 +1107,17 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
 
   useEffect(() => {
     if (typeof __DEV__ === 'undefined' || !__DEV__) return;
-    if (mode === MODE.SDK_MISSING) {
+    if (mode === MODE.EASEBUZZ_WEBVIEW) {
+      const ebUrl = activePaymentUrl || (
+        activePaymentSessionId
+          ? (String(environment || '').toUpperCase() === 'PRODUCTION'
+              ? `https://pay.easebuzz.in/pay/${activePaymentSessionId}`
+              : `https://testpay.easebuzz.in/pay/${activePaymentSessionId}`)
+          : ''
+      );
+      // eslint-disable-next-line no-console
+      console.log('📱 [Step 5/7] [PaymentProcessingScreen] Loading Easebuzz payment URL in WebView:', ebUrl);
+    } else if (mode === MODE.SDK_MISSING) {
       // eslint-disable-next-line no-console
       console.warn(
         '📱 [PaymentProcessingScreen] Payment SDK missing in this build:',
@@ -1052,7 +1138,7 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
         describeRazorpaySdkAvailability()
       );
     }
-  }, [mode, activePaymentUrl, environment, isRazorpay]);
+  }, [mode, activePaymentUrl, activePaymentSessionId, environment, isCashfree, isRazorpay]);
 
   useEffect(() => {
     const onHardwareBack = () => promptAbandonCheckout();
