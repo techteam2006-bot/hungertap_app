@@ -128,8 +128,12 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
         setCanteenError('');
       } else {
         setCanteenRow(null);
-        setCanteenName('');
-        setCanteenError('Could not load canteen. Check your internet and try again.');
+        setCanteenName('DEVDEE');
+        if (result.reason === 'not_found') {
+          setCanteenError('This canteen is currently unavailable for new registrations. Please try again later.');
+        } else {
+          setCanteenError('Could not load canteen. Check your internet and try again.');
+        }
       }
       setCanteenLoading(false);
     })();
@@ -240,6 +244,9 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
       return { ok: false, message: 'Could not verify your canteen. Check your internet and try again.' };
     }
     if (!canteenLookup.ok || !canteenLookup.row) {
+      if (canteenLookup.reason === 'not_found') {
+        return { ok: false, message: 'This canteen is currently unavailable for new registrations. Please try again later.' };
+      }
       return { ok: false, message: 'Could not load canteen. Check your internet and try again.' };
     }
     if (canteenLookup.row.is_open === false) {
@@ -599,7 +606,7 @@ export default function SignupForm({ navigation, onSwitchToLogin, style, scrollR
 
         <PasswordRuleList
           password={password}
-          mutedColor={tertiary}
+          mutedColor={colors.error || '#EF4444'}
           okColor={okGreen}
           dimmed={passwordLocked}
         />

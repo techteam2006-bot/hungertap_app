@@ -187,58 +187,58 @@ const ItemDetailScreen = ({ route, navigation }) => {
 
       {/* Fixed Footer */}
       <View style={[styles.footer, { backgroundColor: colors.elevatedSurface, paddingBottom: footerPadBottom }]}>
-        <View
-          style={[
-            styles.quantityContainer,
-            {
-              backgroundColor: colors.quantityStripBackground,
-              borderWidth: 1,
-              borderColor: colors.border,
-            },
-          ]}
-        >
-          <TouchableOpacity
+        {item.isAvailable ? (
+          <View
             style={[
-              styles.quantityButton,
-              { backgroundColor: colors.elevatedSurface },
-              (!item.isAvailable || cartQuantity === 0) && styles.quantityButtonDisabled
+              styles.quantityContainer,
+              {
+                backgroundColor: colors.quantityStripBackground,
+                borderWidth: 1,
+                borderColor: colors.border,
+              },
             ]}
-            onPress={handleDecreaseQuantity}
-            disabled={!item.isAvailable || cartQuantity === 0}
           >
-            {cartQuantity === 1 ? (
+            <TouchableOpacity
+              style={[
+                styles.quantityButton,
+                { backgroundColor: colors.elevatedSurface },
+                cartQuantity === 0 && styles.quantityButtonDisabled
+              ]}
+              onPress={handleDecreaseQuantity}
+              disabled={cartQuantity === 0}
+            >
+              {cartQuantity === 1 ? (
+                <AppIcon 
+                  name="trash-outline" 
+                  size={18} 
+                  color={colors.text} 
+                />
+              ) : (
+                <View style={[
+                  styles.minusLine,
+                  { backgroundColor: colors.text },
+                  cartQuantity === 0 && styles.minusLineDisabled
+                ]} />
+              )}
+            </TouchableOpacity>
+            
+            <Text style={[styles.quantityText, { color: colors.text }]}>{displayQuantity}</Text>
+            
+            <TouchableOpacity
+              style={[
+                styles.quantityButton,
+                { backgroundColor: colors.elevatedSurface },
+              ]}
+              onPress={handleIncreaseQuantity}
+            >
               <AppIcon 
-                name="trash-outline" 
+                name="add" 
                 size={18} 
-                color={!item.isAvailable ? '#999' : colors.text} 
+                color={colors.text} 
               />
-            ) : (
-              <View style={[
-                styles.minusLine,
-                { backgroundColor: colors.text },
-                (!item.isAvailable || cartQuantity === 0) && styles.minusLineDisabled
-              ]} />
-            )}
-          </TouchableOpacity>
-          
-          <Text style={[styles.quantityText, { color: colors.text }]}>{displayQuantity}</Text>
-          
-          <TouchableOpacity
-            style={[
-              styles.quantityButton,
-              { backgroundColor: colors.elevatedSurface },
-              !item.isAvailable && styles.quantityButtonDisabled
-            ]}
-            onPress={handleIncreaseQuantity}
-            disabled={!item.isAvailable}
-          >
-            <AppIcon 
-              name="add" 
-              size={18} 
-              color={!item.isAvailable ? '#999' : colors.text} 
-            />
-          </TouchableOpacity>
-        </View>
+            </TouchableOpacity>
+          </View>
+        ) : null}
 
         <TouchableOpacity
           style={[

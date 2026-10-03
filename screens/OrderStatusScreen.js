@@ -49,7 +49,7 @@ import {
   isReorderEligibleStatus,
   canShowPickupQr,
 } from '../lib/orderStatus';
-import { takeawayChargeForLines } from '../lib/cartRules';
+import { takeawayChargeForLines, TAKEAWAY_FEE_PER_ITEM } from '../lib/cartRules';
 import useAppActive from '../lib/useAppActive';
 import * as Notifications from 'expo-notifications';
 import { isFinalOrderStatus, isOrderUpdateNotification, ORDER_STATUS_POLL_MS } from '../lib/orderPolling';
@@ -1124,7 +1124,6 @@ const OrderStatusScreen = ({ navigation, route }) => {
   const isTakeawayOrder =
     currentOrder?.is_takeaway === true || currentOrder?.order_type === true;
 
-  /** Prefer DB columns; else match cart rule (₹10 × total item qty) when takeaway is set. */
   let takeawayChargeDisplay = null;
   if (isTakeawayOrder) {
     const explicit = parseCurrencyValue(
@@ -1132,17 +1131,29 @@ const OrderStatusScreen = ({ navigation, route }) => {
         currentOrder?.takeaway_fee ??
         currentOrder?.take_away_charge
     );
-    if (explicit !== null && Number.isFinite(explicit) && explicit >= 0) {
+    if (explicit !== null && Number.isFinite(explicit) && explicit > 0) {
       takeawayChargeDisplay = explicit;
     } else {
       const rows = pickLineRowsFromOrderRow(currentOrder);
       const targetLines = rows.length > 0 ? rows : (Array.isArray(orderItems) ? orderItems : []);
-      takeawayChargeDisplay = takeawayChargeForLines(targetLines, true);
+      const feePerItem =
+        parseCurrencyValue(currentOrder?.canteens?.takeaway_charge) ?? TAKEAWAY_FEE_PER_ITEM;
+      const computed = takeawayChargeForLines(targetLines, true, feePerItem);
+
+      const orderTotal = Number(currentOrder?.total_amount);
+      const discount = Number.isFinite(Number(offerDiscountAmount)) ? Number(offerDiscountAmount) : 0;
+      if (computed > 0) {
+        takeawayChargeDisplay = computed;
+      } else if (Number.isFinite(orderTotal) && pricedLinesSum > 0 && orderTotal > (pricedLinesSum - discount)) {
+        takeawayChargeDisplay = Number((orderTotal - (pricedLinesSum - discount)).toFixed(2));
+      } else {
+        takeawayChargeDisplay = computed > 0 ? computed : feePerItem;
+      }
     }
   }
 
   const takeawayChargesRow =
-    isTakeawayOrder && takeawayChargeDisplay !== null ? (
+    isTakeawayOrder && Number(takeawayChargeDisplay) > 0 ? (
       <View style={[styles.takeawayChargeRow, { borderTopColor: colors.divider }]}>
         <Text style={[styles.takeawayChargeLabel, { color: colors.textSecondary }]}>
           Takeaway charges
@@ -1206,7 +1217,20 @@ const OrderStatusScreen = ({ navigation, route }) => {
       >
         {/* Order Summary Card */}
         <View style={[styles.orderSummaryCard, { backgroundColor: colors.elevatedSurface }, cardOutline]}>
-          <Text style={[styles.orderNumber, { color: colors.text }]}>Order #{currentOrder?.order_token || currentOrder?.orderNumber || '2435'}</Text>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text style={[styles.orderNumber, { color: colors.text }]}>Order #{currentOrder?.order_token || currentOrder?.orderNumber || '2435'}</Text>
+            {isTakeawayOrder ? (
+              <View style={[styles.takeawayHeaderBadge, { backgroundColor: isDarkMode ? 'rgba(234,179,8,0.15)' : '#FEF9C3', borderColor: isDarkMode ? 'rgba(234,179,8,0.35)' : '#FDE047' }]}>
+                <AppIcon name="basket-outline" size={12} color={isDarkMode ? '#FACC15' : '#854D0E'} />
+                <Text style={[styles.takeawayHeaderBadgeText, { color: isDarkMode ? '#FACC15' : '#854D0E' }]}>Takeaway</Text>
+              </View>
+            ) : (
+              <View style={[styles.takeawayHeaderBadge, { backgroundColor: isDarkMode ? 'rgba(59,130,246,0.12)' : '#EFF6FF', borderColor: isDarkMode ? 'rgba(59,130,246,0.25)' : '#BFDBFE' }]}>
+                <AppIcon name="restaurant" size={12} color={isDarkMode ? '#60A5FA' : '#1D4ED8'} />
+                <Text style={[styles.takeawayHeaderBadgeText, { color: isDarkMode ? '#60A5FA' : '#1D4ED8' }]}>Dine-in</Text>
+              </View>
+            )}
+          </View>
           
           <View style={styles.locationRow}>
             <AppIcon name="location" size={12} color={colors.error} />
@@ -1993,6 +2017,19 @@ const styles = StyleSheet.create({
     color: '#00B330',
     flexShrink: 0,
     marginLeft: 8,
+  },
+  takeawayHeaderBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  takeawayHeaderBadgeText: {
+    fontSize: 12,
+    fontFamily: appTypography.semiBold || appTypography.medium,
   },
   takeawayChargeRow: {
     flexDirection: 'row',

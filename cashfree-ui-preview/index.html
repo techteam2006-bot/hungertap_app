@@ -106,17 +106,48 @@ button { cursor: pointer; }
 .section-title { font-size: 12.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-400); margin: 14px 0 10px; }
 /* s.methodTab* */
 .method-tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 16px; }
-.method-tab { display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 10px 4px; border: 1.5px solid var(--ink-100); border-radius: var(--radius-sm); background: var(--white); font-size: 13px; font-weight: 700; color: var(--ink-500); }
-.method-tab .mi { width: 28px; height: 28px; border-radius: 50%; background: var(--ink-100); display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; color: var(--ink-700); }
+.method-tab { display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 10px 4px; border: 1.5px solid var(--ink-100); border-radius: var(--radius-sm); background: var(--white); font-size: 13px; font-weight: 700; color: var(--ink-500); transition: all .15s ease; }
+.method-tab .mi { width: 28px; height: 28px; border-radius: 50%; background: var(--ink-100); display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; color: var(--ink-700); transition: all .15s ease; }
 .method-tab.active { border-color: var(--brand); background: var(--brand-50); color: var(--brand-deep); }
 .method-tab.active .mi { background: var(--brand); color: var(--on-brand); }
 .pane { display: none; }
 .pane.active { display: block; }
 /* s.grid / tile* */
 .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px 6px; margin-bottom: 14px; }
-.tile { display: flex; flex-direction: column; align-items: center; gap: 6px; border: none; background: transparent; }
-.tile .ti { width: 52px; height: 52px; border-radius: 14px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; font-size: 14px; box-shadow: 0 1px 2px rgba(15,23,42,.06); }
-.tile .tl { font-size: 12px; font-weight: 600; color: var(--ink-700); white-space: nowrap; }
+.tile { display: flex; flex-direction: column; align-items: center; gap: 6px; border: none; background: transparent; cursor: pointer; transition: transform .15s ease; }
+.tile:hover { transform: translateY(-1px); }
+.tile:active { transform: scale(0.96); }
+.tile .ti {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 700;
+  font-size: 14px;
+  box-shadow: 0 2px 6px rgba(15,23,42,.06), 0 1px 2px rgba(15,23,42,.04);
+  overflow: hidden;
+  position: relative;
+  background: #ffffff;
+  border: 1px solid rgba(15,23,42,.06);
+}
+.tile .ti svg { display: block; }
+.tile .tl { font-size: 12px; font-weight: 600; color: var(--ink-700); white-space: nowrap; margin-top: 1px; }
+
+/* UPI badge pill */
+.upi-badge-tag { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; color: #15803d; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 999px; padding: 2px 7px; }
+
+/* Accepted card mini badges */
+.card-accepted-pills { display: inline-flex; align-items: center; gap: 4px; }
+.c-pill { display: inline-flex; align-items: center; justify-content: center; height: 16px; border-radius: 3px; font-size: 9px; font-weight: 800; padding: 0 4px; line-height: 1; }
+.c-pill.visa { background: #0d2c6c; color: #ffffff; font-style: italic; letter-spacing: 0.5px; }
+.c-pill.mc { background: #1e293b; width: 22px; position: relative; }
+.c-pill.mc::before { content:''; width:9px; height:9px; border-radius:50%; background:#eb001b; display:inline-block; margin-right:-3px; }
+.c-pill.mc::after { content:''; width:9px; height:9px; border-radius:50%; background:#f79e1b; display:inline-block; }
+.c-pill.rupay { background: #f1f5f9; color: #0284c7; border: 1px solid #cbd5e1; }
+
 /* s.field / label / input / select */
 .field { margin-bottom: 14px; }
 .field label { display: block; font-size: 13px; font-weight: 700; color: var(--ink-700); margin-bottom: 6px; }
@@ -128,13 +159,16 @@ button { cursor: pointer; }
 .field-row { display: flex; gap: 10px; }
 .field-row .field { flex: 1; }
 .input-wrap { position: relative; display: flex; align-items: center; }
-.brand-tag { position: absolute; right: 12px; font-size: 11px; font-weight: 700; color: var(--ink-700); }
+.brand-tag { position: absolute; right: 10px; display: flex; align-items: center; }
 .select { display: flex; justify-content: space-between; align-items: center; text-align: left; }
 .select .ph { color: var(--ink-400); }
-.bank-list { margin-top: 6px; border: 1px solid var(--ink-200); border-radius: var(--radius-sm); overflow: hidden; display: none; }
+.bank-list { margin-top: 6px; border: 1px solid var(--ink-200); border-radius: var(--radius-sm); overflow: hidden; display: none; max-height: 220px; overflow-y: auto; }
 .bank-list.open { display: block; }
-.bank-row { display: block; width: 100%; text-align: left; padding: 12px 14px; border: none; border-bottom: 1px solid var(--ink-100); background: var(--white); font-size: 15px; color: var(--ink-800); }
-.bank-row.active { background: var(--brand-50); }
+.bank-row { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 10px 14px; border: none; border-bottom: 1px solid var(--ink-100); background: var(--white); font-size: 14.5px; color: var(--ink-800); cursor: pointer; transition: background .12s; }
+.bank-row:hover { background: var(--ink-50); }
+.bank-row.active { background: var(--brand-50); font-weight: 600; }
+.bank-avatar { width: 24px; height: 24px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 800; color: #ffffff; flex-shrink: 0; }
+.bank-name { flex: 1; }
 /* s.infoBanner */
 .info-banner { display: flex; gap: 10px; padding: 12px; border-radius: var(--radius-sm); background: var(--brand-50); border: 1px solid var(--brand-light); font-size: 12.5px; line-height: 1.45; color: var(--ink-700); margin-top: 6px; }
 /* s.btn / btnPrimary */
@@ -202,27 +236,111 @@ button { cursor: pointer; }
           <div class="order-card" id="orderCard">
             <div class="order-row"><span class="n">Veg Fried Rice × 1</span><span class="p">₹120.00</span></div>
             <div class="order-row"><span class="n">Paneer Roll × 2</span><span class="p">₹128.00</span></div>
+            <div class="order-row"><span class="n">Takeaway Charge(s)</span><span class="p">₹10.00</span></div>
+            <div class="order-row"><span class="n">Discount (WELCOME50)</span><span class="p" style="color:var(--success, #16a34a)">−₹10.00</span></div>
             <div class="divider"></div>
             <div class="order-row total"><span class="n">Amount payable</span><span class="p">₹248.00</span></div>
           </div>
 
           <div class="section-title">Choose payment method</div>
           <div class="method-tabs">
-            <button class="method-tab active" data-m="upi"><span class="mi">U</span>UPI</button>
-            <button class="method-tab" data-m="card"><span class="mi">💳</span>Card</button>
-            <button class="method-tab" data-m="netbanking"><span class="mi">🏦</span>Bank</button>
-            <button class="method-tab" data-m="wallet"><span class="mi">W</span>Wallet</button>
+            <button class="method-tab active" data-m="upi">
+              <span class="mi">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M7 17l5-5-5-5M13 17l5-5-5-5"/>
+                </svg>
+              </span>
+              UPI
+            </button>
+            <button class="method-tab" data-m="card">
+              <span class="mi">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="2" y="5" width="20" height="14" rx="3"/>
+                  <line x1="2" y1="10" x2="22" y2="10"/>
+                  <line x1="6" y1="15" x2="9" y2="15"/>
+                </svg>
+              </span>
+              Card
+            </button>
+            <button class="method-tab" data-m="netbanking">
+              <span class="mi">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M3 21h18M3 10h18M5 10v7M9 10v7M15 10v7M19 10v7M12 3l9 5H3l9-5z"/>
+                </svg>
+              </span>
+              Bank
+            </button>
+            <button class="method-tab" data-m="wallet">
+              <span class="mi">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M20 7H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/>
+                  <circle cx="16" cy="14" r="1.5" fill="currentColor"/>
+                  <path d="M4 7V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2"/>
+                </svg>
+              </span>
+              Wallet
+            </button>
           </div>
 
           <div class="pane active" id="pane-upi">
             <div class="grid">
-              <button class="tile" onclick="pay('success')"><div class="ti" style="background:#4285f4">G</div><div class="tl">GPay</div></button>
-              <button class="tile" onclick="pay('success')"><div class="ti" style="background:#5f259f">Pe</div><div class="tl">PhonePe</div></button>
-              <button class="tile" onclick="pay('failed')"><div class="ti" style="background:#00baf2">Pm</div><div class="tl">Paytm</div></button>
-              <button class="tile" onclick="pay('success')"><div class="ti" style="background:#e5720e">B</div><div class="tl">BHIM</div></button>
+              <!-- Google Pay -->
+              <button class="tile" onclick="pay('success')">
+                <div class="ti">
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+                    <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                    <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                    <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" fill="#FBBC05"/>
+                    <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" fill="#EA4335"/>
+                  </svg>
+                </div>
+                <div class="tl">GPay</div>
+              </button>
+
+              <!-- PhonePe -->
+              <button class="tile" onclick="pay('success')">
+                <div class="ti" style="background:#5f259f;border-color:#5f259f">
+                  <svg width="28" height="28" viewBox="0 0 36 36" fill="none">
+                    <path d="M10 13h16M22 13v15M10.5 13v5.5a4.5 4.5 0 0 0 4.5 4.5H22" stroke="#ffffff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M21.5 13l-4.5-6.5" stroke="#ffffff" stroke-width="3.2" stroke-linecap="round"/>
+                  </svg>
+                </div>
+                <div class="tl">PhonePe</div>
+              </button>
+
+              <!-- Paytm -->
+              <button class="tile" onclick="pay('failed')">
+                <div class="ti">
+                  <svg width="45" height="15" viewBox="0 3 108 36" fill="none">
+                    <path d="M2.5 5.5h10.2c5.5 0 9 3 9 7.8s-3.5 7.8-9 7.8H8.8V31H2.5V5.5zm6.3 10.6h3.4c2.5 0 4.2-1.2 4.2-3.1s-1.7-3.1-4.2-3.1H8.8v6.2z" fill="#002970"/>
+                    <path d="M23.5 15.6c0-4.6 3.6-7.8 8.6-7.8 4.8 0 8.3 3.1 8.3 7.6v15.6h-5.9v-3.2c-1.3 2.1-3.6 3.6-6.3 3.6-4.5 0-7.8-3.1-7.8-7.3 0-4.4 3.4-7.1 8.8-7.1h5.2v-.8c0-2-1.4-3.2-3.6-3.2-2 0-3.3 1-3.6 2.6l-3.7-.6zm11 5.3h-4.6c-2.4 0-3.9 1.2-3.9 2.8 0 1.6 1.4 2.8 3.5 2.8 2.6 0 5-1.7 5-4.2v-1.4z" fill="#002970"/>
+                    <path d="M42.2 11.2l5.4 14 5.3-14h6.5l-9.3 20.8c-1.8 4-4.5 6-8.2 6-1 0-2.2-.2-2.9-.6l.9-4.8c.5.2 1.1.4 1.7.4 1.7 0 2.9-.9 3.7-2.8l.6-1.4-7.8-17.6h4.6z" fill="#002970"/>
+                    <path d="M64 5.5v5.7h4.8v4.6H64V25c0 1.6.8 2.3 2.2 2.3.9 0 1.8-.2 2.5-.5l.6 4.3c-1.2.6-2.9.9-4.8.9-4.3 0-6.6-2.3-6.6-6.6V15.8h-3.4v-4.6h3.4V7.5L64 5.5z" fill="#00baf2"/>
+                    <path d="M72.2 11.2h5.8v3.2c1.4-2.1 3.7-3.6 6.5-3.6 3.1 0 5.4 1.6 6.3 4.2 1.6-2.6 4.3-4.2 7.3-4.2 4.4 0 7.4 2.9 7.4 8.5V31H99.6V19.8c0-2.6-1.3-3.8-3.1-3.8-2 0-3.7 1.4-4.3 3.6V31h-5.9V19.8c0-2.6-1.3-3.8-3.1-3.8-2 0-3.7 1.4-4.3 3.6V31h-6.7V11.2z" fill="#00baf2"/>
+                  </svg>
+                </div>
+                <div class="tl">Paytm</div>
+              </button>
+
+              <!-- BHIM -->
+              <button class="tile" onclick="pay('success')">
+                <div class="ti">
+                  <svg width="30" height="30" viewBox="0 0 128 128" fill="none">
+                    <polygon points="74,15 101,64 46,115" fill="#00A859"/>
+                    <polygon points="56,11 82,61 26,113" fill="#FF6D00"/>
+                  </svg>
+                </div>
+                <div class="tl">BHIM</div>
+              </button>
             </div>
             <div class="field">
-              <label for="vpa">Or enter your UPI ID</label>
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                <label for="vpa" style="margin-bottom:0">Or enter your UPI ID</label>
+                <span class="upi-badge-tag">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="M7 17l5-5-5-5M13 17l5-5-5-5" stroke="#15803d" stroke-width="3.2" stroke-linecap="round"/></svg>
+                  Verified UPI
+                </span>
+              </div>
               <input class="input" id="vpa" placeholder="yourname@okhdfcbank" />
               <div class="err" id="vpaErr"></div>
             </div>
@@ -230,8 +348,18 @@ button { cursor: pointer; }
 
           <div class="pane" id="pane-card">
             <div class="field">
-              <label for="cardNo">Card number</label>
-              <div class="input-wrap"><input class="input" id="cardNo" inputmode="numeric" placeholder="1234 5678 9012 3456" maxlength="19" style="padding-right:70px" /><span class="brand-tag" id="brandTag"></span></div>
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                <label for="cardNo" style="margin-bottom:0">Card number</label>
+                <div class="card-accepted-pills">
+                  <span class="c-pill visa">VISA</span>
+                  <span class="c-pill mc"></span>
+                  <span class="c-pill rupay">RuPay</span>
+                </div>
+              </div>
+              <div class="input-wrap">
+                <input class="input" id="cardNo" inputmode="numeric" placeholder="1234 5678 9012 3456" maxlength="19" style="padding-right:75px" />
+                <span class="brand-tag" id="brandTag"></span>
+              </div>
               <div class="err" id="numErr">Enter a valid card number</div>
             </div>
             <div class="field-row">
@@ -243,10 +371,54 @@ button { cursor: pointer; }
 
           <div class="pane" id="pane-netbanking">
             <div class="grid">
-              <button class="tile" onclick="pay('success')"><div class="ti" style="background:#004c8f">SBI</div><div class="tl">SBI</div></button>
-              <button class="tile" onclick="pay('success')"><div class="ti" style="background:#004b8d">HDFC</div><div class="tl">HDFC</div></button>
-              <button class="tile" onclick="pay('success')"><div class="ti" style="background:#f37021">ICICI</div><div class="tl">ICICI</div></button>
-              <button class="tile" onclick="pay('success')"><div class="ti" style="background:#97144d">Axis</div><div class="tl">Axis</div></button>
+              <!-- SBI -->
+              <button class="tile" onclick="pay('success')">
+                <div class="ti" style="background:#004c8f;border-color:#004c8f">
+                  <svg width="34" height="34" viewBox="0 0 40 40" fill="none">
+                    <circle cx="20" cy="20" r="16" fill="#008ecf"/>
+                    <circle cx="20" cy="18" r="4.6" fill="#ffffff"/>
+                    <rect x="18.5" y="18" width="3" height="17" fill="#ffffff"/>
+                  </svg>
+                </div>
+                <div class="tl">SBI</div>
+              </button>
+
+              <!-- HDFC -->
+              <button class="tile" onclick="pay('success')">
+                <div class="ti">
+                  <svg width="32" height="32" viewBox="0 0 36 36" fill="none">
+                    <rect x="12" y="12" width="12" height="12" fill="#004c8f"/>
+                    <path d="M4 4h10v5H9v5H4V4z" fill="#ed1c24"/>
+                    <path d="M32 4H22v5h5v5h5V4z" fill="#ed1c24"/>
+                    <path d="M4 32h10v-5H9v-5H4v10z" fill="#ed1c24"/>
+                    <path d="M32 32H22v-5h5v-5h5v10z" fill="#ed1c24"/>
+                  </svg>
+                </div>
+                <div class="tl">HDFC</div>
+              </button>
+
+              <!-- ICICI -->
+              <button class="tile" onclick="pay('success')">
+                <div class="ti" style="background:#a2192e;border-color:#a2192e">
+                  <svg width="42" height="26" viewBox="0 0 64 36" fill="none">
+                    <circle cx="14" cy="9" r="4" fill="#f58220"/>
+                    <path d="M10 16c0-1.5 1-2.6 2.5-2.8l3.5-.2c1.2 0 2.2.9 2.2 2.2v10.5c0 2.8-2.2 5.1-5 5.1s-5-2.3-5-5.1h3.2c0 1.1.8 1.9 1.8 1.9s1.8-.8 1.8-1.9V17.5c0-.4-.3-.7-.7-.7h-2.3c-.8 0-1.5-.4-1.7-1l-.3.2z" fill="#f58220"/>
+                    <text x="24" y="24" fill="#ffffff" font-family="'Afacad', system-ui, sans-serif" font-size="14" font-weight="800" letter-spacing="0.5">ICICI</text>
+                  </svg>
+                </div>
+                <div class="tl">ICICI</div>
+              </button>
+
+              <!-- Axis -->
+              <button class="tile" onclick="pay('success')">
+                <div class="ti" style="background:#861f41;border-color:#861f41">
+                  <svg width="32" height="32" viewBox="0 0 40 40" fill="none">
+                    <path d="M20 7L7 31h8l5-9.6L25 31h8L20 7z" fill="#ffffff"/>
+                    <path d="M20 18.5l-3 5.5h6L20 18.5z" fill="#861f41"/>
+                  </svg>
+                </div>
+                <div class="tl">Axis</div>
+              </button>
             </div>
             <div class="field">
               <label>Or choose another bank</label>
@@ -257,10 +429,53 @@ button { cursor: pointer; }
 
           <div class="pane" id="pane-wallet">
             <div class="grid">
-              <button class="tile" onclick="wallet()"><div class="ti" style="background:#00baf2">Pm</div><div class="tl">Paytm</div></button>
-              <button class="tile" onclick="wallet()"><div class="ti" style="background:#ff9900">Az</div><div class="tl">Amazon Pay</div></button>
-              <button class="tile" onclick="wallet()"><div class="ti" style="background:#3f51b5">Mo</div><div class="tl">Mobikwik</div></button>
-              <button class="tile" onclick="wallet()"><div class="ti" style="background:#f5bc3b;color:#1f1502">Fc</div><div class="tl">Freecharge</div></button>
+              <!-- Paytm Wallet -->
+              <button class="tile" onclick="wallet()">
+                <div class="ti">
+                  <svg width="45" height="15" viewBox="0 3 108 36" fill="none">
+                    <path d="M2.5 5.5h10.2c5.5 0 9 3 9 7.8s-3.5 7.8-9 7.8H8.8V31H2.5V5.5zm6.3 10.6h3.4c2.5 0 4.2-1.2 4.2-3.1s-1.7-3.1-4.2-3.1H8.8v6.2z" fill="#002970"/>
+                    <path d="M23.5 15.6c0-4.6 3.6-7.8 8.6-7.8 4.8 0 8.3 3.1 8.3 7.6v15.6h-5.9v-3.2c-1.3 2.1-3.6 3.6-6.3 3.6-4.5 0-7.8-3.1-7.8-7.3 0-4.4 3.4-7.1 8.8-7.1h5.2v-.8c0-2-1.4-3.2-3.6-3.2-2 0-3.3 1-3.6 2.6l-3.7-.6zm11 5.3h-4.6c-2.4 0-3.9 1.2-3.9 2.8 0 1.6 1.4 2.8 3.5 2.8 2.6 0 5-1.7 5-4.2v-1.4z" fill="#002970"/>
+                    <path d="M42.2 11.2l5.4 14 5.3-14h6.5l-9.3 20.8c-1.8 4-4.5 6-8.2 6-1 0-2.2-.2-2.9-.6l.9-4.8c.5.2 1.1.4 1.7.4 1.7 0 2.9-.9 3.7-2.8l.6-1.4-7.8-17.6h4.6z" fill="#002970"/>
+                    <path d="M64 5.5v5.7h4.8v4.6H64V25c0 1.6.8 2.3 2.2 2.3.9 0 1.8-.2 2.5-.5l.6 4.3c-1.2.6-2.9.9-4.8.9-4.3 0-6.6-2.3-6.6-6.6V15.8h-3.4v-4.6h3.4V7.5L64 5.5z" fill="#00baf2"/>
+                    <path d="M72.2 11.2h5.8v3.2c1.4-2.1 3.7-3.6 6.5-3.6 3.1 0 5.4 1.6 6.3 4.2 1.6-2.6 4.3-4.2 7.3-4.2 4.4 0 7.4 2.9 7.4 8.5V31H99.6V19.8c0-2.6-1.3-3.8-3.1-3.8-2 0-3.7 1.4-4.3 3.6V31h-5.9V19.8c0-2.6-1.3-3.8-3.1-3.8-2 0-3.7 1.4-4.3 3.6V31h-6.7V11.2z" fill="#00baf2"/>
+                  </svg>
+                </div>
+                <div class="tl">Paytm</div>
+              </button>
+
+              <!-- Amazon Pay -->
+              <button class="tile" onclick="wallet()">
+                <div class="ti" style="background:#232f3e;border-color:#232f3e">
+                  <svg width="42" height="24" viewBox="0 0 70 32" fill="none">
+                    <text x="2" y="18" fill="#ffffff" font-family="'Afacad', system-ui, sans-serif" font-size="15" font-weight="700" letter-spacing="-0.5">amazon</text>
+                    <text x="48" y="13" fill="#ff9900" font-family="'Afacad', system-ui, sans-serif" font-size="9" font-weight="700">pay</text>
+                    <path d="M6 23c10 4.5 23 4.5 34-1.5" stroke="#ff9900" stroke-width="2.2" stroke-linecap="round"/>
+                    <path d="M38.5 19.5l3.2 2-1 3.5" fill="#ff9900"/>
+                  </svg>
+                </div>
+                <div class="tl">Amazon Pay</div>
+              </button>
+
+              <!-- Mobikwik -->
+              <button class="tile" onclick="wallet()">
+                <div class="ti" style="background:#1e40af;border-color:#1e40af">
+                  <svg width="30" height="30" viewBox="0 0 36 36" fill="none">
+                    <path d="M7 26V10l6 7.5L18 10l5 7.5L29 10v16h-4V16.5l-4 5.5-3-4-3 4-4-5.5V26H7z" fill="#ffffff"/>
+                    <circle cx="18" cy="7" r="2.2" fill="#00d2ff"/>
+                  </svg>
+                </div>
+                <div class="tl">Mobikwik</div>
+              </button>
+
+              <!-- Freecharge -->
+              <button class="tile" onclick="wallet()">
+                <div class="ti" style="background:#ea580c;border-color:#ea580c">
+                  <svg width="28" height="28" viewBox="0 0 36 36" fill="none">
+                    <path d="M20 3L6 19h10l-3 14 16-18h-11l5-12z" fill="#ffffff"/>
+                  </svg>
+                </div>
+                <div class="tl">Freecharge</div>
+              </button>
             </div>
           </div>
 
@@ -268,7 +483,14 @@ button { cursor: pointer; }
         </div>
         <div class="footer">
           <button class="btn btn-primary" id="payBtn" onclick="onPay()">Pay ₹248.00</button>
-          <div class="trust"><span class="cf-badge"><span class="cf-mark"></span>cashfree</span></div>
+          <div class="trust">
+            <span class="cf-badge">
+              <span class="cf-mark"></span>
+              cashfree
+              <span style="color:var(--ink-300);margin:0 2px">·</span>
+              <span style="font-size:11px;font-weight:500;color:var(--ink-500)">100% Secure &amp; RBI Authorised</span>
+            </span>
+          </div>
         </div>
       </section>
 
@@ -301,7 +523,19 @@ button { cursor: pointer; }
 /* Preview-only interactions. No payments are made. */
 const ORDER = ['checkout', 'processing', 'failed'];
 const LABELS = { checkout: 'Checkout', processing: 'Processing', failed: 'Payment failed' };
-const BANKS = ['Punjab National Bank','Bank of Baroda','Kotak Mahindra Bank','IDFC FIRST Bank','Canara Bank','Union Bank of India','Bank of India','Indian Bank','Yes Bank','IndusInd Bank','Federal Bank'];
+const BANKS = [
+  { name: 'Kotak Mahindra Bank', color: '#ed1c24', short: 'K' },
+  { name: 'Punjab National Bank', color: '#a20033', short: 'PNB' },
+  { name: 'Bank of Baroda', color: '#f26522', short: 'BOB' },
+  { name: 'IDFC FIRST Bank', color: '#991b1b', short: 'IDFC' },
+  { name: 'Canara Bank', color: '#0091df', short: 'CB' },
+  { name: 'Union Bank of India', color: '#004b8d', short: 'UBI' },
+  { name: 'Bank of India', color: '#e66a1f', short: 'BOI' },
+  { name: 'Indian Bank', color: '#003366', short: 'IB' },
+  { name: 'Yes Bank', color: '#004b8d', short: 'YES' },
+  { name: 'IndusInd Bank', color: '#8b1d41', short: 'IND' },
+  { name: 'Federal Bank', color: '#0b3967', short: 'FB' },
+];
 let method = 'upi';
 let bank = null;
 
@@ -332,12 +566,13 @@ function updatePay() {
 }
 
 const list = document.getElementById('bankList');
-BANKS.forEach((name) => {
+BANKS.forEach((b) => {
   const r = document.createElement('button');
-  r.className = 'bank-row'; r.textContent = name;
+  r.className = 'bank-row';
+  r.innerHTML = `<span class="bank-avatar" style="background:${b.color}">${b.short}</span><span class="bank-name">${b.name}</span>`;
   r.onclick = () => {
-    bank = name;
-    document.getElementById('bankLabel').textContent = name;
+    bank = b.name;
+    document.getElementById('bankLabel').textContent = b.name;
     document.getElementById('bankLabel').classList.remove('ph');
     list.querySelectorAll('.bank-row').forEach((x) => x.classList.toggle('active', x === r));
     list.classList.remove('open');
@@ -389,9 +624,18 @@ function onPay() {
 document.getElementById('cardNo').addEventListener('input', (e) => {
   const d = e.target.value.replace(/\D/g, '').slice(0, 16);
   e.target.value = d.replace(/(.{4})/g, '$1 ').trim();
-  let b = '';
-  if (/^4/.test(d)) b = 'VISA'; else if (/^5[1-5]/.test(d)) b = 'MASTERCARD'; else if (/^6/.test(d)) b = 'RUPAY'; else if (/^3[47]/.test(d)) b = 'AMEX';
-  document.getElementById('brandTag').textContent = d.length >= 8 ? b : '';
+  const tag = document.getElementById('brandTag');
+  if (/^4/.test(d)) {
+    tag.innerHTML = `<svg width="40" height="24" viewBox="0 0 48 26" fill="none"><rect width="48" height="26" rx="4" fill="#0d2c6c"/><text x="6" y="19" fill="#ffffff" font-family="'Afacad', sans-serif" font-size="15" font-weight="800" font-style="italic" letter-spacing="1">VISA</text></svg>`;
+  } else if (/^5[1-5]/.test(d)) {
+    tag.innerHTML = `<svg width="36" height="24" viewBox="0 0 40 26" fill="none"><circle cx="15" cy="13" r="10" fill="#EB001B"/><circle cx="25" cy="13" r="10" fill="#F79E1B"/><path d="M20 6.6a10 10 0 0 1 0 12.8 10 10 0 0 1 0-12.8z" fill="#FF5F00"/></svg>`;
+  } else if (/^6/.test(d)) {
+    tag.innerHTML = `<svg width="46" height="24" viewBox="0 0 54 26" fill="none"><rect width="54" height="26" rx="4" fill="#f8fafc" stroke="#cbd5e1"/><path d="M8 7l5 6-5 6h4l5-6-5-6h-4z" fill="#097939"/><path d="M14 7l5 6-5 6h4l5-6-5-6h-4z" fill="#ee3124"/><text x="24" y="17" fill="#1e293b" font-family="'Afacad', sans-serif" font-size="10" font-weight="800">RuPay</text></svg>`;
+  } else if (/^3[47]/.test(d)) {
+    tag.innerHTML = `<svg width="40" height="24" viewBox="0 0 46 26" fill="none"><rect width="46" height="26" rx="4" fill="#006fcf"/><text x="5" y="17" fill="#ffffff" font-family="'Afacad', sans-serif" font-size="10" font-weight="800">AMEX</text></svg>`;
+  } else {
+    tag.innerHTML = '';
+  }
 });
 document.getElementById('exp').addEventListener('input', (e) => {
   let d = e.target.value.replace(/\D/g, '').slice(0, 4);

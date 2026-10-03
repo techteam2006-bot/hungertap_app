@@ -114,6 +114,9 @@ export default function CashfreeCheckoutSheet({
   orderItems = [],
   orderTotal = 0,
   isTakeaway = false,
+  takeawayCharge = 0,
+  discountAmount = 0,
+  offerCode = '',
   attempt = null,
   onPaymentLaunched,
   onCancelOrder,
@@ -174,6 +177,9 @@ export default function CashfreeCheckoutSheet({
           orderItems={orderItems}
           orderTotal={orderTotal}
           isTakeaway={isTakeaway}
+          takeawayCharge={takeawayCharge}
+          discountAmount={discountAmount}
+          offerCode={offerCode}
           notice={notice}
           bottomPad={bottomPad}
           onBack={onCancelOrder}
@@ -199,7 +205,7 @@ const METHODS = [
   { key: 'wallet', label: 'Wallet', icon: 'W' },
 ];
 
-function CheckoutScreen({ session, orderItems, orderTotal, isTakeaway, notice, bottomPad, onBack, launch }) {
+function CheckoutScreen({ session, orderItems, orderTotal, isTakeaway, takeawayCharge, discountAmount, offerCode, notice, bottomPad, onBack, launch }) {
   const amountLabel = formatInr(orderTotal);
   const lines = Array.isArray(orderItems) ? orderItems : [];
   const itemCount = lines.reduce((n, it) => n + Math.max(1, Number(it?.quantity) || 1), 0);
@@ -338,6 +344,22 @@ function CheckoutScreen({ session, orderItems, orderTotal, isTakeaway, notice, b
                 </View>
               );
             })}
+            {isTakeaway && Number(takeawayCharge) > 0 ? (
+              <View style={s.orderRow}>
+                <Text style={s.orderItem}>Takeaway Charge(s)</Text>
+                <Text style={s.orderPrice}>{formatInr(takeawayCharge)}</Text>
+              </View>
+            ) : null}
+            {Number(discountAmount) > 0 ? (
+              <View style={s.orderRow}>
+                <Text style={s.orderItem}>
+                  {offerCode ? `Discount (${offerCode})` : 'Discount'}
+                </Text>
+                <Text style={[s.orderPrice, { color: C.success }]}>
+                  −{formatInr(discountAmount)}
+                </Text>
+              </View>
+            ) : null}
             <View style={s.divider} />
             <View style={s.orderRow}>
               <Text style={s.orderTotalLabel}>Amount payable</Text>

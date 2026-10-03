@@ -1528,9 +1528,7 @@ const HomeScreen = ({ navigation, route }) => {
     if (item.__rowType === 'oos_header') {
       return (
         <View style={styles.oosSectionHeader}>
-          <Text style={styles.oosSectionTitle}>
-            Out of stock{item.count > 0 ? ` (${item.count})` : ''}
-          </Text>
+          <Text style={styles.oosSectionTitle}>Out of stock</Text>
         </View>
       );
     }

@@ -388,6 +388,9 @@ export default function EmailVerificationSection({
                     textStyle={{ color: tertiary }}
                   />
                 </View>
+                <Text style={{ color: '#EF4444', fontSize: 12, textAlign: 'center', marginTop: 16 }}>
+                  Didn't receive the email? Check your spam/junk folder.
+                </Text>
               </>
             )}
 

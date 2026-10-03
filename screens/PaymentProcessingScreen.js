@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { useTheme } from '../lib/ThemeContext';
 import BrandYellowStrip from '../components/BrandYellowStrip';
+import AppIcon from '../components/AppIcon';
 import { appTypography } from '../lib/darkThemeConfig';
 import { supabase } from '../lib/supabase';
 import { useCart } from '../lib/CartContext';
@@ -77,7 +78,7 @@ const STUCK_MS = 180000;
 const SDK_FALLBACK_MS = 30000;
 const WEBVIEW_OVERLAY_MAX_MS = 5000;
 /** Ignore transient order statuses while checkout is still opening. */
-const CHECKOUT_LAUNCH_GRACE_MS = 35000;
+const CHECKOUT_LAUNCH_GRACE_MS = 8000;
 
 /**
  * Cashfree and Easebuzz are native-SDK only (no hosted/WebView fallback).
@@ -377,6 +378,9 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
     orderItems = [],
     orderTotal = 0,
     isTakeaway = false,
+    takeawayCharge = 0,
+    discountAmount = 0,
+    offerCode = '',
     razorpayKeyId: initialRazorpayKeyId = '',
     razorpayOrderId: initialRazorpayOrderId = '',
     razorpayAmountPaise: initialRazorpayAmountPaise = '',
@@ -429,8 +433,20 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
     setWebviewKey((k) => k + 1);
   }, []);
   const [verifying, setVerifying] = useState(false);
+  const [showVerifyCancel, setShowVerifyCancel] = useState(false);
   const [webViewLoaded, setWebViewLoaded] = useState(false);
   const [blockExit, setBlockExit] = useState(true);
+
+  useEffect(() => {
+    if (!verifying) {
+      setShowVerifyCancel(false);
+      return undefined;
+    }
+    const timer = setTimeout(() => {
+      setShowVerifyCancel(true);
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [verifying]);
 
   useEffect(() => {
     blockExitRef.current = blockExit;
@@ -729,7 +745,9 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
       }
 
       // Ignore transient failed/cancel statuses while the gateway UI is still opening.
-      const inLaunchGrace = Date.now() - checkoutOpenedAtRef.current < CHECKOUT_LAUNCH_GRACE_MS;
+      const inLaunchGrace =
+        !sdkUiPresentedRef.current &&
+        Date.now() - checkoutOpenedAtRef.current < CHECKOUT_LAUNCH_GRACE_MS;
       if (
         inLaunchGrace &&
         (status === 'payment_failed' ||
@@ -995,10 +1013,57 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
         // eslint-disable-next-line no-console
         console.log('🎉 [Step 7/7] Easebuzz SDK result:', res.payload?.result, 'Outcome:', outcome);
       }
-      // Easebuzz's SDK result is advisory: timeouts, empty payloads, and other
-      // non-success results can arrive before the payment settles. The webhook
-      // and resulting order status are authoritative, so always verify by
-      // polling instead of finalizing failure from the SDK payload.
+
+      if (outcome === 'cancelled') {
+        // Quick safety check: ensure an async webhook hasn't already marked the order paid
+        try {
+          const { data: ord } = await supabase
+            .from('orders')
+            .select('status')
+            .eq('id', checkoutOrderId)
+            .eq('placed_by', userId)
+            .maybeSingle();
+          if (ord?.status && isOrderPlacedSuccessStatus(ord.status)) {
+            finalizeSuccess();
+            return;
+          }
+        } catch (_) {}
+        applyOutcomeRef.current?.('cancelled');
+        return;
+      }
+
+      if (outcome === 'success') {
+        applyOutcomeRef.current?.('success');
+        return;
+      }
+
+      if (outcome === 'failure') {
+        // Check for 3-4 seconds to allow late-arriving webhooks before failing
+        setVerifying(true);
+        let settled = false;
+        for (let i = 0; i < 3; i++) {
+          await new Promise((r) => setTimeout(r, 1200));
+          if (cancelled || finalizedRef.current) return;
+          try {
+            const { data: ord } = await supabase
+              .from('orders')
+              .select('status')
+              .eq('id', checkoutOrderId)
+              .eq('placed_by', userId)
+              .maybeSingle();
+            if (ord?.status && isOrderPlacedSuccessStatus(ord.status)) {
+              settled = true;
+              finalizeSuccess();
+              return;
+            }
+          } catch (_) {}
+        }
+        if (!settled && !finalizedRef.current && !cancelled) {
+          finalizeFailure();
+        }
+        return;
+      }
+
       applyOutcomeRef.current?.('return_to_app');
     })();
 
@@ -1012,6 +1077,10 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
     environment,
     bumpWebViewKey,
     handleEasebuzzLaunchFailure,
+    checkoutOrderId,
+    userId,
+    finalizeSuccess,
+    finalizeFailure,
   ]);
 
   // --- Native SDK: Razorpay (WebView fallback when native blocked or unavailable) ---
@@ -1303,6 +1372,9 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
           orderItems={orderItems}
           orderTotal={orderTotal}
           isTakeaway={isTakeaway}
+          takeawayCharge={takeawayCharge}
+          discountAmount={discountAmount}
+          offerCode={offerCode}
           attempt={cfAttempt}
           onPaymentLaunched={() => {
             cfProcessingRef.current = true;
@@ -1322,12 +1394,22 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
       <BrandYellowStrip />
 
       <View style={[styles.header, { backgroundColor: colors.elevatedSurface, borderBottomColor: colors.border }]}>
+        <TouchableOpacity
+          style={styles.headerBackBtn}
+          onPress={promptAbandonCheckout}
+          accessibilityRole="button"
+          accessibilityLabel="Cancel and return to cart"
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+        >
+          <AppIcon name="arrow-back" size={22} color={colors.text} />
+        </TouchableOpacity>
         <Text
           style={[styles.headerTitle, { color: colors.text, fontFamily: appTypography.bold }]}
           numberOfLines={1}
         >
           Checkout
         </Text>
+        <View style={styles.headerRightPlaceholder} />
       </View>
 
       {verifying ? (
@@ -1341,6 +1423,22 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
           >
             Verifying your payment…
           </Text>
+          {showVerifyCancel ? (
+            <TouchableOpacity
+              onPress={promptAbandonCheckout}
+              style={[styles.verifyCancelBtn, { borderColor: colors.border }]}
+              activeOpacity={0.7}
+            >
+              <Text
+                style={[
+                  styles.verifyCancelText,
+                  { color: colors.textSecondary, fontFamily: appTypography.medium },
+                ]}
+              >
+                Cancel and return to cart
+              </Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       ) : mode === MODE.UNAVAILABLE || mode === MODE.SDK_MISSING ? (
         <View style={[styles.fallback, { paddingBottom: insets.bottom }]}>
@@ -1431,15 +1529,36 @@ const PaymentProcessingScreen = ({ navigation, route }) => {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   header: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 12,
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
     paddingVertical: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
+  headerBackBtn: {
+    width: 32,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+  },
   headerTitle: {
+    flex: 1,
     textAlign: 'center',
     fontSize: 20,
+  },
+  headerRightPlaceholder: {
+    width: 32,
+  },
+  verifyCancelBtn: {
+    marginTop: 20,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  verifyCancelText: {
+    fontSize: 14,
+    textAlign: 'center',
   },
   webWrap: { flex: 1 },
   web: { flex: 1 },
