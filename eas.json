@@ -51,8 +51,8 @@
         "SENTRY_ORG": "trovox",
         "SENTRY_PROJECT": "android",
         "SENTRY_ALLOW_FAILURE": "true",
-        "SENTRY_RELEASE": "com.hungertap.app@1.0.9+9",
-        "SENTRY_DIST": "9"
+        "SENTRY_RELEASE": "com.hungertap.app@1.0.10+10",
+        "SENTRY_DIST": "10"
       }
     }
   },

@@ -851,6 +851,43 @@ const createCartStyles = (colors, windowHeight) =>
     fontSize: 15,
     fontFamily: appTypography.semiBold,
   },
+  networkErrorCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 14,
+    marginVertical: 12,
+  },
+  networkErrorIconRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  networkErrorTitle: {
+    fontSize: 14,
+    fontFamily: appTypography.bold,
+    marginBottom: 2,
+  },
+  networkErrorSubtitle: {
+    fontSize: 12,
+    fontFamily: appTypography.regular,
+    lineHeight: 16,
+  },
+  networkRetryButton: {
+    backgroundColor: '#E5A93B',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    alignSelf: 'flex-start',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 32,
+    minWidth: 75,
+  },
+  networkRetryText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontFamily: appTypography.semiBold,
+  },
 });
 
 const CartScreen = ({ navigation }) => {
@@ -1028,37 +1065,48 @@ const CartScreen = ({ navigation }) => {
   // Payment Gateway State Ownership
   const [gateways, setGateways] = useState([]);
   const [gatewayLoading, setGatewayLoading] = useState(true);
+  const [gatewayRetrying, setGatewayRetrying] = useState(false);
   const [gatewayError, setGatewayError] = useState(false);
   const [selectedGateway, setSelectedGateway] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [allFoodItems, setAllFoodItems] = useState([]);
   const [recommendationsLoading, setRecommendationsLoading] = useState(true);
 
-  const loadGateways = useCallback(async () => {
-    setGatewayLoading(true);
-    const res = await fetchActivePaymentGateways();
+  const loadGateways = useCallback(async ({ isRetry = false } = {}) => {
+    if (isRetry) {
+      setGatewayRetrying(true);
+    } else {
+      setGatewayLoading(true);
+    }
 
-    if (!res.success || !res.data) {
+    try {
+      const res = await fetchActivePaymentGateways();
+
+      if (!res.success || !res.data) {
+        setGatewayError(true);
+        return;
+      }
+
+      const activeList = res.data;
+      setGateways(activeList);
+
+      if (activeList.length === 0) {
+        setGatewayError(true);
+        return;
+      }
+
+      setGatewayError(false);
+      setSelectedGateway((prev) => {
+        if (prev && activeList.some((g) => g.code === prev)) return prev;
+        const defaultGw = activeList.find((g) => g.is_default) || activeList[0];
+        return defaultGw.code;
+      });
+    } catch (_) {
       setGatewayError(true);
+    } finally {
       setGatewayLoading(false);
-      return;
+      setGatewayRetrying(false);
     }
-
-    const activeList = res.data;
-    setGateways(activeList);
-    setGatewayLoading(false);
-
-    if (activeList.length === 0) {
-      setGatewayError(true);
-      return;
-    }
-
-    setGatewayError(false);
-    setSelectedGateway((prev) => {
-      if (prev && activeList.some((g) => g.code === prev)) return prev;
-      const defaultGw = activeList.find((g) => g.is_default) || activeList[0];
-      return defaultGw.code;
-    });
   }, []);
 
   const transformMenuItem = useCallback(
@@ -1304,6 +1352,13 @@ const CartScreen = ({ navigation }) => {
       showAppAlert('Order limit', CART_MAX_ORDER_TOTAL_MESSAGE);
       return;
     }
+    if (gatewayError || !selectedGateway) {
+      showAppAlert(
+        'No Internet Connection',
+        'Unable to load payment methods. Please check your network connection and tap Retry above.'
+      );
+      return;
+    }
     if (placeOrderInFlightRef.current || isCreatingOrder) return;
     if (!CONFIG.CREATE_ORDER_V2_URL) {
       showAppAlert(
@@ -1392,6 +1447,9 @@ const CartScreen = ({ navigation }) => {
           orderItems: [...linesForOrder],
           orderTotal,
           isTakeaway: args.p_is_takeaway,
+          takeawayCharge: getTakeawayCharge(),
+          discountAmount: Number(offerPreview?.discount_amount || 0),
+          offerCode: appliedOffer?.code || '',
         });
         if (!nav.ok) {
           setCheckoutErrorToast(toAlertMessage(nav.error, 'Checkout incomplete.'));
@@ -1976,10 +2034,51 @@ const CartScreen = ({ navigation }) => {
             {gatewayLoading ? (
               <ActivityIndicator size="small" style={{ marginVertical: 12 }} color="#E5A93B" />
             ) : gatewayError ? (
-              <View style={{ padding: 12, backgroundColor: 'rgba(255,77,77,0.1)', borderRadius: 8, marginVertical: 12 }}>
-                <Text style={{ color: '#FF4D4D', fontWeight: '600', fontSize: 13 }}>
-                  ⚠️ Payment methods currently unavailable. Please try again later.
-                </Text>
+              <View
+                style={[
+                  styles.networkErrorCard,
+                  {
+                    backgroundColor: isDarkMode ? '#1E1A14' : '#FFF8E8',
+                    borderColor: 'rgba(229, 169, 59, 0.4)',
+                  },
+                ]}
+              >
+                <View style={styles.networkErrorIconRow}>
+                  <AppIcon name="cloud-offline-outline" size={24} color="#D97706" />
+                  <View style={{ flex: 1, marginLeft: 10 }}>
+                    <Text
+                      style={[
+                        styles.networkErrorTitle,
+                        { color: isDarkMode ? '#FBBF24' : '#92400E' },
+                      ]}
+                    >
+                      No Internet Connection
+                    </Text>
+                    <Text
+                      style={[
+                        styles.networkErrorSubtitle,
+                        { color: isDarkMode ? '#D1D5DB' : '#78350F' },
+                      ]}
+                    >
+                      Unable to load payment methods. Please check your network connection and try again.
+                    </Text>
+                  </View>
+                </View>
+                <TouchableOpacity
+                  style={styles.networkRetryButton}
+                  onPress={() => loadGateways({ isRetry: true })}
+                  disabled={gatewayRetrying}
+                  activeOpacity={0.8}
+                >
+                  {gatewayRetrying ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <AppIcon name="refresh" size={14} color="#FFFFFF" style={{ marginRight: 6 }} />
+                      <Text style={styles.networkRetryText}>Retry</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
               </View>
             ) : (
               <PaymentGatewaySelector

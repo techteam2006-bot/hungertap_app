@@ -3,7 +3,7 @@
     "name": "HungerTap",
     "slug": "canteen-app",
     "scheme": "hungertap",
-    "version": "1.0.9",
+    "version": "1.0.10",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "androidNavigationBar": {
@@ -28,7 +28,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.hungertap.app",
-      "buildNumber": "2",
+      "buildNumber": "3",
       "googleServicesFile": "./GoogleService-Info.plist",
       "icon": "./assets/splash_icon.png",
       "infoPlist": {
@@ -56,7 +56,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#FDC403"
       },
-      "versionCode": 9,
+      "versionCode": 10,
       "softwareKeyboardLayoutMode": "pan",
       "permissions": [
         "INTERNET",
